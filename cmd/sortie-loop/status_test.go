@@ -130,11 +130,19 @@ func TestAtomicWriteLeavesNoTempFile(t *testing.T) {
 }
 
 func TestLoopTypeOf(t *testing.T) {
-	if got := loopTypeOf([]byte("tracker:\n  kind: github\n")); got != "issues" {
-		t.Errorf("got %s, want issues", got)
+	cases := map[string]string{
+		"---\ntracker:\n  kind: github\n---\n":                      "issues",
+		"---\ntracker:\n  kind: github-pr\n---\n":                   "prs",
+		"---\ntracker:\n  kind: \"github-pr\"\n---\n":               "prs",
+		"---\ntracker:\n  kind: 'github-pr' # pull requests\n---\n": "prs",
+		"---\ntracker:\n  kind: github # not github-pr\n---\n":      "issues",
+		"---\ntracker:\n  kind: github\n---\nkind: github-pr\n":     "issues",
+		"tracker:\n  kind: github-pr\n":                             "issues",
 	}
-	if got := loopTypeOf([]byte("tracker:\n  kind: github-pr\n")); got != "prs" {
-		t.Errorf("got %s, want prs", got)
+	for in, want := range cases {
+		if got := loopTypeOf([]byte(in)); got != want {
+			t.Errorf("loopTypeOf(%q) = %s, want %s", in, got, want)
+		}
 	}
 }
 

@@ -120,11 +120,23 @@ func configHash(workflow, env []byte, filter string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// loopTypeOf reads the tracker kind from a workflow's front matter.
+// loopTypeOf reads the tracker kind from a workflow's front matter,
+// the block between the first two --- lines.
 func loopTypeOf(workflow []byte) string {
-	for _, line := range strings.Split(string(workflow), "\n") {
-		if strings.TrimSpace(line) == "kind: github-pr" {
-			return "prs"
+	lines := strings.Split(string(workflow), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return "issues"
+	}
+	for _, line := range lines[1:] {
+		line = strings.TrimSpace(line)
+		if line == "---" {
+			break
+		}
+		if val, ok := strings.CutPrefix(line, "kind:"); ok {
+			val, _, _ = strings.Cut(val, " #")
+			if strings.Trim(strings.TrimSpace(val), `"'`) == "github-pr" {
+				return "prs"
+			}
 		}
 	}
 	return "issues"
