@@ -33,6 +33,10 @@ type loopEndpoint struct {
 	Loop     string `json:"loop"`
 	Port     int    `json:"port"`
 	DBPath   string `json:"db_path"`
+	// WorkflowFile is the absolute path of the workflow the loop runs.
+	WorkflowFile string `json:"workflow_file,omitempty"`
+	// LoopType is "issues" or "prs".
+	LoopType string `json:"loop_type,omitempty"`
 }
 
 // registry maps repo root -> its loop endpoints. One registry file is
@@ -50,6 +54,11 @@ type registryEntry struct {
 	// Args is the run's own command line, so a client replacing it can
 	// start the next one with the same flags instead of guessing.
 	Args []string `json:"args,omitempty"`
+	// Version is the sortie-loop version of the supervisor.
+	Version   string    `json:"version,omitempty"`
+	StartedAt time.Time `json:"started_at,omitempty"`
+	// StatusPath is the supervisor's status document.
+	StatusPath string `json:"status_path,omitempty"`
 }
 
 // registryPath returns the shared registry file, creating its directory.
@@ -165,7 +174,7 @@ func findUniteDashboardOn(p int) int {
 
 // writeRegistry records this sortie-loop's endpoints so a --unite
 // dashboard started later can discover them without probing.
-func writeRegistry(root string, endpoints []loopEndpoint) error {
+func writeRegistry(root string, endpoints []loopEndpoint, startedAt time.Time) error {
 	path, err := registryPath()
 	if err != nil {
 		return err
@@ -177,18 +186,26 @@ func writeRegistry(root string, endpoints []loopEndpoint) error {
 			reg.Entries = map[string]registryEntry{}
 		}
 	}
+	name := repoName(root)
+	statusFile, err := statusPath(name)
+	if err != nil {
+		return err
+	}
 	reg.Entries[root] = registryEntry{
-		RepoName:  repoName(root),
-		UpdatedAt: time.Now().UTC(),
-		PID:       os.Getpid(),
-		Loops:     endpoints,
-		Args:      os.Args[1:],
+		RepoName:   name,
+		UpdatedAt:  time.Now().UTC(),
+		PID:        os.Getpid(),
+		Loops:      endpoints,
+		Args:       os.Args[1:],
+		Version:    version,
+		StartedAt:  startedAt.UTC(),
+		StatusPath: statusFile,
 	}
 	data, err := json.MarshalIndent(reg, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return writeFileAtomic(path, data)
 }
 
 // dropRegistry removes this repo's entry on clean shutdown.

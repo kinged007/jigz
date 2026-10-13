@@ -137,3 +137,41 @@ func TestLoopTypeOf(t *testing.T) {
 		t.Errorf("got %s, want prs", got)
 	}
 }
+
+func TestRegistryEntryHasStatusFields(t *testing.T) {
+	_, root := startedSup(t, "while true; do sleep 1; done\n")
+	entry := registryEntryFor(t, root)
+	wantStatus, _ := statusPath("owner/name")
+	if entry.Version != version || entry.StartedAt.IsZero() || entry.StatusPath != wantStatus {
+		t.Errorf("unexpected entry fields: %+v", entry)
+	}
+	l := entry.Loops[0]
+	if l.WorkflowFile != filepath.Join(root, ".sortie", "workflows", "WORKFLOW.plan.md") || l.LoopType != "prs" {
+		t.Errorf("unexpected endpoint fields: %+v", l)
+	}
+}
+
+func TestOldFormatRegistryStillLoads(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	path, err := registryPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := `{"entries":{"/r":{"repo_name":"o/n","updated_at":"2026-01-01T00:00:00Z","pid":1,` +
+		`"loops":[{"repo":"/r","repo_name":"o/n","loop":"plan","port":7678,"db_path":"/x"}]}}}`
+	mustWrite(t, path, old)
+	if err := writeRegistry("/s", nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	var reg registry
+	if err := json.Unmarshal(data, &reg); err != nil {
+		t.Fatal(err)
+	}
+	if got := reg.Entries["/r"].Loops[0]; got.Loop != "plan" || got.WorkflowFile != "" {
+		t.Errorf("old entry did not load: %+v", got)
+	}
+	if reg.Entries["/s"].Version == "" {
+		t.Error("new entry was not written beside the old one")
+	}
+}

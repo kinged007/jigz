@@ -398,6 +398,8 @@ func (s *supervisor) endpoints() []loopEndpoint {
 		eps = append(eps, loopEndpoint{
 			Repo: s.root, RepoName: repoName(s.root), Loop: p.def.name,
 			Port: p.port, DBPath: dbPathFor(s.root, p.def.file),
+			WorkflowFile: filepath.Join(s.root, ".sortie", "workflows", p.def.file),
+			LoopType:     p.loopType,
 		})
 	}
 	sort.Slice(eps, func(i, j int) bool { return eps[i].Loop < eps[j].Loop })
@@ -408,7 +410,7 @@ func (s *supervisor) endpoints() []loopEndpoint {
 // running, so a rebound port or a stopped loop is visible to whatever
 // reads the registry.
 func (s *supervisor) republish() {
-	if err := writeRegistry(s.root, s.endpoints()); err != nil {
+	if err := writeRegistry(s.root, s.endpoints(), s.startedAt); err != nil {
 		fmt.Fprintln(os.Stderr, "sortie-loop: registry:", err)
 	}
 	s.publishStatus("running")
