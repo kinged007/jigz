@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"os"
@@ -108,11 +109,14 @@ func removeStatus(root string) {
 }
 
 // configHash identifies the inputs a child was started with: the
-// workflow file followed by the env file.
-func configHash(workflow, env []byte) string {
+// workflow file, the env file and the query filter. Each part is
+// length-prefixed so the boundaries are unambiguous.
+func configHash(workflow, env []byte, filter string) string {
 	h := sha256.New()
-	h.Write(workflow)
-	h.Write(env)
+	for _, part := range [][]byte{workflow, env, []byte(filter)} {
+		_ = binary.Write(h, binary.BigEndian, uint64(len(part)))
+		h.Write(part)
+	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 

@@ -175,3 +175,31 @@ func TestOldFormatRegistryStillLoads(t *testing.T) {
 		t.Error("new entry was not written beside the old one")
 	}
 }
+
+func TestConfigHashCoversEveryInput(t *testing.T) {
+	base := configHash([]byte("wf"), []byte("env"), "label:a")
+	if base != configHash([]byte("wf"), []byte("env"), "label:a") {
+		t.Error("same inputs gave different hashes")
+	}
+	for name, got := range map[string]string{
+		"workflow":  configHash([]byte("wf2"), []byte("env"), "label:a"),
+		"env":       configHash([]byte("wf"), []byte("env2"), "label:a"),
+		"filter":    configHash([]byte("wf"), []byte("env"), "label:b"),
+		"boundary":  configHash([]byte("w"), []byte("fenv"), "label:a"),
+		"no filter": configHash([]byte("wf"), []byte("env"), ""),
+	} {
+		if got == base {
+			t.Errorf("changing the %s did not change the hash", name)
+		}
+	}
+}
+
+func TestLastEnvTakesTheLastEntry(t *testing.T) {
+	env := []string{"K=old", "OTHER=x", "K=new"}
+	if got := lastEnv(env, "K"); got != "new" {
+		t.Errorf("got %q, want new", got)
+	}
+	if got := lastEnv(env, "MISSING"); got != "" {
+		t.Errorf("got %q, want empty", got)
+	}
+}

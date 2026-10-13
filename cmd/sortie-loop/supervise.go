@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -151,6 +152,17 @@ func (s *supervisor) childEnv(name string) (envFile string, env []string, err er
 	return envFile, env, nil
 }
 
+// lastEnv returns the last value set for key, as a child would see it.
+func lastEnv(env []string, key string) string {
+	val := ""
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, key+"="); ok {
+			val = v
+		}
+	}
+	return val
+}
+
 // startOne launches one loop on the port it last used, so a loop that is
 // replaced keeps the address it already published.
 func (s *supervisor) startOne(name string) error {
@@ -178,7 +190,7 @@ func (s *supervisor) startOne(name string) error {
 	s.ports[name] = port
 	p := &loopProc{
 		def: def, cmd: cmd, port: port, since: time.Now(),
-		configHash: configHash(workflow, envBody), loopType: loopTypeOf(workflow),
+		configHash: configHash(workflow, envBody, lastEnv(env, "SORTIE_TRACKER_QUERY_FILTER")), loopType: loopTypeOf(workflow),
 	}
 	if prev := s.gone[name]; prev != nil {
 		p.restarts = prev.restarts + 1
