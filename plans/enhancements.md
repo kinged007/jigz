@@ -1,6 +1,6 @@
 # Enhancements
 
-Status: draft
+Status: in progress
 
 Four changes to `sortie-loop` (idle sleep, workflow consolidation, workspace
 cleanup, spend controls), a summary of two features that belong in
@@ -11,6 +11,148 @@ cost.
 Statements about Sortie engine behaviour come from summarised documentation and are
 marked "to verify against docs before implementing". Unverified items are
 listed under Open questions.
+
+## Implementation status and handoff
+
+State as of `3384ab2` on `main` (the `feat/sleep` branch is equal to it).
+Section numbers below refer to this document.
+
+### State
+
+| Item | State | Evidence | Note |
+| ---- | ----- | -------- | ---- |
+| 1. Idle sleep (section 1) | done | `6728935`, `0dc7e1e`, `efc71ab`, docs `3384ab2` | Disabled by default. |
+| 3. Cleanup (section 3) | done | `7b8e9f7`, `6f08a10`, `e385697`, docs `2508689` | Config, interval runner, `cleanup` subcommand, last-run record. |
+| 2. Workflow consolidation (section 2) | not started | none | Still six workflow files. |
+| 4. Spend controls (section 4) | not started | none | Includes L1 budget fields. |
+| L1 status document | done, partial | `18eacae`, `04ea228`, `b557387`, `bb5a8cf`, docs `43d3a79`, `e6724ee` | File and `sortie-loop status [--json]`. Sleep, cleanup and `log_path` fields exist. Budget fields and tested schema versions (L4) are not in the document. |
+| L2 `wake` | done | `efc71ab` | |
+| L2 `cleanup` | done | `e385697` | |
+| L2 `pause`, `resume`, `budget override` | not started | none | Part of spend controls. |
+| L3 registry additions | done | `d636dac`, `b3e8f47` | `b3e8f47` adds registry locking and atomic writes. |
+| L4 tested schema versions | not started | none | Central pins its own versions. |
+| L8 child logs | done | `30a4112`, docs `f9f182e` | |
+| L8 per-run transcript | not started | none | Depends on an open question. |
+| L9 `validate` | not started | none | |
+| L10 safe apply | partial | existing `restart --when-idle` | Reload for repo config does not exist. |
+| L11 `setup --json` | not started | none | |
+| L12 Windows parity | not started | none | Optional. |
+| L7 cost per run | deferred | none | Needs an engine change. |
+| sortie-central (items 5, 6) | not started | separate repo | |
+
+### Next actions
+
+1. Workflow consolidation (section 2): two workflow files, dispatch rules,
+   `agent:plan` and `agent:plan-build`, label-driven PR rules, the docs
+   workflow, and `setup` never removing existing workflow files.
+2. Spend controls (section 4) with L2 `pause`, `resume` and
+   `budget override`. First investigate the semantics of `budget_exhausted`
+   and `budget_hold_notices`.
+3. L9 `sortie-loop validate [--json]`, L10 safe apply, L11 `setup --json`.
+   These are independent of consolidation and can be done in parallel with
+   it, because they touch different files. L9 rules for spend controls wait
+   for step 2.
+4. L12 only if Windows is a target.
+
+### Code map
+
+Files are in `cmd/sortie-loop/` unless stated.
+
+| Feature | Location |
+| ------- | -------- |
+| Status document, status file path, config hash | `status.go` |
+| `status` subcommand | `status_cmd.go` |
+| Supervisor, status publishing, `loopQuiet` | `supervise.go` |
+| Registry, `lockStarts`, `lockRegistry` | `unite.go` |
+| Child logs | `childlog.go` |
+| Cleanup runner and file paths | `cleanup.go` |
+| `cleanup` subcommand | `cleanup_cmd.go` |
+| Sleep and wake logic | `sleep.go` |
+| `wake` subcommand | `wake_cmd.go` |
+| Remote control (`stop`, `restart`, signals) | `remote.go` |
+| Subcommand dispatch and usage text | `main.go` |
+| Config loading and validation (`sleep:`, `cleanup:`) | `internal/config/config.go` |
+| Workflow files and `setup` | `workflows/`, `embed.go`, `setup.go` |
+
+Files and formats:
+
+| Item | Rule |
+| ---- | ---- |
+| Status file | `<user cache dir>/sortie-loop/status/<hash>.json`. `<hash>` is the first 16 hex digits of the SHA-256 of the absolute repo root. |
+| Wake request file | `<hash>.wake` next to the status file. |
+| Cleanup record and lock | `<hash>.cleanup.json` and `<hash>.cleanup.lock` next to the status file. |
+| Registry and locks | `registry.json` in `<user cache dir>/sortie-loop/`, with `.lock` (port claim) and `.update.lock` (registry read-modify-write) beside it. |
+| Child logs | `<repo>/.sortie/logs/<workflow>.log`, rotated at 10 MiB, 3 files kept. |
+| Schema | `schema_version` is 1. Changes are additive: the top-level `cleanup` and `sleep` sections and the workflow field `log_path` were added without changing existing fields. |
+
+### Decisions already made
+
+- `sortie-loop` runs no tracker queries. Sleep depends only on engine state.
+- Sleep is disabled by default.
+- Spend controls use token caps only. There are no per-model rates and no
+  dollar computation. `max_usd` is ignored unless the engine records cost.
+- The project cap is the sum of the workflow caps.
+- `setup` never removes or overwrites existing workflow files.
+- Cleanup is a user script run at an interval. It has no tracker-dependent
+  logic.
+- `sortie-loop` exposes no HTTP API. State is a file and control is by
+  commands and signals.
+- `sortie-central` has one visibility setting and one password for the whole
+  app.
+- The Sortie engine is not changed.
+
+Implementation facts:
+
+- `restart_count` counts recycles and wakes only.
+- `last_exit_code` is `-1` when the child was killed by a signal.
+- A run that ends on a loop failure leaves the final status document with
+  state `exited`. A clean exit removes it.
+- A sleep stop is a requested stop, so no exit counts as a crash.
+- A child whose state query fails counts as busy for sleep.
+- `--no-server` runs never sleep, because they have no ports to query.
+- `stop --when-idle` and `restart --when-idle` also wait on retrying work.
+
+### Known gaps and unverified items
+
+- No live end-to-end run with real engine children was done for status,
+  logs, cleanup interval and timeout, or sleep and wake. Unit tests only.
+- `sortie-loop status` shows no cleanup record when no supervisor has
+  produced a status document.
+- Review findings left unfixed:
+  - Pid reuse can make a stale document look running.
+  - Temp files are left after SIGKILL.
+  - Status write failures only reach stderr.
+  - `--repo <value>` is ignored by `status` and by `stop` and `restart`.
+- The `/api/v1/state` shape (`counts.running`, `counts.retrying`, `running[]`,
+  `retrying[]`) was checked against docs.sortie-ai.com. Dispatch rules and
+  stage chains (section 2) are not verified.
+- The cleanup script contract expects `removed: <path>` lines on stdout. The
+  user's own script has not been checked against it.
+- Whether `rule_name` equals the stage name once chains run is unverified.
+
+### Working conventions
+
+- Conventional Commits, with the `Co-Authored-By` trailer.
+- Build only with `go build -o /tmp/<name>` or run `go test`. A compiled
+  binary was once committed by mistake.
+- Checks before each commit: `gofmt -l cmd internal` prints nothing,
+  `go vet ./...`, `go test -count=1 ./...`, and
+  `go test -race ./cmd/sortie-loop/`.
+- One branch per feature, stacked on the previous one.
+- Push only when the user asks. Fast-forward with
+  `git push origin <branch>:main` after `git merge-base --is-ancestor
+  origin/main <branch>` succeeds.
+- `plans/pm-agent.md` is the user's untracked file and is never committed.
+- The lead agent delegates execution to workers per
+  `~/.claude/AGENT_ORCHESTRATION.md` and reviews diffs itself.
+- An independent reviewer pass after a feature found a high-severity defect
+  once. Repeat it for supervisor and registry changes.
+
+### Next action
+
+Start section 2 with an explorer that maps the current workflow files in
+`cmd/sortie-loop/workflows/` and the file-copy logic of `setup` (`embed.go`,
+`setup.go`). Then an implementer, then a reviewer.
 
 ## 0. Scope and repo split
 
@@ -452,20 +594,21 @@ change and is an open question.
 ## 8. Phasing and dependencies
 
 
-| Phase | Item                                              | Depends on                                  |
-| ----- | ------------------------------------------------- | ------------------------------------------- |
-| 1     | Cleanup (3); L1, L3; L2 `cleanup`                 | none                                        |
-| 2     | Idle sleep (1); L2 `wake`; L1 sleep fields        | `/api/v1/state` verified                    |
-| 3     | Workflow consolidation (2)                        | engine facts verified                       |
-| 4     | Spend controls (4); L2 `pause`, `resume`, `budget override`; L1 budget fields | `budget_exhausted` semantics |
-| 5     | L8; L4 tested schema versions in the L1 document  | L1                                          |
-| 6     | L9, L10, L11; L12 (optional)                      | 1, 2, 3, 4 (rules and workflow files), L1   |
-| 7     | sortie-central UI (5, 6)                          | 1-6                                         |
+| Phase | Item                                              | Depends on                                  | Status |
+| ----- | ------------------------------------------------- | ------------------------------------------- | ------ |
+| 1     | Cleanup (3); L1, L3; L2 `cleanup`                 | none                                        | done |
+| 2     | Idle sleep (1); L2 `wake`; L1 sleep fields        | `/api/v1/state` verified                    | done |
+| 3     | Workflow consolidation (2)                        | engine facts verified                       | not started |
+| 4     | Spend controls (4); L2 `pause`, `resume`, `budget override`; L1 budget fields | `budget_exhausted` semantics | not started |
+| 5     | L8; L4 tested schema versions in the L1 document  | L1                                          | L8 child logs done; L8 transcript and L4 tested schema versions not started |
+| 6     | L9, L10, L11; L12 (optional)                      | 1, 2, 3, 4 (rules and workflow files), L1   | not started |
+| 7     | sortie-central UI (5, 6)                          | 1-6                                         | not started |
 
-L1 and L3 are built first, in phase 1 alongside cleanup. The L1 fields for
-sleep and budget are added in phases 2 and 4 with the features they report.
-L2 commands are added with the feature each controls. L8 follows, then
-L9-L11. L5 and L6 are built in `sortie-central`. L7 is not scheduled.
+L1 and L3 were built first, in phase 1 alongside cleanup. The L1 fields for
+sleep were added in phase 2. The budget fields are added in phase 4 with the
+feature they report. L2 commands are added with the feature each controls.
+L8 follows, then L9-L11. L9-L11 can be done in parallel with phase 3. L5 and
+L6 are built in `sortie-central`. L7 is not scheduled.
 
 
 ## 9. Open questions
