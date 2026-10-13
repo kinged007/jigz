@@ -8,7 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -35,6 +37,107 @@ type Config struct {
 	// labels absent here are left alone). Empty = DefaultLabels.
 	Labels     []Label `yaml:"labels"`
 	Workspaces string  // .sortie/workspaces under Dir
+	Cleanup    Cleanup
+}
+
+// Cleanup configures the workspace cleanup command.
+type Cleanup struct {
+	Enabled    bool
+	Interval   time.Duration
+	Command    string
+	MaxAgeDays int
+	DryRun     bool
+	Timeout    time.Duration
+}
+
+type cleanupFile struct {
+	Enabled    bool   `yaml:"enabled"`
+	Interval   string `yaml:"interval"`
+	Command    string `yaml:"command"`
+	MaxAgeDays int    `yaml:"max_age_days"`
+	DryRun     bool   `yaml:"dry_run"`
+	Timeout    string `yaml:"timeout"`
+}
+
+const defaultCleanupTimeout = 10 * time.Minute
+
+func (f cleanupFile) resolve() (Cleanup, error) {
+	c := Cleanup{
+		Enabled: f.Enabled, Command: strings.TrimSpace(f.Command),
+		MaxAgeDays: f.MaxAgeDays, DryRun: f.DryRun, Timeout: defaultCleanupTimeout,
+	}
+	for _, d := range []struct {
+		key, val string
+		dst      *time.Duration
+	}{{"interval", f.Interval, &c.Interval}, {"timeout", f.Timeout, &c.Timeout}} {
+		if d.val == "" {
+			continue
+		}
+		v, err := time.ParseDuration(d.val)
+		if err != nil || v <= 0 {
+			return c, fmt.Errorf("cleanup.%s: %q is not a positive duration (for example 6h)", d.key, d.val)
+		}
+		*d.dst = v
+	}
+	if !c.Enabled {
+		return c, nil
+	}
+	if c.Command == "" {
+		return c, errors.New("cleanup.command is required when cleanup.enabled is true")
+	}
+	if c.Interval == 0 {
+		return c, errors.New("cleanup.interval is required when cleanup.enabled is true")
+	}
+	if c.MaxAgeDays <= 0 {
+		return c, errors.New("cleanup.max_age_days must be a positive number of days when cleanup.enabled is true")
+	}
+	return c, nil
+}
+
+// CheckCleanup fails when cleanup is enabled and max_age_days is not
+// less than workspace.retention_days in a workflow file. Files without
+// retention_days are ignored.
+func (c *Config) CheckCleanup() error {
+	if !c.Cleanup.Enabled {
+		return nil
+	}
+	files, err := filepath.Glob(filepath.Join(c.Dir, ".sortie", "workflows", "WORKFLOW.*.md"))
+	if err != nil {
+		return err
+	}
+	for _, f := range files {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			return err
+		}
+		days, ok := retentionDays(raw)
+		if ok && c.Cleanup.MaxAgeDays >= days {
+			return fmt.Errorf("cleanup.max_age_days (%d) must be less than workspace.retention_days (%d) in %s",
+				c.Cleanup.MaxAgeDays, days, filepath.Base(f))
+		}
+	}
+	return nil
+}
+
+// retentionDays reads workspace.retention_days from a workflow's front
+// matter, the block between the first two --- lines.
+func retentionDays(workflow []byte) (int, bool) {
+	lines := strings.Split(string(workflow), "\n")
+	if strings.TrimSpace(lines[0]) != "---" {
+		return 0, false
+	}
+	for _, line := range lines[1:] {
+		line = strings.TrimSpace(line)
+		if line == "---" {
+			break
+		}
+		if val, ok := strings.CutPrefix(line, "retention_days:"); ok {
+			val, _, _ = strings.Cut(val, " #")
+			n, err := strconv.Atoi(strings.TrimSpace(val))
+			return n, err == nil
+		}
+	}
+	return 0, false
 }
 
 // Label is one GitHub label managed by `sortie-loop setup`.
@@ -75,7 +178,7 @@ var DefaultLabels = []Label{
 // it would silently fall back to defaults (wrong labels, no milestone)
 // and dispatch on items the operator never scoped.
 func Load(dir string) (*Config, error) {
-	c := &Config{Dir: dir, Filters: map[string]string{}}
+	c := &Config{Dir: dir, Filters: map[string]string{}, Cleanup: Cleanup{Timeout: defaultCleanupTimeout}}
 	if dir == "" {
 		return nil, errors.New("config dir must not be empty")
 	}
@@ -94,6 +197,7 @@ func Load(dir string) (*Config, error) {
 			Assignee  *string           `yaml:"assignee"`
 			Filters   map[string]string `yaml:"filters"`
 			Labels    []Label           `yaml:"labels"`
+			Cleanup   cleanupFile       `yaml:"cleanup"`
 		}
 		if err := yaml.Unmarshal(raw, &file); err != nil {
 			return nil, fmt.Errorf("parse .sortie/config.yaml: %w", err)
@@ -102,6 +206,11 @@ func Load(dir string) (*Config, error) {
 		c.Assignee = file.Assignee
 		c.Filters = file.Filters
 		c.Labels = file.Labels
+		cl, err := file.Cleanup.resolve()
+		if err != nil {
+			return nil, err
+		}
+		c.Cleanup = cl
 	}
 	if c.Filters == nil {
 		c.Filters = map[string]string{}

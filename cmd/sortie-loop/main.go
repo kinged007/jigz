@@ -185,6 +185,9 @@ func run() (code int) {
 	if err := cfg.CheckToken(); err != nil {
 		fatal(err)
 	}
+	if err := cfg.CheckCleanup(); err != nil {
+		fatal(err)
+	}
 	bin, err := resolveSortieBin()
 	if err != nil {
 		fatal(err)

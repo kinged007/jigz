@@ -47,7 +47,17 @@ func runSetup(dir, repo string) {
 			"# Per-loop query-filter overrides, keyed by WORKFLOW.*.md stem.\n" +
 			"# New loops start on the default filter; narrow them here, e.g.:\n" +
 			"#filters:\n" +
-			"#  triage: \"label:agent:triage -label:needs-human\"\n"
+			"#  triage: \"label:agent:triage -label:needs-human\"\n" +
+			"# Workspace cleanup: runs command every interval. max_age_days must be\n" +
+			"# less than workspace.retention_days in every workflow. dry_run passes\n" +
+			"# SORTIE_CLEANUP_DRY_RUN=1; timeout defaults to 10m.\n" +
+			"#cleanup:\n" +
+			"#  enabled: true\n" +
+			"#  interval: 6h\n" +
+			"#  command: ./scripts/cleanup.sh\n" +
+			"#  max_age_days: 14\n" +
+			"#  dry_run: false\n" +
+			"#  timeout: 10m\n"
 		labelsBody := ""
 		for _, l := range config.DefaultLabels {
 			labelsBody += fmt.Sprintf("- {name: %q, color: %q, description: %q}\n", l.Name, l.Color, l.Description)

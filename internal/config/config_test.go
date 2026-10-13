@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNormalizeRepo(t *testing.T) {
@@ -207,5 +208,65 @@ func TestLoadNoRepoFails(t *testing.T) {
 	t.Setenv("SORTIE_LOOP_REPO", "")
 	if _, err := Load(dir); err == nil {
 		t.Error("expected error with no repo detectable")
+	}
+}
+
+func loadWithConfig(t *testing.T, yaml string, workflows map[string]string) (*Config, error) {
+	t.Helper()
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, ".sortie", "workflows"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".sortie", "config.yaml"), []byte("repo: o/r\n"+yaml), 0o644)
+	for name, body := range workflows {
+		os.WriteFile(filepath.Join(dir, ".sortie", "workflows", name), []byte(body), 0o644)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		return nil, err
+	}
+	return cfg, cfg.CheckCleanup()
+}
+
+const cleanupYAML = "cleanup:\n  enabled: true\n  interval: 6h\n  command: ./scripts/cleanup.sh\n  max_age_days: 14\n  dry_run: true\n"
+
+func TestCleanupValid(t *testing.T) {
+	wf := map[string]string{
+		"WORKFLOW.plan.md":  "---\nworkspace:\n  retention_days: 30\n---\n",
+		"WORKFLOW.other.md": "---\nkind: x\n---\n",
+	}
+	cfg, err := loadWithConfig(t, cleanupYAML, wf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := cfg.Cleanup
+	if !c.Enabled || c.Interval != 6*time.Hour || c.Command != "./scripts/cleanup.sh" ||
+		c.MaxAgeDays != 14 || !c.DryRun || c.Timeout != 10*time.Minute {
+		t.Errorf("unexpected cleanup config: %+v", c)
+	}
+}
+
+func TestCleanupDisabledByDefault(t *testing.T) {
+	cfg, err := loadWithConfig(t, "", nil)
+	if err != nil || cfg.Cleanup.Enabled || cfg.Cleanup.Timeout != 10*time.Minute {
+		t.Errorf("cfg %+v err %v", cfg, err)
+	}
+}
+
+func TestCleanupInvalid(t *testing.T) {
+	retention := map[string]string{"WORKFLOW.plan.md": "---\nworkspace:\n  retention_days: 14\n---\n"}
+	cases := []struct {
+		name, yaml, want string
+		wf               map[string]string
+	}{
+		{"missing command", "cleanup:\n  enabled: true\n  interval: 1h\n  max_age_days: 3\n", "cleanup.command", nil},
+		{"missing interval", "cleanup:\n  enabled: true\n  command: x\n  max_age_days: 3\n", "cleanup.interval", nil},
+		{"bad interval", "cleanup:\n  interval: soon\n", "cleanup.interval", nil},
+		{"missing max age", "cleanup:\n  enabled: true\n  command: x\n  interval: 1h\n", "max_age_days", nil},
+		{"max age equals retention", cleanupYAML, "retention_days (14)", retention},
+	}
+	for _, tc := range cases {
+		_, err := loadWithConfig(t, tc.yaml, tc.wf)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: error %v, want %q", tc.name, err, tc.want)
+		}
 	}
 }
