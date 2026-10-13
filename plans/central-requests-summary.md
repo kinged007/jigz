@@ -25,7 +25,7 @@ after a failed run, with state `exited`. Proposed key fields (names are not fina
   - `sleep`: `awake`, `sleeping_since`, `next_wake`
   - `budget` per workflow: `period`, `used`, `cap`, `unmeasured_runs`,
   `paused`, `override`
-  - `cleanup`: `last_run_at`, `duration`, `exit_code`, `paths_removed`
+  - `cleanup`: `last_run_at`, `duration_ms`, `exit_code`, `dry_run`, `paths`
 - L2 control commands: `wake`, `pause <workflow>`, `resume <workflow>`,
 `budget override <workflow>`, `cleanup [--dry-run]`. Each prints a JSON result
 and exits non-zero on failure.

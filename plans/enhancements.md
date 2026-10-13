@@ -209,7 +209,14 @@ cleanup:
   command: ./scripts/cleanup.sh
   max_age_days: 14
   dry_run: false
+  timeout: 10m
 ```
+
+`command` runs through `sh -c` in the repo root. `timeout` defaults to
+`10m`; on expiry the command and its process group are killed and the run
+is a failure. The first run is one `interval` after startup. Runs never
+overlap, including a manual run: the second one is skipped or rejected.
+Captured stdout and stderr are limited to the last 4 KB.
 
 **Command contract.**
 
@@ -222,16 +229,20 @@ cleanup:
   (`.sortie/workflows/`).
 - With `SORTIE_CLEANUP_DRY_RUN=1` the script removes nothing and prints what
 it would remove.
-- It prints one removed path per line on stdout.
+- It may print `removed: <path>` lines on stdout, one path per line. At
+most 200 paths are recorded.
 - Exit 0 is success. Any other exit is a failed run.
 
 **Run log.**
 
 - Log every run with start time, duration, exit code, and the paths the
 script printed.
-- Record the last run time and result.
-- Status fields (L1): last cleanup run time, duration, exit code, and the
-paths removed.
+- Record the last run time and result in `<hash>.cleanup.json` next to the
+status file, for scheduled and manual runs.
+- Status fields (L1), in the top-level `cleanup` object: `last_run_at`,
+`duration_ms`, `exit_code`, `dry_run`, `paths`.
+- `sortie-loop cleanup [--dry-run] [--json]` prints `started_at`,
+`duration_ms`, `exit_code`, `dry_run`, `command`, `output_tail`, `error`.
 
 **Acceptance criteria.**
 
@@ -367,7 +378,7 @@ engine request and is deferred.
 
 | ID  | Request | Owner | Needed by |
 | --- | ------- | ----- | --------- |
-| L1  | Status document: one machine-readable status per supervisor, a file at `<user cache dir>/sortie-loop/status/<hash>.json`, keyed by a hash of the repo root and referenced from the registry entry as `status_path` (the supported way for central to find it); it remains after a failed run with state `exited`; read through `sortie-loop status --json`, which adds a `liveness` field. Fields: version, engine version, tested schema versions (L4), pid, start time, repo; per workflow child: name, port, pid, state, restart count, last exit code; sleep state (awake, sleeping since, next wake); budget state per workflow (period, used, cap, unmeasured run count, paused, override); last cleanup run (time, duration, exit code, paths); config hash of what each child runs. | `sortie-loop` | C2, C3, C6 |
+| L1  | Status document: one machine-readable status per supervisor, a file at `<user cache dir>/sortie-loop/status/<hash>.json`, keyed by a hash of the repo root and referenced from the registry entry as `status_path` (the supported way for central to find it); it remains after a failed run with state `exited`; read through `sortie-loop status --json`, which adds a `liveness` field. Fields: version, engine version, tested schema versions (L4), pid, start time, repo; per workflow child: name, port, pid, state, restart count, last exit code; sleep state (awake, sleeping since, next wake); budget state per workflow (period, used, cap, unmeasured run count, paused, override); last cleanup run (`cleanup` object: `last_run_at`, `duration_ms`, `exit_code`, `dry_run`, `paths`); config hash of what each child runs. | `sortie-loop` | C2, C3, C6 |
 | L2  | Control commands beyond signals: `sortie-loop wake`, `pause <workflow>`, `resume <workflow>`, `budget override <workflow>`, `cleanup [--dry-run]`. Each returns a JSON result and exits non-zero on failure. Signals stay for stop and restart. | `sortie-loop` | C3, C6 |
 | L3  | Registry entry additions: workflow file path, loop type, `sortie-loop` version, supervisor start time, and the `status_path` of the status document, added to the existing `repo_name`, `updated_at`, `pid`, and `loops` (port and `db_path`). | `sortie-loop` | C1 |
 | L4  | DB compatibility: `sortie-central` pins the supported `schema_migrations` versions, detects columns with `PRAGMA table_info`, opens the DBs read-only, and hides a feature when its column is missing. `sortie-loop` lists the schema versions it was tested against, next to the engine version, in the L1 document. | `sortie-loop`, `sortie-central` | C4, C5, C6 |

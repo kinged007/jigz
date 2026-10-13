@@ -293,6 +293,13 @@ document. A run that ends on a loop failure leaves it with state
 being asked to ends the run. `last_exit_code` is `-1` when the child was
 killed by a signal.
 
+The status document has a top-level `cleanup` object once a cleanup has
+run: `last_run_at`, `duration_ms`, `exit_code`, `dry_run` and `paths`.
+`sortie-loop status` prints it as one line.
+
+`sortie-loop cleanup [--dry-run] [--json] [repo-root]` runs the configured
+cleanup command once (see [Workspace cleanup](#workspace-cleanup)).
+
 Flags: `--unite` joins (or starts) the shared dashboard,
 `--dashboard-port=N` forces the dashboard onto port N,
 `--no-dashboard` / `--no-server` disable the dashboard page and the
@@ -306,7 +313,7 @@ all. This is how `sortie-central` picks a per-repo workflow set.
 
 ```
 .sortie/
-  config.yaml      # repo:, token:, milestone: (all optional — see below)
+  config.yaml      # repo:, token:, milestone:, cleanup: (all optional — see below)
   workflows/       # installed by setup from the binary; edit freely, loop runs these
   .env.loop        # generated each run (resolved tracker, token, clone URL; mode 0600)
   workspaces/      # per-item agent checkouts (one subdir per loop)
@@ -356,6 +363,52 @@ for l in agent:plan-needed agent:quick agent:pr-fix agent:needs-review \
   gh label delete "$l" --repo owner/name --yes
 done
 ```
+
+### Workspace cleanup
+
+`cleanup:` in `.sortie/config.yaml` runs a command that removes old
+workspaces:
+
+```yaml
+cleanup:
+  enabled: false    # default
+  interval: 6h      # required when enabled
+  command: ./scripts/cleanup.sh   # required when enabled
+  max_age_days: 14  # required when enabled
+  dry_run: false
+  timeout: 10m      # default; kills the command and its process group
+```
+
+When `enabled` is true, the supervisor runs `command` through `sh -c`
+every `interval`, starting one interval after startup, in the repo root.
+`sortie-loop` refuses to start when `command`, `interval` or
+`max_age_days` is missing, or when `max_age_days` is not less than
+`workspace.retention_days` in a workflow file that sets it.
+
+The command gets these environment variables and no arguments:
+
+- `SORTIE_CLEANUP_DRY_RUN`: `1` or `0`. With `1` the command removes
+  nothing and only reports what it would remove.
+- `SORTIE_CLEANUP_MAX_AGE_DAYS`: `cleanup.max_age_days`.
+- `SORTIE_CLEANUP_WORKSPACE_ROOT`: `.sortie/workspaces` in the repo root.
+- `SORTIE_CLEANUP_DB_DIR`: `.sortie/workflows`, which holds the workflow
+  SQLite DBs.
+
+Exit code 0 is success and anything else is a failed run. A failed run
+is logged and does not stop the supervisor. The command may print
+`removed: <path>` lines on stdout. Up to 200 of them are recorded as the
+paths of the run. The last 4 KB of stdout and stderr are logged. Two
+cleanups never run at the same time: a run that finds another one active
+is skipped.
+
+`sortie-loop cleanup` runs the command once with the same contract.
+`--dry-run` sets `SORTIE_CLEANUP_DRY_RUN=1`. `--json` prints
+`started_at`, `duration_ms`, `exit_code`, `dry_run`, `command`,
+`output_tail` and `error`. It exits non-zero when the command fails or
+none is configured.
+
+Every run, scheduled or manual, writes its result to
+`<hash>.cleanup.json` next to the status document.
 
 Env overrides: `SORTIE_LOOP_REPO`, `SORTIE_LOOP_TOKEN`,
 `SORTIE_LOOP_MILESTONE` (plus `GH_MILESTONE` as a legacy alias),
