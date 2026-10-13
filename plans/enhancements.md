@@ -385,7 +385,7 @@ engine request and is deferred.
 | L5  | Run attributes derived by `sortie-central` (table below). | `sortie-central` | C4, C5 |
 | L6  | Run timeline derived by `sortie-central` (below). | `sortie-central` | C5 |
 | L7  | Cost per run: the engine records dollar cost per run when the adapter reports it, with a flag for estimated or reported. Deferred until the engine provides cost. Tokens remain the unit. Same item as the `max_usd` open question. | `engine (deferred)` | C6 |
-| L8  | Run log access: `sortie-loop` writes engine stdout and stderr to `.sortie/logs/<workflow>.log` with size rotation. The directory does not exist today. | `sortie-loop` | C5 |
+| L8  | Run log access: `sortie-loop` writes engine stdout and stderr to `.sortie/logs/<workflow>.log` with size rotation: the file is rotated at 10 MiB and 3 rotated files are kept (`.log.1` to `.log.3`). The terminal output is unchanged, and the status document has `log_path` per workflow. Implemented. The per-run transcript part of L8 is not implemented. | `sortie-loop` | C5 |
 | L9  | `sortie-loop validate [--json]`: runs `sortie validate` on all workflow files and checks repo config and the sleep, cleanup, and budget rules (for example `cleanup.max_age_days` less than `workspace.retention_days`). | `sortie-loop` | C7 |
 | L10 | Safe apply: `sortie-loop restart --when-idle` for workflow changes and a reload for repo config. Both return success or failure. The L1 status document carries the config hash of what each child runs. | `sortie-loop` | C7 |
 | L11 | `sortie-loop setup --json`: non-interactive setup that reports what was created, skipped, and why (labels, workflow files, `.env.loop`), and fails clearly on a bad token, missing repo, or missing permissions. | `sortie-loop` | C8 |
@@ -436,7 +436,7 @@ The timeline combines:
 - `run_history`: start, end, status, and attempt per run.
 - Current-state tables: parked, retry, and budget hold rows.
 - GitHub label and comment changes.
-- The L8 logs.
+- The L8 child logs (no per-run transcript).
 
 There are no per-event token deltas. A full event stream needs an engine
 change and is an open question.
@@ -470,6 +470,7 @@ and how do they relate to the per-workflow token cap?
 - Does `rule_name` equal the stage name once chains run?
 - Are past-run model history and a full event stream needed enough to justify
 an engine change later?
+- Does the pi adapter write a per-run transcript file in the workspace? This is unverified. Per-run transcript access (the rest of L8) depends on it.
 - Is the branch still available after cleanup deletes workspaces?
 - Windows control parity (L12) is optional and depends on whether Windows is
 a target.

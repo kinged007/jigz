@@ -31,7 +31,7 @@ after a failed run, with state `exited`. Proposed key fields (names are not fina
 and exits non-zero on failure.
 - L3 registry additions: workflow file path, loop type, `sortie-loop` version,
 supervisor start time, status endpoint.
-- L8 child logs: `.sortie/logs/<workflow>.log`, size-rotated.
+- L8 child logs: `.sortie/logs/<workflow>.log`, rotated at 10 MiB with 3 rotated files kept (`.log.1` to `.log.3`). The path is `log_path` in each status workflow entry. The per-run transcript is not implemented.
 - L9 `sortie-loop validate [--json]`: runs `sortie validate` on all workflow
 files and checks sleep, cleanup, and budget rules.
 - L10 safe apply: `restart --when-idle` for workflow changes, and a reload for

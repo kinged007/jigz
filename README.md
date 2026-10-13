@@ -291,11 +291,25 @@ document. A run that ends on a loop failure leaves it with state
 `exited`, and the next supervisor for the same root overwrites it. In a workflow entry,
 `restart_count` counts recycles only, because a child that exits without
 being asked to ends the run. `last_exit_code` is `-1` when the child was
-killed by a signal.
+killed by a signal. `log_path` is the absolute path of the workflow's log
+file.
 
 The status document has a top-level `cleanup` object once a cleanup has
 run: `last_run_at`, `duration_ms`, `exit_code`, `dry_run` and `paths`.
 `sortie-loop status` prints it as one line.
+
+### Child logs
+
+The stdout and stderr of each engine child are written to
+`<repo-root>/.sortie/logs/<workflow>.log`, interleaved in arrival order and
+unchanged. They are still printed to the terminal of `sortie-loop`. The file
+is opened for appending, so it keeps its content across child recycles and
+supervisor restarts. When a write would take the file over 10 MiB, it is
+renamed to `<workflow>.log.1`, `.1` becomes `.2`, `.2` becomes `.3`, and the
+old `.3` is deleted. A file that is already over 10 MiB when a child starts
+is rotated first. The limit and the 3 rotated files are fixed in the code.
+If the log file cannot be opened or written, one warning is printed and the
+child keeps running. The per-run agent transcript is not part of these logs.
 
 `sortie-loop cleanup [--dry-run] [--json] [repo-root]` runs the configured
 cleanup command once (see [Workspace cleanup](#workspace-cleanup)).
@@ -317,6 +331,7 @@ all. This is how `sortie-central` picks a per-repo workflow set.
   workflows/       # installed by setup from the binary; edit freely, loop runs these
   .env.loop        # generated each run (resolved tracker, token, clone URL; mode 0600)
   workspaces/      # per-item agent checkouts (one subdir per loop)
+  logs/            # engine child output, one <workflow>.log per loop
 ```
 
 `setup` ignores `.sortie/` wholesale in `.gitignore` — run state
