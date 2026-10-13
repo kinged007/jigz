@@ -179,6 +179,11 @@ func writeRegistry(root string, endpoints []loopEndpoint, startedAt time.Time) e
 	if err != nil {
 		return err
 	}
+	lock, err := lockRegistry()
+	if err != nil {
+		return err
+	}
+	defer lock.release()
 	reg := registry{Entries: map[string]registryEntry{}}
 	if data, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(data, &reg)
@@ -214,6 +219,11 @@ func dropRegistry(root string) {
 	if err != nil {
 		return
 	}
+	lock, err := lockRegistry()
+	if err != nil {
+		return
+	}
+	defer lock.release()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return
@@ -227,7 +237,7 @@ func dropRegistry(root string) {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(path, data, 0o644)
+	_ = writeFileAtomic(path, data)
 }
 
 // dbPathFor resolves a workflow's db_path front-matter the way sortie
@@ -425,11 +435,22 @@ type portLock struct{ f *os.File }
 // bound its port, so a run started at the same moment probes ports the
 // earlier run has already claimed instead of stealing them.
 func lockStarts() (*portLock, error) {
+	return lockFile(".lock")
+}
+
+// lockRegistry serializes read-modify-write cycles on registry.json. It
+// uses its own file: lockStarts is held across writeRegistry in the same
+// process, and flock locks on separate descriptors do not nest.
+func lockRegistry() (*portLock, error) {
+	return lockFile(".update.lock")
+}
+
+func lockFile(suffix string) (*portLock, error) {
 	path, err := registryPath()
 	if err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o644)
+	f, err := os.OpenFile(path+suffix, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return nil, err
 	}

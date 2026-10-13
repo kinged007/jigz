@@ -1,10 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
+	"sync"
 	"testing"
 	"time"
 )
@@ -148,5 +151,46 @@ func TestLockStartsSerializes(t *testing.T) {
 	case <-held:
 	case <-time.After(5 * time.Second):
 		t.Fatal("second lockStarts did not return after release")
+	}
+}
+
+func TestConcurrentRegistryWritesKeepEveryEntry(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	const n = 20
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if err := writeRegistry(fmt.Sprintf("/repo/%d", i), nil, time.Now()); err != nil {
+				t.Error(err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	for i := 0; i < n; i += 2 {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			dropRegistry(fmt.Sprintf("/repo/%d", i))
+		}(i)
+	}
+	wg.Wait()
+	path, _ := registryPath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reg registry
+	if err := json.Unmarshal(data, &reg); err != nil {
+		t.Fatal(err)
+	}
+	if len(reg.Entries) != n/2 {
+		t.Errorf("got %d entries, want %d", len(reg.Entries), n/2)
+	}
+	for i := 1; i < n; i += 2 {
+		if _, ok := reg.Entries[fmt.Sprintf("/repo/%d", i)]; !ok {
+			t.Errorf("entry %d was lost", i)
+		}
 	}
 }
