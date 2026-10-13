@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -104,6 +105,9 @@ type supervisor struct {
 	failed bool
 
 	events chan exitEvent
+
+	cleanupCancel context.CancelFunc
+	cleanupWG     sync.WaitGroup
 }
 
 func newSupervisor(root, bin string, defs []loopDef, ports []int) *supervisor {
@@ -491,6 +495,7 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 // shutdown stops every remaining loop and waits for it, so a run that is
 // ending leaves no engine behind holding a GitHub token.
 func (s *supervisor) shutdown() {
+	s.stopCleanup()
 	s.stopAll(false, false)
 	deadline := time.After(shutdownBudget)
 	for !s.empty() {

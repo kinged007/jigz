@@ -263,6 +263,9 @@ func run() (code int) {
 		fatal(err)
 	}
 	sup.republish()
+	if cfg.Cleanup.Enabled {
+		sup.startCleanup(cfg)
+	}
 	// Startup done: every child bound its port, so the next run's probe
 	// sees them; free the port-claim lock for the rest of the lifetime.
 	if lock != nil {
