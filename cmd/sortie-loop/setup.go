@@ -57,7 +57,15 @@ func runSetup(dir, repo string) {
 			"#  command: ./scripts/cleanup.sh\n" +
 			"#  max_age_days: 14\n" +
 			"#  dry_run: false\n" +
-			"#  timeout: 10m\n"
+			"#  timeout: 10m\n" +
+			"# Idle sleep: stop the engine children after idle_timeout with no running\n" +
+			"# or retrying work, start them again after wake_interval or on\n" +
+			"# `sortie-loop wake`. idle_timeout should exceed the workflows' polling\n" +
+			"# interval. New issues wait while sleeping.\n" +
+			"#sleep:\n" +
+			"#  enabled: true\n" +
+			"#  idle_timeout: 15m\n" +
+			"#  wake_interval: 1h\n"
 		labelsBody := ""
 		for _, l := range config.DefaultLabels {
 			labelsBody += fmt.Sprintf("- {name: %q, color: %q, description: %q}\n", l.Name, l.Color, l.Description)

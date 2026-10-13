@@ -38,6 +38,7 @@ type Config struct {
 	Labels     []Label `yaml:"labels"`
 	Workspaces string  // .sortie/workspaces under Dir
 	Cleanup    Cleanup
+	Sleep      Sleep
 }
 
 // Cleanup configures the workspace cleanup command.
@@ -57,6 +58,41 @@ type cleanupFile struct {
 	MaxAgeDays int    `yaml:"max_age_days"`
 	DryRun     bool   `yaml:"dry_run"`
 	Timeout    string `yaml:"timeout"`
+}
+
+// Sleep configures idle sleep: the supervisor stops the engine children
+// after IdleTimeout without work and starts them again after WakeInterval.
+type Sleep struct {
+	Enabled      bool
+	IdleTimeout  time.Duration
+	WakeInterval time.Duration
+}
+
+type sleepFile struct {
+	Enabled      bool   `yaml:"enabled"`
+	IdleTimeout  string `yaml:"idle_timeout"`
+	WakeInterval string `yaml:"wake_interval"`
+}
+
+func (f sleepFile) resolve() (Sleep, error) {
+	s := Sleep{Enabled: f.Enabled}
+	for _, d := range []struct {
+		key, val string
+		dst      *time.Duration
+	}{{"idle_timeout", f.IdleTimeout, &s.IdleTimeout}, {"wake_interval", f.WakeInterval, &s.WakeInterval}} {
+		if d.val == "" {
+			if s.Enabled {
+				return s, fmt.Errorf("sleep.%s is required when sleep.enabled is true", d.key)
+			}
+			continue
+		}
+		v, err := time.ParseDuration(d.val)
+		if err != nil || v <= 0 {
+			return s, fmt.Errorf("sleep.%s: %q is not a positive duration (for example 15m)", d.key, d.val)
+		}
+		*d.dst = v
+	}
+	return s, nil
 }
 
 const defaultCleanupTimeout = 10 * time.Minute
@@ -198,6 +234,7 @@ func Load(dir string) (*Config, error) {
 			Filters   map[string]string `yaml:"filters"`
 			Labels    []Label           `yaml:"labels"`
 			Cleanup   cleanupFile       `yaml:"cleanup"`
+			Sleep     sleepFile         `yaml:"sleep"`
 		}
 		if err := yaml.Unmarshal(raw, &file); err != nil {
 			return nil, fmt.Errorf("parse .sortie/config.yaml: %w", err)
@@ -211,6 +248,11 @@ func Load(dir string) (*Config, error) {
 			return nil, err
 		}
 		c.Cleanup = cl
+		sl, err := file.Sleep.resolve()
+		if err != nil {
+			return nil, err
+		}
+		c.Sleep = sl
 	}
 	if c.Filters == nil {
 		c.Filters = map[string]string{}

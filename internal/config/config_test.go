@@ -270,3 +270,36 @@ func TestCleanupInvalid(t *testing.T) {
 		}
 	}
 }
+
+func TestSleepValid(t *testing.T) {
+	cfg, err := loadWithConfig(t, "sleep:\n  enabled: true\n  idle_timeout: 15m\n  wake_interval: 1h\n", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := cfg.Sleep; !s.Enabled || s.IdleTimeout != 15*time.Minute || s.WakeInterval != time.Hour {
+		t.Errorf("unexpected sleep config: %+v", s)
+	}
+}
+
+func TestSleepDisabledByDefault(t *testing.T) {
+	cfg, err := loadWithConfig(t, "sleep:\n  idle_timeout: 5m\n", nil)
+	if err != nil || cfg.Sleep.Enabled {
+		t.Errorf("cfg %+v err %v", cfg, err)
+	}
+}
+
+func TestSleepInvalid(t *testing.T) {
+	cases := []struct{ name, yaml, want string }{
+		{"missing idle timeout", "sleep:\n  enabled: true\n  wake_interval: 1h\n", "sleep.idle_timeout"},
+		{"missing wake interval", "sleep:\n  enabled: true\n  idle_timeout: 5m\n", "sleep.wake_interval"},
+		{"zero", "sleep:\n  enabled: true\n  idle_timeout: 0s\n  wake_interval: 1h\n", "sleep.idle_timeout"},
+		{"negative", "sleep:\n  enabled: true\n  idle_timeout: 5m\n  wake_interval: -1h\n", "sleep.wake_interval"},
+		{"unparsable when disabled", "sleep:\n  wake_interval: soon\n", "sleep.wake_interval"},
+	}
+	for _, tc := range cases {
+		_, err := loadWithConfig(t, tc.yaml, nil)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: error %v, want %q", tc.name, err, tc.want)
+		}
+	}
+}
