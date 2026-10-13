@@ -463,6 +463,7 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 		UpdatedAt:     time.Now().UTC(),
 		State:         state,
 		Workflows:     []workflowStatus{},
+		Cleanup:       readCleanupRecord(s.root),
 	}
 	add := func(p *loopProc) {
 		st := "running"

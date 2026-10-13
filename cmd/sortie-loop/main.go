@@ -22,7 +22,7 @@ type cmdline struct {
 	dashPort    int
 	dumpVersion bool
 	showVersion bool
-	// remote is "stop", "restart" or "status" when one of those
+	// remote is "stop", "restart", "status" or "cleanup" when one of those
 	// subcommands was given, and remoteArgs is everything after it.
 	remote     string
 	remoteArgs []string
@@ -56,7 +56,7 @@ func parseArgs(argv []string) (cmdline, error) {
 		switch name {
 		case "setup":
 			c.setup = true
-		case "stop", "restart", "status":
+		case "stop", "restart", "status", "cleanup":
 			// A subcommand: everything after it belongs to runRemote,
 			// which does its own parsing, so stop collecting here.
 			c.remote = name
@@ -111,12 +111,14 @@ func usage() {
          sortie-loop stop [--when-idle] [repo-root]
          sortie-loop restart [--when-idle] [repo-root]
          sortie-loop status [--json] [repo-root]
+         sortie-loop cleanup [--dry-run] [--json] [repo-root]
   Run every WORKFLOW.*.md loop in .sortie/workflows/ against the repo at repo-root (default: cwd).
   SORTIE_LOOP_ONLY=plan,build  start only these loops (default: all of them)
   Settings live in <root>/.sortie/config.yaml; repo id defaults to the git remote.
   stop/restart act on the run already serving this repo-root, found through the shared registry.
   stop and restart are immediate; --when-idle waits for each loop to finish what it is working on, one loop at a time.
   status prints the state of the run serving this repo-root; --json prints its status document with a liveness field.
+  cleanup runs the configured cleanup command once, records the result for status, and exits non-zero when it fails.
   --version prints the tool version and the engine it drives; --dump-version prints only the engine version.`)
 }
 
@@ -160,6 +162,10 @@ func run() (code int) {
 	}
 	if c.remote == "status" {
 		runStatus(c.remoteArgs)
+		return 0
+	}
+	if c.remote == "cleanup" {
+		runCleanupCmd(c.remoteArgs)
 		return 0
 	}
 	if c.remote != "" {

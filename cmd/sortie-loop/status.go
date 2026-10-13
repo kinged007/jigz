@@ -30,6 +30,7 @@ type statusDoc struct {
 	UpdatedAt     time.Time        `json:"updated_at"`
 	State         string           `json:"state"`
 	Workflows     []workflowStatus `json:"workflows"`
+	Cleanup       *cleanupRecord   `json:"cleanup,omitempty"`
 }
 
 type workflowStatus struct {

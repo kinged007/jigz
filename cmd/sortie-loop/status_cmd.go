@@ -58,6 +58,7 @@ func statusOutput(root string, asJSON bool) (string, error) {
 		return "", fmt.Errorf("status document %s: %w", path, err)
 	}
 	liveness := statusLiveness(doc)
+	doc.Cleanup = readCleanupRecord(root)
 	if !asJSON {
 		return statusSummary(doc, liveness), nil
 	}
@@ -66,6 +67,9 @@ func statusOutput(root string, asJSON bool) (string, error) {
 		return "", err
 	}
 	raw["liveness"], _ = json.Marshal(liveness)
+	if doc.Cleanup != nil {
+		raw["cleanup"], _ = json.Marshal(doc.Cleanup)
+	}
 	out, err := json.MarshalIndent(raw, "", "  ")
 	return string(out), err
 }
@@ -91,6 +95,9 @@ func statusSummary(doc statusDoc, liveness string) string {
 		}
 		fmt.Fprintf(&b, "  %s: %s, port %d, pid %d, restarts %d, last exit %s\n",
 			w.Name, w.State, w.Port, w.PID, w.RestartCount, exit)
+	}
+	if line := cleanupSummary(doc.Cleanup); line != "" {
+		b.WriteString(line + "\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

@@ -220,7 +220,7 @@ func (s *supervisor) startCleanup(cfg *config.Config) {
 				return
 			case <-tick.C:
 			}
-			res, err := runCleanup(ctx, cfg, false)
+			res, err := runCleanupRecorded(ctx, cfg, false)
 			switch {
 			case ctx.Err() != nil:
 				return
@@ -230,6 +230,7 @@ func (s *supervisor) startCleanup(cfg *config.Config) {
 				fmt.Fprintln(os.Stderr, "sortie-loop: cleanup:", err)
 			default:
 				logCleanup(res)
+				s.publishStatus("running")
 			}
 		}
 	}()
