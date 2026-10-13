@@ -44,6 +44,7 @@ type workflowStatus struct {
 	RestartCount int       `json:"restart_count"`
 	LastExitCode *int      `json:"last_exit_code"`
 	ConfigHash   string    `json:"config_hash"`
+	LogPath      string    `json:"log_path"`
 }
 
 // statusPath returns the status file for a repo root. The name is a

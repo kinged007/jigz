@@ -186,8 +186,18 @@ func (s *supervisor) startOne(name string) error {
 	if err != nil {
 		return err
 	}
-	cmd, port, err := startLoopChild(s.bin, envFile, s.root, def.file, env, s.ports[name])
+	var logw io.Writer
+	var logf *rotatingLog
+	if lf, err := openRotatingLog(childLogPath(s.root, name), childLogMaxBytes, childLogKeep); err != nil {
+		fmt.Fprintln(os.Stderr, "sortie-loop: child log:", err)
+	} else {
+		logf, logw = lf, lf
+	}
+	cmd, port, err := startLoopChild(s.bin, envFile, s.root, def.file, env, s.ports[name], logw)
 	if err != nil {
+		if logf != nil {
+			_ = logf.Close()
+		}
 		return fmt.Errorf("start %s loop: %w", name, err)
 	}
 	s.mu.Lock()
@@ -202,7 +212,13 @@ func (s *supervisor) startOne(name string) error {
 	}
 	s.procs[name] = p
 	s.mu.Unlock()
-	go func() { s.events <- exitEvent{loop: name, err: cmd.Wait()} }()
+	go func() {
+		err := cmd.Wait()
+		if logf != nil {
+			_ = logf.Close()
+		}
+		s.events <- exitEvent{loop: name, err: err}
+	}()
 	// Republished here rather than only at boot: a loop that is replaced
 	// leaves the registry advertising nothing for a moment, and the entry
 	// is what points a supervisor at its port and its dashboard.
@@ -481,6 +497,7 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 			Name: p.def.name, WorkflowFile: p.def.file, LoopType: p.loopType,
 			Port: p.port, PID: pid, State: st, StartedAt: p.since.UTC(),
 			RestartCount: p.restarts, LastExitCode: p.exitCode, ConfigHash: p.configHash,
+			LogPath: childLogPath(s.root, p.def.name),
 		})
 	}
 	for _, p := range s.procs {

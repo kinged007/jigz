@@ -391,16 +391,16 @@ func childExited(cmd *exec.Cmd) bool {
 // ports; sortie ends the process when its HTTP server cannot bind, so
 // the loser moves to the next free port instead of leaving its repo
 // unwatched with no dashboard endpoint.
-func startLoopChild(bin, envFile, dir, file string, env []string, start int) (*exec.Cmd, int, error) {
+func startLoopChild(bin, envFile, dir, file string, env []string, start int, logw io.Writer) (*exec.Cmd, int, error) {
 	if start == 0 {
-		cmd, port, err := startOn(bin, envFile, dir, file, env, 0)
+		cmd, port, err := startOn(bin, envFile, dir, file, env, 0, logw)
 		return cmd, port, err
 	}
 	for p := start; p <= probeCeilPort; p++ {
 		if !probeFreePort(p) {
 			continue
 		}
-		cmd, port, err := startOn(bin, envFile, dir, file, env, p)
+		cmd, port, err := startOn(bin, envFile, dir, file, env, p, logw)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -414,12 +414,17 @@ func startLoopChild(bin, envFile, dir, file string, env []string, start int) (*e
 }
 
 // startOn launches one loop child on port; port 0 disables its server.
-func startOn(bin, envFile, dir, file string, env []string, port int) (*exec.Cmd, int, error) {
+// Output goes to this process's stdout and stderr, and also to logw when
+// it is not nil.
+func startOn(bin, envFile, dir, file string, env []string, port int, logw io.Writer) (*exec.Cmd, int, error) {
 	cmd := exec.Command(bin, "--env-file", envFile, "--port", fmt.Sprint(port), workflowPath(dir, file))
 	cmd.Dir = dir
 	cmd.Env = env
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	if logw != nil {
+		cmd.Stdout = io.MultiWriter(logw, os.Stdout)
+		cmd.Stderr = io.MultiWriter(logw, os.Stderr)
+	}
 	if err := cmd.Start(); err != nil {
 		return nil, 0, err
 	}
