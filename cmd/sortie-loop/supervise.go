@@ -2,12 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"sync"
 	"syscall"
@@ -62,6 +64,12 @@ type loopProc struct {
 	recycle bool
 	// since is when this child started, for the settle guard.
 	since time.Time
+	// restarts counts how many times the supervisor recycled this loop.
+	restarts int
+	// exitCode is nil until the child has exited.
+	exitCode   *int
+	configHash string
+	loopType   string
 }
 
 type exitEvent struct {
@@ -87,16 +95,25 @@ type supervisor struct {
 	// are gone.
 	exitWhenEmpty bool
 
+	// gone holds the loops that have exited, so the status document can
+	// still report their exit code.
+	gone      map[string]*loopProc
+	startedAt time.Time
+	// failed marks a run that ended because a loop died unrequested.
+	failed bool
+
 	events chan exitEvent
 }
 
 func newSupervisor(root, bin string, defs []loopDef, ports []int) *supervisor {
 	s := &supervisor{
 		root: root, bin: bin,
-		defs:   map[string]loopDef{},
-		ports:  map[string]int{},
-		procs:  map[string]*loopProc{},
-		events: make(chan exitEvent, len(defs)+4),
+		defs:      map[string]loopDef{},
+		ports:     map[string]int{},
+		procs:     map[string]*loopProc{},
+		gone:      map[string]*loopProc{},
+		startedAt: time.Now(),
+		events:    make(chan exitEvent, len(defs)+4),
 	}
 	for i, d := range defs {
 		s.defs[d.name] = d
@@ -145,13 +162,29 @@ func (s *supervisor) startOne(name string) error {
 	if err != nil {
 		return err
 	}
+	workflow, err := os.ReadFile(filepath.Join(s.root, ".sortie", "workflows", def.file))
+	if err != nil {
+		return err
+	}
+	envBody, err := os.ReadFile(envFile)
+	if err != nil {
+		return err
+	}
 	cmd, port, err := startLoopChild(s.bin, envFile, s.root, def.file, env, s.ports[name])
 	if err != nil {
 		return fmt.Errorf("start %s loop: %w", name, err)
 	}
 	s.mu.Lock()
 	s.ports[name] = port
-	s.procs[name] = &loopProc{def: def, cmd: cmd, port: port, since: time.Now()}
+	p := &loopProc{
+		def: def, cmd: cmd, port: port, since: time.Now(),
+		configHash: configHash(workflow, envBody), loopType: loopTypeOf(workflow),
+	}
+	if prev := s.gone[name]; prev != nil {
+		p.restarts = prev.restarts + 1
+		delete(s.gone, name)
+	}
+	s.procs[name] = p
 	s.mu.Unlock()
 	go func() { s.events <- exitEvent{loop: name, err: cmd.Wait()} }()
 	// Republished here rather than only at boot: a loop that is replaced
@@ -244,29 +277,51 @@ func (s *supervisor) onSignal(sg os.Signal) (int, bool) {
 }
 
 func (s *supervisor) onExit(ev exitEvent) (int, bool) {
-	s.mu.Lock()
-	p := s.procs[ev.loop]
-	delete(s.procs, ev.loop)
-	s.mu.Unlock()
+	p := s.reap(ev)
 	if p == nil {
 		return 0, false
 	}
 	if !p.stopping {
+		s.failed = true
 		// Nobody asked for this loop to end, so it died on its own and
 		// the repo is no longer whole. Everything goes down, as before: a
 		// run left watching half a repo is worse than none, and a
 		// supervisor reads the exit as a failure it can attribute.
 		fmt.Fprintln(os.Stderr, "sortie-loop:", p.def.name, "exited:", ev.err)
+		s.republish()
 		return 1, true
 	}
 	s.republish()
 	if p.recycle {
 		if err := s.startOne(p.def.name); err != nil {
 			fmt.Fprintln(os.Stderr, "sortie-loop:", err)
+			s.failed = true
 			return 1, true
 		}
 	}
 	return 0, s.finished()
+}
+
+// reap moves an exited loop from procs to gone with its exit code.
+func (s *supervisor) reap(ev exitEvent) *loopProc {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p := s.procs[ev.loop]
+	if p == nil {
+		return nil
+	}
+	delete(s.procs, ev.loop)
+	code := 0
+	if ev.err != nil {
+		code = -1
+		var xe *exec.ExitError
+		if errors.As(ev.err, &xe) {
+			code = xe.ExitCode()
+		}
+	}
+	p.exitCode = &code
+	s.gone[ev.loop] = p
+	return p
 }
 
 // drainStep stops the loops that were asked to stop once idle and are
@@ -356,6 +411,67 @@ func (s *supervisor) republish() {
 	if err := writeRegistry(s.root, s.endpoints()); err != nil {
 		fmt.Fprintln(os.Stderr, "sortie-loop: registry:", err)
 	}
+	s.publishStatus("running")
+}
+
+func (s *supervisor) publishStatus(state string) {
+	if err := writeStatus(s.statusDoc(state)); err != nil {
+		fmt.Fprintln(os.Stderr, "sortie-loop: status:", err)
+	}
+}
+
+// closeStatus runs once the loops are gone. A clean exit removes the
+// status file; a run that ended on a loop failure leaves a final
+// document with the exit codes.
+func (s *supervisor) closeStatus() {
+	if s.failed {
+		s.publishStatus("exited")
+		return
+	}
+	removeStatus(repoName(s.root))
+}
+
+func (s *supervisor) statusDoc(state string) statusDoc {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	doc := statusDoc{
+		SchemaVersion: statusSchemaVersion,
+		Version:       version,
+		EngineVersion: engineVersion(),
+		PID:           os.Getpid(),
+		Repo:          s.root,
+		RepoName:      repoName(s.root),
+		StartedAt:     s.startedAt.UTC(),
+		UpdatedAt:     time.Now().UTC(),
+		State:         state,
+		Workflows:     []workflowStatus{},
+	}
+	add := func(p *loopProc) {
+		st := "running"
+		switch {
+		case p.exitCode != nil:
+			st = "exited"
+		case p.stopping:
+			st = "stopping"
+		}
+		pid := 0
+		if p.cmd != nil && p.cmd.Process != nil {
+			pid = p.cmd.Process.Pid
+		}
+		doc.Workflows = append(doc.Workflows, workflowStatus{
+			Name: p.def.name, WorkflowFile: p.def.file, LoopType: p.loopType,
+			Port: p.port, PID: pid, State: st, StartedAt: p.since.UTC(),
+			RestartCount: p.restarts, LastExitCode: p.exitCode, ConfigHash: p.configHash,
+		})
+	}
+	for _, p := range s.procs {
+		add(p)
+	}
+	for _, p := range s.gone {
+		add(p)
+	}
+	sort.Slice(doc.Workflows, func(i, j int) bool { return doc.Workflows[i].Name < doc.Workflows[j].Name })
+	return doc
 }
 
 // shutdown stops every remaining loop and waits for it, so a run that is
@@ -366,9 +482,7 @@ func (s *supervisor) shutdown() {
 	for !s.empty() {
 		select {
 		case ev := <-s.events:
-			s.mu.Lock()
-			delete(s.procs, ev.loop)
-			s.mu.Unlock()
+			s.reap(ev)
 		case <-deadline:
 			s.mu.Lock()
 			for _, p := range s.procs {
@@ -379,10 +493,7 @@ func (s *supervisor) shutdown() {
 			s.mu.Unlock()
 			// The kills land on their own; the waits still have to reap.
 			for !s.empty() {
-				ev := <-s.events
-				s.mu.Lock()
-				delete(s.procs, ev.loop)
-				s.mu.Unlock()
+				s.reap(<-s.events)
 			}
 			return
 		}

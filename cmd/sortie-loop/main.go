@@ -244,6 +244,7 @@ func run() (code int) {
 	// fatal from a loop that failed to start after others were running.
 	defer func() {
 		sup.shutdown()
+		sup.closeStatus()
 		dropRegistry(abs)
 		if lock != nil {
 			lock.release()
