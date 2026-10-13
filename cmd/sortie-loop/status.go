@@ -31,6 +31,7 @@ type statusDoc struct {
 	State         string           `json:"state"`
 	Workflows     []workflowStatus `json:"workflows"`
 	Cleanup       *cleanupRecord   `json:"cleanup,omitempty"`
+	Sleep         sleepStatus      `json:"sleep"`
 }
 
 type workflowStatus struct {

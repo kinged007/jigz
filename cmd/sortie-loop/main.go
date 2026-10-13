@@ -253,6 +253,7 @@ func run() (code int) {
 		names[i] = l.name
 	}
 	sup := newSupervisor(abs, bin, loops, loopPorts)
+	sup.sleepCfg = cfg.Sleep
 	// Ordered rather than deferred in the body: os.Exit would skip a
 	// defer, and the children and the registry entry both have to be
 	// cleaned up on the way out whatever ends the run — including a

@@ -108,6 +108,19 @@ type supervisor struct {
 
 	cleanupCancel context.CancelFunc
 	cleanupWG     sync.WaitGroup
+
+	sleepCfg      config.Sleep
+	sleeping      bool
+	sleepingSince time.Time
+	nextWake      time.Time
+	// idleSince is the first idle observation after the last busy one or
+	// the last start; zero while the last observation was busy.
+	idleSince time.Time
+	lastPoll  time.Time
+	wakeNow   bool
+	clock     func() time.Time
+	quiet     func(port int) (idle, known bool)
+	pollEvery time.Duration
 }
 
 func newSupervisor(root, bin string, defs []loopDef, ports []int) *supervisor {
@@ -119,6 +132,7 @@ func newSupervisor(root, bin string, defs []loopDef, ports []int) *supervisor {
 		gone:      map[string]*loopProc{},
 		startedAt: time.Now(),
 		events:    make(chan exitEvent, len(defs)+4),
+		clock:     time.Now, quiet: loopQuiet, pollEvery: sleepPollEvery,
 	}
 	for i, d := range defs {
 		s.defs[d.name] = d
@@ -211,6 +225,7 @@ func (s *supervisor) startOne(name string) error {
 		delete(s.gone, name)
 	}
 	s.procs[name] = p
+	s.idleSince = s.clock()
 	s.mu.Unlock()
 	go func() {
 		err := cmd.Wait()
@@ -290,6 +305,9 @@ func (s *supervisor) run() int {
 			if code, done := s.drainStep(); done {
 				return code
 			}
+			if code, done := s.sleepStep(); done {
+				return code
+			}
 		}
 	}
 }
@@ -303,6 +321,13 @@ func (s *supervisor) onSignal(sg os.Signal) (int, bool) {
 		s.stopAll(true, false)
 		s.exitWhenEmpty = true
 	case sigRestartIdle:
+		s.mu.Lock()
+		asleep := s.sleeping
+		s.wakeNow = s.wakeNow || asleep
+		s.mu.Unlock()
+		if asleep {
+			return s.sleepStep()
+		}
 		s.stopAll(true, true)
 	}
 	return 0, s.finished()
@@ -480,10 +505,13 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 		State:         state,
 		Workflows:     []workflowStatus{},
 		Cleanup:       readCleanupRecord(s.root),
+		Sleep:         s.sleepStatusLocked(),
 	}
 	add := func(p *loopProc) {
 		st := "running"
 		switch {
+		case s.sleeping:
+			st = "sleeping"
 		case p.exitCode != nil:
 			st = "exited"
 		case p.stopping:
@@ -561,5 +589,5 @@ func loopQuiet(port int) (idle, known bool) {
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&p); err != nil {
 		return false, false
 	}
-	return len(p.Running) == 0 && p.Counts.Retrying == 0, true
+	return len(p.Running) == 0 && len(p.Retrying) == 0 && p.Counts.Retrying == 0, true
 }

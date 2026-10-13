@@ -24,6 +24,9 @@ type statePayload struct {
 		Retrying        int `json:"retrying"`
 		BudgetExhausted int `json:"budget_exhausted"`
 	} `json:"counts"`
+	Retrying []struct {
+		IssueID string `json:"issue_id"`
+	} `json:"retrying"`
 	Running []struct {
 		DisplayIdentifier string    `json:"display_identifier"`
 		IssueIdentifier   string    `json:"issue_identifier"`

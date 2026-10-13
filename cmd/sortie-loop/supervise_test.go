@@ -97,6 +97,13 @@ func TestAPendingRetryIsNotIdle(t *testing.T) {
 	}
 }
 
+func TestARetryingEntryIsNotIdle(t *testing.T) {
+	body := `{"counts":{"running":0,"retrying":0},"running":[],"retrying":[{"issue_id":"1"}]}`
+	if idle, known := loopQuiet(fakeLoop(t, body, 200)); !known || idle {
+		t.Errorf("a loop with a retrying entry reported idle=%v known=%v, want idle=false", idle, known)
+	}
+}
+
 // An engine that does not answer is unknown, not idle. Reading a
 // connection failure as quiet would stop a loop mid-run every time the
 // engine was briefly busy.
