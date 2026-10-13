@@ -22,11 +22,11 @@ after a failed run, with state `exited`. Proposed key fields (names are not fina
   `started_at`, `repo`
   - `workflows[]`: `name`, `port`, `pid`, `state`, `restart_count`,
   `last_exit_code`, `config_hash`
-  - `sleep`: `awake`, `sleeping_since`, `next_wake`
+  - `sleep`: `enabled`, `awake`, `sleeping_since`, `next_wake`, `idle_since` (when enabled)
   - `budget` per workflow: `period`, `used`, `cap`, `unmeasured_runs`,
   `paused`, `override`
   - `cleanup`: `last_run_at`, `duration_ms`, `exit_code`, `dry_run`, `paths`
-- L2 control commands: `wake`, `pause <workflow>`, `resume <workflow>`,
+- L2 control commands: `wake [--json]` (result: `woke`, `was_sleeping`, `error`), `pause <workflow>`, `resume <workflow>`,
 `budget override <workflow>`, `cleanup [--dry-run]`. Each prints a JSON result
 and exits non-zero on failure.
 - L3 registry additions: workflow file path, loop type, `sortie-loop` version,

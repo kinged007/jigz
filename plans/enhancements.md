@@ -47,20 +47,28 @@ again later. An idle project costs no engine processes.
 per-tracker adapters are built. Sleep depends only on engine state.
 - The supervisor (`supervise.go`) stops all engine children after
 `idle_timeout` with no running work and no retrying work. Running and
-retrying counts come from `GET /api/v1/state` on each child (to verify
-against docs before implementing).
+retrying counts come from `GET /api/v1/state` on each child (verified
+against the HTTP API reference: `counts.running`, `counts.retrying`, and
+`running[]` and `retrying[]` arrays). The supervisor polls every 30 seconds (fixed). A
+  child with running or retrying work, or one that cannot be queried, is
+  busy. The idle clock restarts on every busy observation and whenever
+  the children are started.
 - Wake triggers:
   - `wake_interval` elapsed.
-  - A manual trigger: `sortie-loop wake` (L2), which `sortie-central` also
-  calls from its dashboard button.
+  - A manual trigger: `sortie-loop wake [--json]` (L2), which
+  `sortie-central` also calls from its dashboard button. The command
+  writes a request file next to the status document. The supervisor reads
+  it on its 2-second tick, and the command waits up to 5 seconds for
+  `sleep.awake`. Its JSON result has `woke`, `was_sleeping` and `error`.
 - While sleeping, new issues and PRs wait until the next wake.
 - `sleep.enabled: false` keeps always-on behaviour. It is for users who do
 not want to wait for agents to start. The default is `false`.
 - Interaction with remote control: `stop` ends the supervisor. `restart`
 stops children and starts them again, clearing sleep. A manual wake while
 awake does nothing.
-- Status fields (L1): `awake`, `sleeping since <time>`, and next scheduled
-wake.
+- Status fields (L1): the top-level `sleep` object with `enabled`,
+`awake`, `sleeping_since`, `next_wake` and, when enabled, `idle_since`.
+Workflow entries have state `sleeping` while the run sleeps.
 
 ```yaml
 sleep:
@@ -378,8 +386,8 @@ engine request and is deferred.
 
 | ID  | Request | Owner | Needed by |
 | --- | ------- | ----- | --------- |
-| L1  | Status document: one machine-readable status per supervisor, a file at `<user cache dir>/sortie-loop/status/<hash>.json`, keyed by a hash of the repo root and referenced from the registry entry as `status_path` (the supported way for central to find it); it remains after a failed run with state `exited`; read through `sortie-loop status --json`, which adds a `liveness` field. Fields: version, engine version, tested schema versions (L4), pid, start time, repo; per workflow child: name, port, pid, state, restart count, last exit code; sleep state (awake, sleeping since, next wake); budget state per workflow (period, used, cap, unmeasured run count, paused, override); last cleanup run (`cleanup` object: `last_run_at`, `duration_ms`, `exit_code`, `dry_run`, `paths`); config hash of what each child runs. | `sortie-loop` | C2, C3, C6 |
-| L2  | Control commands beyond signals: `sortie-loop wake`, `pause <workflow>`, `resume <workflow>`, `budget override <workflow>`, `cleanup [--dry-run]`. Each returns a JSON result and exits non-zero on failure. Signals stay for stop and restart. | `sortie-loop` | C3, C6 |
+| L1  | Status document: one machine-readable status per supervisor, a file at `<user cache dir>/sortie-loop/status/<hash>.json`, keyed by a hash of the repo root and referenced from the registry entry as `status_path` (the supported way for central to find it); it remains after a failed run with state `exited`; read through `sortie-loop status --json`, which adds a `liveness` field. Fields: version, engine version, tested schema versions (L4), pid, start time, repo; per workflow child: name, port, pid, state, restart count, last exit code; sleep state (`sleep` object: enabled, awake, sleeping since, next wake, idle since); budget state per workflow (period, used, cap, unmeasured run count, paused, override); last cleanup run (`cleanup` object: `last_run_at`, `duration_ms`, `exit_code`, `dry_run`, `paths`); config hash of what each child runs. | `sortie-loop` | C2, C3, C6 |
+| L2  | Control commands beyond signals: `sortie-loop wake [--json]`, `pause <workflow>`, `resume <workflow>`, `budget override <workflow>`, `cleanup [--dry-run]`. Each returns a JSON result and exits non-zero on failure. Signals stay for stop and restart. | `sortie-loop` | C3, C6 |
 | L3  | Registry entry additions: workflow file path, loop type, `sortie-loop` version, supervisor start time, and the `status_path` of the status document, added to the existing `repo_name`, `updated_at`, `pid`, and `loops` (port and `db_path`). | `sortie-loop` | C1 |
 | L4  | DB compatibility: `sortie-central` pins the supported `schema_migrations` versions, detects columns with `PRAGMA table_info`, opens the DBs read-only, and hides a feature when its column is missing. `sortie-loop` lists the schema versions it was tested against, next to the engine version, in the L1 document. | `sortie-loop`, `sortie-central` | C4, C5, C6 |
 | L5  | Run attributes derived by `sortie-central` (table below). | `sortie-central` | C4, C5 |
@@ -476,5 +484,4 @@ an engine change later?
 a target.
 - Password and TLS exposure details for a public `sortie-central`
 deployment.
-- Engine facts marked "to verify": dispatch rules, chains, and
-`/api/v1/state` fields.
+- Engine facts marked "to verify": dispatch rules and chains.

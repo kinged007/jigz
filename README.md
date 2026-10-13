@@ -289,7 +289,7 @@ first 16 hex digits of the SHA-256 of the absolute repo-root. The registry
 entry holds the same path as `status_path`. A clean exit removes the
 document. A run that ends on a loop failure leaves it with state
 `exited`, and the next supervisor for the same root overwrites it. In a workflow entry,
-`restart_count` counts recycles only, because a child that exits without
+`restart_count` counts recycles and wakes only, because a child that exits without
 being asked to ends the run. `last_exit_code` is `-1` when the child was
 killed by a signal. `log_path` is the absolute path of the workflow's log
 file.
@@ -297,6 +297,12 @@ file.
 The status document has a top-level `cleanup` object once a cleanup has
 run: `last_run_at`, `duration_ms`, `exit_code`, `dry_run` and `paths`.
 `sortie-loop status` prints it as one line.
+
+The status document has a top-level `sleep` object: `enabled`, `awake`,
+`sleeping_since` and `next_wake` (RFC 3339 or `null`), and, when sleep is
+enabled, `idle_since` (RFC 3339, or `null` after a busy observation). While
+the run sleeps, the workflow entries have state `sleeping`.
+`sortie-loop status` prints one `sleep:` line when sleep is enabled.
 
 ### Child logs
 
@@ -314,6 +320,13 @@ child keeps running. The per-run agent transcript is not part of these logs.
 `sortie-loop cleanup [--dry-run] [--json] [repo-root]` runs the configured
 cleanup command once (see [Workspace cleanup](#workspace-cleanup)).
 
+`sortie-loop wake [--json] [repo-root]` starts the engine loops of a run
+that is sleeping (see [Idle sleep](#idle-sleep)). `--json` prints `woke`,
+`was_sleeping` and `error`. When the run is awake or sleep is disabled it
+does nothing, prints `was_sleeping: false` and exits 0. It exits non-zero
+when no supervisor is running for the repo-root, or when the supervisor is
+not awake 5 seconds after the request.
+
 Flags: `--unite` joins (or starts) the shared dashboard,
 `--dashboard-port=N` forces the dashboard onto port N,
 `--no-dashboard` / `--no-server` disable the dashboard page and the
@@ -327,7 +340,7 @@ all. This is how `sortie-central` picks a per-repo workflow set.
 
 ```
 .sortie/
-  config.yaml      # repo:, token:, milestone:, cleanup: (all optional — see below)
+  config.yaml      # repo:, token:, milestone:, cleanup:, sleep: (all optional — see below)
   workflows/       # installed by setup from the binary; edit freely, loop runs these
   .env.loop        # generated each run (resolved tracker, token, clone URL; mode 0600)
   workspaces/      # per-item agent checkouts (one subdir per loop)
@@ -424,6 +437,45 @@ none is configured.
 
 Every run, scheduled or manual, writes its result to
 `<hash>.cleanup.json` next to the status document.
+
+### Idle sleep
+
+`sleep:` in `.sortie/config.yaml` stops the engine children when there is
+no work and starts them again later:
+
+```yaml
+sleep:
+  enabled: false       # default
+  idle_timeout: 15m    # required when enabled
+  wake_interval: 1h    # required when enabled
+```
+
+Both values are Go durations and must be positive when `enabled` is true;
+`sortie-loop` refuses to start otherwise. With `enabled: false` the loops
+run all the time.
+
+Every 30 seconds the supervisor asks each child's `GET /api/v1/state` on
+`127.0.0.1` for its running and retrying work. A child with running or
+retrying work is busy. A child that cannot be queried (connection error,
+timeout, bad response) is also busy, so the supervisor never sleeps on an
+error. When no child has been busy for `idle_timeout`, the supervisor stops
+all children and keeps running. The idle time starts again at every busy
+observation and whenever the children are started, so `idle_timeout`
+should be larger than the polling interval of the workflows: a freshly
+started child needs that long to find work. A run started with
+`--no-server` has no state endpoint and never sleeps.
+
+The children start again `wake_interval` after sleep began, or when
+`sortie-loop wake` is run. A wake starts them the same way as startup,
+with the config and workflow files now on disk. `sortie-loop wake` writes a
+request file next to the status document, which the supervisor reads at
+its next 2-second tick.
+
+While the run sleeps, new issues and PRs wait until the next wake. Turn
+sleep off if agents must start immediately. The supervisor, the cleanup
+schedule and the status document keep running. `stop` ends the run.
+`restart --when-idle` wakes the loops, and a restart without
+`--when-idle` replaces the process as usual.
 
 Env overrides: `SORTIE_LOOP_REPO`, `SORTIE_LOOP_TOKEN`,
 `SORTIE_LOOP_MILESTONE` (plus `GH_MILESTONE` as a legacy alias),
