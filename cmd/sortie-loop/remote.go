@@ -135,6 +135,19 @@ func controlSignal(action string, whenIdle bool) (syscall.Signal, error) {
 // entry is worse than none: a repo whose run died leaves its row behind,
 // and signalling that pid would land on an unrelated process.
 func runningEntry(root string) (registryEntry, error) {
+	e, err := registeredEntry(root)
+	if err != nil {
+		return registryEntry{}, err
+	}
+	if e.PID <= 0 || syscall.Kill(e.PID, 0) != nil {
+		return registryEntry{}, fmt.Errorf("the sortie-loop registered for %s is no longer running", root)
+	}
+	return e, nil
+}
+
+// registeredEntry returns the registry entry for root whether or not its
+// process is still alive.
+func registeredEntry(root string) (registryEntry, error) {
 	path, err := registryPath()
 	if err != nil {
 		return registryEntry{}, err
@@ -150,9 +163,6 @@ func runningEntry(root string) (registryEntry, error) {
 	e, ok := reg.Entries[root]
 	if !ok {
 		return registryEntry{}, fmt.Errorf("no sortie-loop is running for %s", root)
-	}
-	if e.PID <= 0 || syscall.Kill(e.PID, 0) != nil {
-		return registryEntry{}, fmt.Errorf("the sortie-loop registered for %s is no longer running", root)
 	}
 	return e, nil
 }
