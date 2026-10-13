@@ -104,6 +104,7 @@
         <form method="post" action="/control"><button type="submit" name="op" value="stop">stop</button></form>
         <form method="post" action="/control"><button type="submit" name="op" value="stopIdle" title="Each loop stops as soon as it has no work in flight, one loop at a time">stop when idle</button></form>
         <form method="post" action="/control"><button type="submit" name="op" value="restart" title="Each loop is replaced as soon as it has no work in flight, one loop at a time, picking up the workflow and settings now on disk">restart when idle</button></form>
+        {{if .Sleep.Enabled}}{{if .Sleep.Awake}}<span class="hint">sleep: awake</span>{{else}}<span class="draining">sleeping since {{.Sleep.SleepingSince.Format "15:04:05"}}, next wake {{.Sleep.NextWake.Format "15:04:05"}}</span>{{end}}{{end}}
         {{if .Draining}}<span class="draining">draining — each loop stops at its next gap</span>{{end}}
         <span class="hint">These act on this run. stop is immediate; the others wait for the current run to finish, and a loop that has just started is left alone for 20s so it is not called idle before it has worked.</span>
       </section>

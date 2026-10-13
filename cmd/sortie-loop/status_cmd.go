@@ -96,6 +96,9 @@ func statusSummary(doc statusDoc, liveness string) string {
 		fmt.Fprintf(&b, "  %s: %s, port %d, pid %d, restarts %d, last exit %s\n",
 			w.Name, w.State, w.Port, w.PID, w.RestartCount, exit)
 	}
+	if line := sleepSummary(doc.Sleep); line != "" {
+		b.WriteString(line + "\n")
+	}
 	if line := cleanupSummary(doc.Cleanup); line != "" {
 		b.WriteString(line + "\n")
 	}

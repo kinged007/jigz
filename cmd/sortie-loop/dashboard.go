@@ -109,6 +109,7 @@ type dashData struct {
 	// says the page can act: a unite page spans repos, and a button on it
 	// would have no single run to signal.
 	Draining map[string]bool
+	Sleep    sleepStatus
 	Controls bool
 }
 
@@ -152,6 +153,7 @@ func collectStats(unite bool, sup *supervisor) dashData {
 	}
 	if !unite {
 		d.Draining = sup.draining()
+		d.Sleep = sup.sleepStatus()
 	}
 	repos := map[string]*repoRollup{}
 	for _, s := range stats {
