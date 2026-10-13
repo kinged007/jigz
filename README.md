@@ -275,6 +275,20 @@ so `sortie-loop setup ./repo --repo owner/name` and
 differs from the shipped one, the same way it confirms before replacing
 an edited workflow file.
 
+`sortie-loop status [--json] [repo-root]` reports the run serving the
+repo-root: version, pid, state, and per workflow its state, port, pid,
+restart count and last exit code. `--json` prints the status document
+with an added `liveness` field: `running` when the pid is alive, `stale`
+when the document says running but the pid is dead, `exited` when the
+run ended. The command exits non-zero when no run or document is found.
+
+The supervisor writes the status document (schema version 1) to
+`<user cache dir>/sortie-loop/status/<owner>/<name>.json` and references
+it from its registry entry as `status_path`. In a workflow entry,
+`restart_count` counts recycles only, because a child that exits without
+being asked to ends the run. `last_exit_code` is `-1` when the child was
+killed by a signal.
+
 Flags: `--unite` joins (or starts) the shared dashboard,
 `--dashboard-port=N` forces the dashboard onto port N,
 `--no-dashboard` / `--no-server` disable the dashboard page and the
