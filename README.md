@@ -280,11 +280,15 @@ repo-root: version, pid, state, and per workflow its state, port, pid,
 restart count and last exit code. `--json` prints the status document
 with an added `liveness` field: `running` when the pid is alive, `stale`
 when the document says running but the pid is dead, `exited` when the
-run ended. The command exits non-zero when no run or document is found.
+run ended. The command reads the document from the repo-root and does not
+need a registry entry. It exits non-zero when no document is found.
 
 The supervisor writes the status document (schema version 1) to
-`<user cache dir>/sortie-loop/status/<owner>/<name>.json` and references
-it from its registry entry as `status_path`. In a workflow entry,
+`<user cache dir>/sortie-loop/status/<hash>.json`, where `<hash>` is the
+first 16 hex digits of the SHA-256 of the absolute repo-root. The registry
+entry holds the same path as `status_path`. A clean exit removes the
+document. A run that ends on a loop failure leaves it with state
+`exited`, and the next supervisor for the same root overwrites it. In a workflow entry,
 `restart_count` counts recycles only, because a child that exits without
 being asked to ends the run. `last_exit_code` is `-1` when the child was
 killed by a signal.

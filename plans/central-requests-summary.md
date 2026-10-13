@@ -14,7 +14,10 @@ registry entry.
 
 - L1 status document: `sortie-loop status --json`, also served on a localhost
 endpoint or as a file referenced from the registry entry (chosen at
-implementation). Proposed key fields (names are not final):
+implementation). The file is `<user cache dir>/sortie-loop/status/<hash>.json`,
+keyed by a hash of the repo root; the `status_path` field of the registry
+entry is the supported way for central to find it. The document remains
+after a failed run, with state `exited`. Proposed key fields (names are not final):
   - `version`, `engine_version`, `schema_versions_tested`, `pid`,
   `started_at`, `repo`
   - `workflows[]`: `name`, `port`, `pid`, `state`, `restart_count`,
