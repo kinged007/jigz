@@ -187,7 +187,7 @@ func writeRegistry(root string, endpoints []loopEndpoint, startedAt time.Time) e
 		}
 	}
 	name := repoName(root)
-	statusFile, err := statusPath(name)
+	statusFile, err := statusPath(root)
 	if err != nil {
 		return err
 	}

@@ -9,8 +9,9 @@ import (
 )
 
 // runStatus prints the status document of the sortie-loop registered for
-// a repo-root. It reads the registry entry without requiring a live pid,
-// because a dead supervisor's last document is what reports "stale".
+// a repo-root. It reads the file derived from the root and does not need
+// a registry entry or a live pid: a failed run leaves its last document
+// behind, and a dead supervisor's document reports "stale".
 func runStatus(args []string) {
 	dir := "."
 	asJSON := false
@@ -44,20 +45,17 @@ func runStatus(args []string) {
 }
 
 func statusOutput(root string, asJSON bool) (string, error) {
-	e, err := registeredEntry(root)
+	path, err := statusPath(root)
 	if err != nil {
 		return "", err
 	}
-	if e.StatusPath == "" {
-		return "", fmt.Errorf("the sortie-loop registered for %s has no status document", root)
-	}
-	data, err := os.ReadFile(e.StatusPath)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("no status document for %s: %w", root, err)
 	}
 	var doc statusDoc
 	if err := json.Unmarshal(data, &doc); err != nil {
-		return "", fmt.Errorf("status document %s: %w", e.StatusPath, err)
+		return "", fmt.Errorf("status document %s: %w", path, err)
 	}
 	liveness := statusLiveness(doc)
 	if !asJSON {

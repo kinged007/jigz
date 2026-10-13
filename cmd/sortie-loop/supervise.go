@@ -430,7 +430,7 @@ func (s *supervisor) closeStatus() {
 		s.publishStatus("exited")
 		return
 	}
-	removeStatus(repoName(s.root))
+	removeStatus(s.root)
 }
 
 func (s *supervisor) statusDoc(state string) statusDoc {

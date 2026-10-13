@@ -24,9 +24,9 @@ func startedSup(t *testing.T, script string) (*supervisor, string) {
 	return sup, root
 }
 
-func readStatus(t *testing.T) statusDoc {
+func readStatus(t *testing.T, root string) statusDoc {
 	t.Helper()
-	path, err := statusPath("owner/name")
+	path, err := statusPath(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func readStatus(t *testing.T) statusDoc {
 
 func TestStatusAfterStart(t *testing.T) {
 	_, root := startedSup(t, "while true; do sleep 1; done\n")
-	doc := readStatus(t)
+	doc := readStatus(t, root)
 	if doc.SchemaVersion != 1 || doc.State != "running" || doc.PID != os.Getpid() ||
 		doc.Repo != root || doc.RepoName != "owner/name" || doc.EngineVersion != engineVersion() ||
 		doc.Version != version || doc.StartedAt.IsZero() {
@@ -61,8 +61,8 @@ func TestStatusAfterStart(t *testing.T) {
 }
 
 func TestStatusAfterRecycle(t *testing.T) {
-	sup, _ := startedSup(t, "while true; do sleep 1; done\n")
-	before := readStatus(t).Workflows[0].ConfigHash
+	sup, root := startedSup(t, "while true; do sleep 1; done\n")
+	before := readStatus(t, root).Workflows[0].ConfigHash
 	sup.stopAll(false, true)
 	select {
 	case ev := <-sup.events:
@@ -72,7 +72,7 @@ func TestStatusAfterRecycle(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("the loop did not stop")
 	}
-	w := readStatus(t).Workflows[0]
+	w := readStatus(t, root).Workflows[0]
 	if w.RestartCount != 1 || w.ConfigHash != before || w.State != "running" {
 		t.Errorf("after recycle got restart_count=%d state=%s hash stable=%v",
 			w.RestartCount, w.State, w.ConfigHash == before)
@@ -80,7 +80,7 @@ func TestStatusAfterRecycle(t *testing.T) {
 }
 
 func TestStatusAfterUnrequestedExit(t *testing.T) {
-	sup, _ := startedSup(t, "exit 3\n")
+	sup, root := startedSup(t, "exit 3\n")
 	var ev exitEvent
 	select {
 	case ev = <-sup.events:
@@ -92,7 +92,7 @@ func TestStatusAfterUnrequestedExit(t *testing.T) {
 	}
 	sup.shutdown()
 	sup.closeStatus()
-	doc := readStatus(t)
+	doc := readStatus(t, root)
 	w := doc.Workflows[0]
 	if doc.State != "exited" || w.State != "exited" || w.LastExitCode == nil || *w.LastExitCode != 3 {
 		t.Errorf("unexpected final status: %+v", doc)
@@ -100,10 +100,10 @@ func TestStatusAfterUnrequestedExit(t *testing.T) {
 }
 
 func TestCleanExitRemovesStatus(t *testing.T) {
-	sup, _ := startedSup(t, "while true; do sleep 1; done\n")
+	sup, root := startedSup(t, "while true; do sleep 1; done\n")
 	sup.shutdown()
 	sup.closeStatus()
-	path, _ := statusPath("owner/name")
+	path, _ := statusPath(root)
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Errorf("status file remains after a clean exit: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestLoopTypeOf(t *testing.T) {
 func TestRegistryEntryHasStatusFields(t *testing.T) {
 	_, root := startedSup(t, "while true; do sleep 1; done\n")
 	entry := registryEntryFor(t, root)
-	wantStatus, _ := statusPath("owner/name")
+	wantStatus, _ := statusPath(root)
 	if entry.Version != version || entry.StartedAt.IsZero() || entry.StatusPath != wantStatus {
 		t.Errorf("unexpected entry fields: %+v", entry)
 	}

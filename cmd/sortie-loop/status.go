@@ -16,7 +16,7 @@ const (
 )
 
 // statusDoc is the machine-readable state of one supervisor, written to
-// the status file named by the registry entry. Later features add
+// the status file derived from the repo root. Later features add
 // top-level sections without changing the fields below.
 type statusDoc struct {
 	SchemaVersion int              `json:"schema_version"`
@@ -44,14 +44,17 @@ type workflowStatus struct {
 	ConfigHash   string    `json:"config_hash"`
 }
 
-// statusPath returns the status file for a repo name. A name of the
-// form owner/name becomes a subdirectory.
-func statusPath(repoName string) (string, error) {
+// statusPath returns the status file for a repo root. The name is a
+// hash of the root, so two checkouts of one repo never share a file and
+// no repo name reaches the file system.
+func statusPath(root string) (string, error) {
 	reg, err := registryPath()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(filepath.Dir(reg), statusDirName, repoName+".json"), nil
+	sum := sha256.Sum256([]byte(root))
+	name := hex.EncodeToString(sum[:])[:16] + ".json"
+	return filepath.Join(filepath.Dir(reg), statusDirName, name), nil
 }
 
 // writeFileAtomic replaces path through a temp file in the same
@@ -87,7 +90,7 @@ func firstErr(errs ...error) error {
 }
 
 func writeStatus(doc statusDoc) error {
-	path, err := statusPath(doc.RepoName)
+	path, err := statusPath(doc.Repo)
 	if err != nil {
 		return err
 	}
@@ -98,8 +101,8 @@ func writeStatus(doc statusDoc) error {
 	return writeFileAtomic(path, data)
 }
 
-func removeStatus(repoName string) {
-	if path, err := statusPath(repoName); err == nil {
+func removeStatus(root string) {
+	if path, err := statusPath(root); err == nil {
 		_ = os.Remove(path)
 	}
 }

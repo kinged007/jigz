@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 func deadPID(t *testing.T) int {
@@ -17,9 +20,9 @@ func deadPID(t *testing.T) int {
 	return cmd.Process.Pid
 }
 
-func rewriteStatus(t *testing.T, edit func(*statusDoc)) {
+func rewriteStatus(t *testing.T, root string, edit func(*statusDoc)) {
 	t.Helper()
-	doc := readStatus(t)
+	doc := readStatus(t, root)
 	edit(&doc)
 	if err := writeStatus(doc); err != nil {
 		t.Fatal(err)
@@ -61,7 +64,7 @@ func TestStatusCommandRunning(t *testing.T) {
 func TestStatusCommandStale(t *testing.T) {
 	_, root := startedSup(t, "while true; do sleep 1; done\n")
 	pid := deadPID(t)
-	rewriteStatus(t, func(d *statusDoc) { d.PID = pid })
+	rewriteStatus(t, root, func(d *statusDoc) { d.PID = pid })
 	if got := statusLivenessJSON(t, root); got != "stale" {
 		t.Errorf("liveness = %q, want stale", got)
 	}
@@ -70,7 +73,7 @@ func TestStatusCommandStale(t *testing.T) {
 func TestStatusCommandExited(t *testing.T) {
 	_, root := startedSup(t, "while true; do sleep 1; done\n")
 	pid := deadPID(t)
-	rewriteStatus(t, func(d *statusDoc) { d.PID = pid; d.State = "exited" })
+	rewriteStatus(t, root, func(d *statusDoc) { d.PID = pid; d.State = "exited" })
 	if got := statusLivenessJSON(t, root); got != "exited" {
 		t.Errorf("liveness = %q, want exited", got)
 	}
@@ -85,7 +88,7 @@ func TestStatusCommandNoSupervisor(t *testing.T) {
 
 func TestStatusCommandNoDocument(t *testing.T) {
 	_, root := startedSup(t, "while true; do sleep 1; done\n")
-	path, _ := statusPath("owner/name")
+	path, _ := statusPath(root)
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
@@ -101,5 +104,54 @@ func TestParseArgsStatusIsASubcommand(t *testing.T) {
 	}
 	if c.remote != "status" || c.dir != "" || len(c.remoteArgs) != 2 {
 		t.Errorf("status parsed as %+v", c)
+	}
+}
+
+func TestStatusAfterFailedRunWithoutRegistryEntry(t *testing.T) {
+	sup, root := startedSup(t, "exit 3\n")
+	select {
+	case ev := <-sup.events:
+		if _, done := sup.onExit(ev); !done {
+			t.Fatal("an unrequested exit did not end the run")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the loop did not exit")
+	}
+	sup.shutdown()
+	sup.closeStatus()
+	dropRegistry(root)
+	out, err := statusOutput(root, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		State     string `json:"state"`
+		Liveness  string `json:"liveness"`
+		Workflows []struct {
+			LastExitCode *int `json:"last_exit_code"`
+		} `json:"workflows"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.State != "exited" || got.Liveness != "exited" ||
+		got.Workflows[0].LastExitCode == nil || *got.Workflows[0].LastExitCode != 3 {
+		t.Errorf("unexpected status after a failed run: %s", out)
+	}
+}
+
+func TestStatusPathIsPerRoot(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	a, err := statusPath("/work/a/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := statusPath("/work/b/repo")
+	again, _ := statusPath("/work/a/repo")
+	if a == b || a != again {
+		t.Errorf("paths a=%s b=%s again=%s", a, b, again)
+	}
+	if filepath.Dir(a) != filepath.Dir(b) || !regexp.MustCompile(`^[0-9a-f]{16}\.json$`).MatchString(filepath.Base(a)) {
+		t.Errorf("unexpected path shape: %s", a)
 	}
 }
