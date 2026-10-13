@@ -3,6 +3,7 @@
 # Anchored: a bare pattern would also match cmd/sortie-loop/ in any
 # subdirectory, which ignores the package source itself.
 /sortie-loop
+/cmd/sortie-loop/sortie-loop
 
 # GoReleaser output
 /dist
