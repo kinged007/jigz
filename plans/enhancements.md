@@ -24,11 +24,11 @@ Section numbers below refer to this document.
 | 1. Idle sleep (section 1) | done | `6728935`, `0dc7e1e`, `efc71ab`, docs `3384ab2` | Disabled by default. |
 | 3. Cleanup (section 3) | done | `7b8e9f7`, `6f08a10`, `e385697`, docs `2508689` | Config, interval runner, `cleanup` subcommand, last-run record. |
 | 2. Workflow consolidation (section 2) | not started | none | Still six workflow files. |
-| 4. Spend controls (section 4) | not started | none | Includes L1 budget fields. |
-| L1 status document | done, partial | `18eacae`, `04ea228`, `b557387`, `bb5a8cf`, docs `43d3a79`, `e6724ee` | File and `sortie-loop status [--json]`. Sleep, cleanup and `log_path` fields exist. Budget fields and tested schema versions (L4) are not in the document. |
+| 4. Spend controls (section 4) | done | uncommitted | Includes L1 budget fields. The relation to the engine's `budget_exhausted` is not investigated; the control reads `run_history` only. |
+| L1 status document | done, partial | `18eacae`, `04ea228`, `b557387`, `bb5a8cf`, docs `43d3a79`, `e6724ee` | File and `sortie-loop status [--json]`. Sleep, cleanup, budget and `log_path` fields exist. Tested schema versions (L4) are not in the document. |
 | L2 `wake` | done | `efc71ab` | |
 | L2 `cleanup` | done | `e385697` | |
-| L2 `pause`, `resume`, `budget override` | not started | none | Part of spend controls. |
+| L2 `pause`, `resume`, `budget override` | done | uncommitted | Part of spend controls. |
 | L3 registry additions | done | `d636dac`, `b3e8f47` | `b3e8f47` adds registry locking and atomic writes. |
 | L4 tested schema versions | not started | none | Central pins its own versions. |
 | L8 child logs | done | `30a4112`, docs `f9f182e` | |
@@ -45,9 +45,8 @@ Section numbers below refer to this document.
 1. Workflow consolidation (section 2): two workflow files, dispatch rules,
    `agent:plan` and `agent:plan-build`, label-driven PR rules, the docs
    workflow, and `setup` never removing existing workflow files.
-2. Spend controls (section 4) with L2 `pause`, `resume` and
-   `budget override`. First investigate the semantics of `budget_exhausted`
-   and `budget_hold_notices`.
+2. Investigate the semantics of `budget_exhausted` and
+   `budget_hold_notices` and their relation to the spend controls.
 3. L9 `sortie-loop validate [--json]`, L10 safe apply, L11 `setup --json`.
    These are independent of consolidation and can be done in parallel with
    it, because they touch different files. L9 rules for spend controls wait
@@ -68,10 +67,12 @@ Files are in `cmd/sortie-loop/` unless stated.
 | Cleanup runner and file paths | `cleanup.go` |
 | `cleanup` subcommand | `cleanup_cmd.go` |
 | Sleep and wake logic | `sleep.go` |
+| Spend controls: periods, token sums, state, enforcement | `budget.go` |
+| `pause`, `resume`, `budget override` subcommands | `budget_cmd.go` |
 | `wake` subcommand | `wake_cmd.go` |
 | Remote control (`stop`, `restart`, signals) | `remote.go` |
 | Subcommand dispatch and usage text | `main.go` |
-| Config loading and validation (`sleep:`, `cleanup:`) | `internal/config/config.go` |
+| Config loading and validation (`sleep:`, `cleanup:`, `workflows:`) | `internal/config/config.go` |
 | Workflow files and `setup` | `workflows/`, `embed.go`, `setup.go` |
 
 Files and formats:
@@ -80,6 +81,7 @@ Files and formats:
 | ---- | ---- |
 | Status file | `<user cache dir>/sortie-loop/status/<hash>.json`. `<hash>` is the first 16 hex digits of the SHA-256 of the absolute repo root. |
 | Wake request file | `<hash>.wake` next to the status file. |
+| Budget state and requests | `<hash>.budget.json` (per workflow: `period_start`, `paused`, `paused_by`, `override`, `warned`) and one `<hash>.budget.request.<time>-<pid>` file per request from `pause`, `resume` and `budget override`, next to the status file. |
 | Cleanup record and lock | `<hash>.cleanup.json` and `<hash>.cleanup.lock` next to the status file. |
 | Registry and locks | `registry.json` in `<user cache dir>/sortie-loop/`, with `.lock` (port claim) and `.update.lock` (registry read-modify-write) beside it. |
 | Child logs | `<repo>/.sortie/logs/<workflow>.log`, rotated at 10 MiB, 3 files kept. |
@@ -89,6 +91,7 @@ Files and formats:
 
 - `sortie-loop` runs no tracker queries. Sleep depends only on engine state.
 - Sleep is disabled by default.
+- A paused workflow stays stopped across wakes and supervisor restarts.
 - Spend controls use token caps only. There are no per-model rates and no
   dollar computation. `max_usd` is ignored unless the engine records cost.
 - The project cap is the sum of the workflow caps.
@@ -421,32 +424,58 @@ the sum of the workflow caps. There is no separate project cap key.
 **Design.**
 
 - The enforced control is a token cap: `max_tokens` per period per
-workflow.
+workflow. The key under `workflows:` is the loop name (the
+`WORKFLOW.<name>.md` stem). A name without a workflow file is a startup
+error. A budget without `max_tokens` is off.
 - Dollar caps apply only when the engine records dollar cost per run. The
 plan does not define input, output, or cache rates per model and does not
 compute dollars from rates. `max_usd` is optional and is ignored with a
-startup warning unless cost data exists.
-- Runs where `tokens_measured` is 0 are counted as unmeasured and reported.
-Their tokens are not estimated.
-- The supervisor reads `run_history` from each workflow DB every
-`poll_interval`.
-- At `warn_percent` of `max_tokens` it sends a notification.
-- At the cap it applies `on_exceed: pause`: the supervisor stops that
-workflow's engine child. Other workflows keep running.
-- The child stays stopped until period rollover or a manual override.
+startup warning.
+- Tokens used are the sum of `total_tokens` in `run_history` for runs whose
+`completed_at` (or `started_at`, when it is empty) is in the current period.
+Runs where `tokens_measured` is 0 are counted as unmeasured and reported.
+Their tokens are not estimated. A missing table or column counts as zero.
+The engine writes timestamps as RFC3339 in UTC; a timestamp without a zone
+is read as UTC. When a DB cannot be read, the last figures are kept and one
+line is printed.
+- The supervisor reads `run_history` read-only from each workflow DB every
+`poll_interval`, on its 2-second tick.
+- At `warn_percent` of `max_tokens` it prints one line to stderr per period
+and sets `warned` in the status document.
+- At the cap it applies `on_exceed: pause` (the only accepted value): the
+supervisor stops that workflow's engine child as a requested stop, so the
+exit does not end the run. Other workflows keep running. Idle sleep does
+not start a paused workflow at wake.
+- The child stays stopped until period rollover or a manual control.
 `sortie-loop pause <workflow>`, `resume <workflow>`, and
-`budget override <workflow>` (L2) are the manual controls.
-- State (period start, tokens used, unmeasured run count, paused flag,
-override) is stored in a small SQLite file owned by `sortie-loop`, so it
-survives restarts.
+`budget override <workflow>` (L2) are the manual controls. `budget override`
+clears a budget pause and turns the cap off until the next period. `resume`
+of a workflow that is at or over its cap behaves the same way, because the
+loop would otherwise be paused again at the next poll. `pause` of a workflow
+that is paused by its budget turns it into a manual pause. A manual pause is
+kept across periods and restarts.
+- A budget pause also ends at the next poll when the tokens used are below
+the cap again, for example after `max_tokens` was raised and the supervisor
+restarted.
+- Each command writes its own request file
+(`<hash>.budget.request.<time>-<pid>`) next to the status file. The
+supervisor reads and deletes the files in name order on every 2-second tick,
+also when sleep is disabled, and the command waits up to 5 seconds for the
+status document to show the change.
+- State (period start, paused, paused by, override, warned) is stored in a
+JSON file `<hash>.budget.json` next to the status file, so it survives
+restarts. Tokens used and unmeasured run count are recomputed from the DBs.
 - Overshoot is bounded by `poll_interval` plus the tokens of runs in flight
 when the cap is hit. The cap is not a hard limit.
 - Periods: `weekly` uses the ISO week, starting Monday. `monthly` uses the
-calendar month. Boundaries use `timezone`.
-- The engine's `budget_exhausted` field and `budget_hold_notices` exist.
-How they relate to this control is investigated at implementation time.
-- Status fields (L1), per workflow: period, tokens used, cap, unmeasured run
-count, paused flag, and override.
+calendar month. Boundaries use `timezone` (IANA name, default UTC). At
+rollover the override and the warning reset, and a budget pause ends.
+- The engine's `budget_exhausted` field and `budget_hold_notices` are not
+used. How they relate to this control is an open question.
+- Status fields (L1), per workflow: state `paused` (above `sleeping`) and a
+`budget` object with `period`, `period_start`, `tokens_used`, `cap`,
+`warn_percent`, `unmeasured_runs`, `paused`, `paused_by`, `override` and
+`warned`. The object is present when the workflow has a budget or is paused.
 
 ```yaml
 workflows:
@@ -465,9 +494,9 @@ workflows:
 
 - Tokens per period are computed per workflow from `run_history`.
 - Runs with `tokens_measured` of 0 are reported as unmeasured.
-- A warning is sent at `warn_percent`.
-- At the cap, the workflow's engine child is stopped.
-- The child restarts at rollover and on manual override.
+- A warning is printed at `warn_percent`.
+- At the cap, the workflow's engine child is stopped and the run continues.
+- The child restarts at rollover and on `resume` or `budget override`.
 - State survives a supervisor restart.
 - `max_usd` produces a startup warning when no cost data exists.
 
@@ -599,7 +628,7 @@ change and is an open question.
 | 1     | Cleanup (3); L1, L3; L2 `cleanup`                 | none                                        | done |
 | 2     | Idle sleep (1); L2 `wake`; L1 sleep fields        | `/api/v1/state` verified                    | done |
 | 3     | Workflow consolidation (2)                        | engine facts verified                       | not started |
-| 4     | Spend controls (4); L2 `pause`, `resume`, `budget override`; L1 budget fields | `budget_exhausted` semantics | not started |
+| 4     | Spend controls (4); L2 `pause`, `resume`, `budget override`; L1 budget fields | none | done |
 | 5     | L8; L4 tested schema versions in the L1 document  | L1                                          | L8 child logs done; L8 transcript and L4 tested schema versions not started |
 | 6     | L9, L10, L11; L12 (optional)                      | 1, 2, 3, 4 (rules and workflow files), L1   | not started |
 | 7     | sortie-central UI (5, 6)                          | 1-6                                         | not started |

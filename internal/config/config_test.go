@@ -303,3 +303,69 @@ func TestSleepInvalid(t *testing.T) {
 		}
 	}
 }
+
+const budgetYAML = "workflows:\n  plan:\n    budget:\n      period: weekly\n      timezone: Africa/Johannesburg\n      max_tokens: 20000000\n      warn_percent: 70\n      on_exceed: pause\n      poll_interval: 30s\n      max_usd: 50\n"
+
+func TestBudgetValid(t *testing.T) {
+	cfg, err := loadWithConfig(t, budgetYAML, map[string]string{"WORKFLOW.plan.md": "---\n---\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.CheckBudgets(); err != nil {
+		t.Fatal(err)
+	}
+	b := cfg.Budgets["plan"]
+	if b.Period != "weekly" || b.Location.String() != "Africa/Johannesburg" || b.MaxTokens != 20000000 ||
+		b.WarnPercent != 70 || b.PollInterval != 30*time.Second || b.MaxUSD != 50 {
+		t.Errorf("unexpected budget: %+v", b)
+	}
+}
+
+func TestBudgetDefaults(t *testing.T) {
+	cfg, err := loadWithConfig(t, "workflows:\n  plan:\n    budget:\n      period: monthly\n      max_tokens: 5\n", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := cfg.Budgets["plan"]
+	if b.Location.String() != "UTC" || b.WarnPercent != 80 || b.PollInterval != time.Minute {
+		t.Errorf("unexpected defaults: %+v", b)
+	}
+}
+
+func TestBudgetDisabledWithoutMaxTokens(t *testing.T) {
+	cfg, err := loadWithConfig(t, "workflows:\n  plan:\n    budget:\n      period: weekly\n", nil)
+	if err != nil || cfg.Budgets["plan"].MaxTokens != 0 {
+		t.Errorf("cfg %+v err %v, want a disabled budget", cfg, err)
+	}
+	if cfg, err = loadWithConfig(t, "", nil); err != nil || len(cfg.Budgets) != 0 {
+		t.Errorf("no workflows: %v", err)
+	}
+}
+
+func TestBudgetInvalid(t *testing.T) {
+	for _, c := range []struct{ name, body, want string }{
+		{"missing period", "max_tokens: 5", "period is required"},
+		{"bad period", "period: daily\n      max_tokens: 5", "period"},
+		{"bad timezone", "period: weekly\n      max_tokens: 5\n      timezone: Mars/Base", "timezone"},
+		{"bad on_exceed", "period: weekly\n      max_tokens: 5\n      on_exceed: stop", "on_exceed"},
+		{"negative cap", "period: weekly\n      max_tokens: -5", "max_tokens"},
+		{"warn percent too high", "period: weekly\n      max_tokens: 5\n      warn_percent: 101", "warn_percent"},
+		{"bad poll interval", "period: weekly\n      max_tokens: 5\n      poll_interval: soon", "poll_interval"},
+		{"negative usd", "period: weekly\n      max_tokens: 5\n      max_usd: -1", "max_usd"},
+	} {
+		_, err := loadWithConfig(t, "workflows:\n  plan:\n    budget:\n      "+c.body+"\n", nil)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: error %v, want it to mention %q", c.name, err, c.want)
+		}
+	}
+}
+
+func TestBudgetUnknownLoop(t *testing.T) {
+	cfg, err := loadWithConfig(t, "workflows:\n  nope:\n    budget:\n      period: weekly\n      max_tokens: 5\n", map[string]string{"WORKFLOW.plan.md": "---\n---\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.CheckBudgets(); err == nil || !strings.Contains(err.Error(), "nope") {
+		t.Errorf("error %v, want the unknown loop named", err)
+	}
+}

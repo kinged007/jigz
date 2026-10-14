@@ -22,7 +22,7 @@ type cmdline struct {
 	dashPort    int
 	dumpVersion bool
 	showVersion bool
-	// remote is "stop", "restart", "status", "cleanup" or "wake" when one of those
+	// remote is "stop", "restart", "status", "cleanup", "wake", "pause", "resume" or "budget" when one of those
 	// subcommands was given, and remoteArgs is everything after it.
 	remote     string
 	remoteArgs []string
@@ -56,7 +56,7 @@ func parseArgs(argv []string) (cmdline, error) {
 		switch name {
 		case "setup":
 			c.setup = true
-		case "stop", "restart", "status", "cleanup", "wake":
+		case "stop", "restart", "status", "cleanup", "wake", "pause", "resume", "budget":
 			// A subcommand: everything after it belongs to runRemote,
 			// which does its own parsing, so stop collecting here.
 			c.remote = name
@@ -113,6 +113,9 @@ func usage() {
          sortie-loop status [--json] [repo-root]
          sortie-loop cleanup [--dry-run] [--json] [repo-root]
          sortie-loop wake [--json] [repo-root]
+         sortie-loop pause <workflow> [--json] [repo-root]
+         sortie-loop resume <workflow> [--json] [repo-root]
+         sortie-loop budget override <workflow> [--json] [repo-root]
   Run every WORKFLOW.*.md loop in .sortie/workflows/ against the repo at repo-root (default: cwd).
   SORTIE_LOOP_ONLY=plan,build  start only these loops (default: all of them)
   Settings live in <root>/.sortie/config.yaml; repo id defaults to the git remote.
@@ -121,6 +124,9 @@ func usage() {
   status prints the state of the run serving this repo-root; --json prints its status document with a liveness field.
   cleanup runs the configured cleanup command once, records the result for status, and exits non-zero when it fails.
   wake starts the engine loops of a run that is sleeping (settings: sleep: in config.yaml); it does nothing when the run is awake.
+  pause stops one workflow's engine loop and keeps it stopped, also after a budget pause; resume starts it again.
+  budget override lifts a budget pause and turns the cap off for the rest of the period (settings: workflows: in config.yaml).
+  resume of a loop that is at or over its cap also turns the cap off for the rest of the period, because the loop would otherwise be paused again at the next poll.
   --version prints the tool version and the engine it drives; --dump-version prints only the engine version.`)
 }
 
@@ -170,6 +176,10 @@ func run() (code int) {
 		runWake(c.remoteArgs)
 		return 0
 	}
+	if c.remote == "pause" || c.remote == "resume" || c.remote == "budget" {
+		runBudgetCmd(c.remote, c.remoteArgs)
+		return 0
+	}
 	if c.remote == "cleanup" {
 		runCleanupCmd(c.remoteArgs)
 		return 0
@@ -199,6 +209,14 @@ func run() (code int) {
 	}
 	if err := cfg.CheckCleanup(); err != nil {
 		fatal(err)
+	}
+	if err := cfg.CheckBudgets(); err != nil {
+		fatal(err)
+	}
+	for name, b := range cfg.Budgets {
+		if b.MaxUSD > 0 {
+			fmt.Fprintf(os.Stderr, "sortie-loop: workflows.%s.budget.max_usd is ignored: the engine records no cost per run\n", name)
+		}
 	}
 	bin, err := resolveSortieBin()
 	if err != nil {
@@ -260,6 +278,7 @@ func run() (code int) {
 	}
 	sup := newSupervisor(abs, bin, loops, loopPorts)
 	sup.sleepCfg = cfg.Sleep
+	sup.initBudget(cfg.Budgets)
 	// Ordered rather than deferred in the body: os.Exit would skip a
 	// defer, and the children and the registry entry both have to be
 	// cleaned up on the way out whatever ends the run — including a

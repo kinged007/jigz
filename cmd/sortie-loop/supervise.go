@@ -121,6 +121,12 @@ type supervisor struct {
 	clock     func() time.Time
 	quiet     func(port int) (idle, known bool)
 	pollEvery time.Duration
+
+	budgets       map[string]config.Budget
+	budgetStates  map[string]*budgetState
+	budgetUse     map[string]budgetUsage
+	budgetPolled  map[string]time.Time
+	budgetReadErr map[string]string
 }
 
 func newSupervisor(root, bin string, defs []loopDef, ports []int) *supervisor {
@@ -133,6 +139,9 @@ func newSupervisor(root, bin string, defs []loopDef, ports []int) *supervisor {
 		startedAt: time.Now(),
 		events:    make(chan exitEvent, len(defs)+4),
 		clock:     time.Now, quiet: loopQuiet, pollEvery: sleepPollEvery,
+		budgets: map[string]config.Budget{}, budgetStates: map[string]*budgetState{},
+		budgetUse: map[string]budgetUsage{}, budgetPolled: map[string]time.Time{},
+		budgetReadErr: map[string]string{},
 	}
 	for i, d := range defs {
 		s.defs[d.name] = d
@@ -241,9 +250,12 @@ func (s *supervisor) startOne(name string) error {
 	return nil
 }
 
-// startAll launches every loop in the run.
+// startAll launches every loop in the run except the paused ones.
 func (s *supervisor) startAll(names []string) error {
 	for _, n := range names {
+		if s.isPaused(n) {
+			continue
+		}
 		if err := s.startOne(n); err != nil {
 			return err
 		}
@@ -305,6 +317,9 @@ func (s *supervisor) run() int {
 			if code, done := s.drainStep(); done {
 				return code
 			}
+			if code, done := s.budgetStep(); done {
+				return code
+			}
 			if code, done := s.sleepStep(); done {
 				return code
 			}
@@ -349,7 +364,7 @@ func (s *supervisor) onExit(ev exitEvent) (int, bool) {
 		return 1, true
 	}
 	s.republish()
-	if p.recycle {
+	if p.recycle && !s.isPaused(p.def.name) {
 		if err := s.startOne(p.def.name); err != nil {
 			fmt.Fprintln(os.Stderr, "sortie-loop:", err)
 			s.failed = true
@@ -509,7 +524,10 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 	}
 	add := func(p *loopProc) {
 		st := "running"
+		bs := s.budgetStatusLocked(p.def.name)
 		switch {
+		case bs != nil && bs.Paused:
+			st = "paused"
 		case s.sleeping:
 			st = "sleeping"
 		case p.exitCode != nil:
@@ -525,7 +543,7 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 			Name: p.def.name, WorkflowFile: p.def.file, LoopType: p.loopType,
 			Port: p.port, PID: pid, State: st, StartedAt: p.since.UTC(),
 			RestartCount: p.restarts, LastExitCode: p.exitCode, ConfigHash: p.configHash,
-			LogPath: childLogPath(s.root, p.def.name),
+			LogPath: childLogPath(s.root, p.def.name), Budget: bs,
 		})
 	}
 	for _, p := range s.procs {
@@ -533,6 +551,17 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 	}
 	for _, p := range s.gone {
 		add(p)
+	}
+	for name, def := range s.defs {
+		if s.procs[name] != nil || s.gone[name] != nil {
+			continue
+		}
+		wf, _ := os.ReadFile(filepath.Join(s.root, ".sortie", "workflows", def.file))
+		doc.Workflows = append(doc.Workflows, workflowStatus{
+			Name: name, WorkflowFile: def.file, LoopType: loopTypeOf(wf), Port: s.ports[name],
+			State: "paused", StartedAt: s.startedAt.UTC(), LogPath: childLogPath(s.root, name),
+			Budget: s.budgetStatusLocked(name),
+		})
 	}
 	sort.Slice(doc.Workflows, func(i, j int) bool { return doc.Workflows[i].Name < doc.Workflows[j].Name })
 	return doc

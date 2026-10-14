@@ -95,6 +95,9 @@ func statusSummary(doc statusDoc, liveness string) string {
 		}
 		fmt.Fprintf(&b, "  %s: %s, port %d, pid %d, restarts %d, last exit %s\n",
 			w.Name, w.State, w.Port, w.PID, w.RestartCount, exit)
+		if line := budgetSummary(w.Budget); line != "" {
+			b.WriteString("    " + line + "\n")
+		}
 	}
 	if line := sleepSummary(doc.Sleep); line != "" {
 		b.WriteString(line + "\n")
@@ -103,4 +106,23 @@ func statusSummary(doc statusDoc, liveness string) string {
 		b.WriteString(line + "\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// budgetSummary is the one-line form of a workflow's budget, empty when it
+// has none.
+func budgetSummary(b *budgetStatus) string {
+	if b == nil || b.Cap == 0 {
+		return ""
+	}
+	line := fmt.Sprintf("budget: %s of %s tokens (%s)", fmtTokens(b.TokensUsed), fmtTokens(b.Cap), b.Period)
+	if b.UnmeasuredRuns > 0 {
+		line += fmt.Sprintf(", %d unmeasured runs", b.UnmeasuredRuns)
+	}
+	if b.Paused {
+		line += ", paused by " + b.PausedBy
+	}
+	if b.Override {
+		line += ", override"
+	}
+	return line
 }

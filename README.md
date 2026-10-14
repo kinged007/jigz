@@ -304,6 +304,12 @@ enabled, `idle_since` (RFC 3339, or `null` after a busy observation). While
 the run sleeps, the workflow entries have state `sleeping`.
 `sortie-loop status` prints one `sleep:` line when sleep is enabled.
 
+A workflow entry has a `budget` object when the workflow has a budget or is
+paused: `period`, `period_start`, `tokens_used`, `cap`, `warn_percent`,
+`unmeasured_runs`, `paused`, `paused_by` (`budget`, `manual` or empty),
+`override` and `warned`. A paused workflow has state `paused`, which takes
+precedence over `sleeping`.
+
 ### Child logs
 
 The stdout and stderr of each engine child are written to
@@ -327,6 +333,25 @@ does nothing, prints `was_sleeping: false` and exits 0. It exits non-zero
 when no supervisor is running for the repo-root, or when the supervisor is
 not awake 5 seconds after the request.
 
+`sortie-loop pause <workflow> [--json] [repo-root]` stops the engine loop of
+one workflow and keeps it stopped, also across a supervisor restart.
+`resume <workflow>` clears a manual or budget pause and starts the loop.
+`budget override <workflow>` clears a budget pause, turns the cap off for
+the rest of the current period and starts the loop. `<workflow>` is the
+loop name, the `WORKFLOW.<name>.md` stem. `resume` of a budget pause also
+turns the cap off for the rest of the period when the workflow is at or
+over its cap, because the loop would be paused again at the next poll
+otherwise. `pause` of a workflow that is paused by its budget turns it into
+a manual pause, which is kept across periods and restarts. `--json` prints `workflow`,
+`changed`, `paused`, `override` and `error`. A command that finds the
+workflow already in the requested state does nothing, prints
+`changed: false` and exits 0. It exits non-zero when no supervisor is
+running, the workflow is unknown, `budget override` is used on a workflow
+without a budget, or the status document does not show the change after
+5 seconds. Each command writes its own request file next to the status
+document (`<hash>.budget.request.<time>-<pid>`), which the supervisor reads
+and deletes at its next 2-second tick, whatever the sleep settings are.
+
 Flags: `--unite` joins (or starts) the shared dashboard,
 `--dashboard-port=N` forces the dashboard onto port N,
 `--no-dashboard` / `--no-server` disable the dashboard page and the
@@ -340,7 +365,7 @@ all. This is how `sortie-central` picks a per-repo workflow set.
 
 ```
 .sortie/
-  config.yaml      # repo:, token:, milestone:, cleanup:, sleep: (all optional — see below)
+  config.yaml      # repo:, token:, milestone:, cleanup:, sleep:, workflows: (all optional — see below)
   workflows/       # installed by setup from the binary; edit freely, loop runs these
   .env.loop        # generated each run (resolved tracker, token, clone URL; mode 0600)
   workspaces/      # per-item agent checkouts (one subdir per loop)
@@ -476,6 +501,48 @@ sleep off if agents must start immediately. The supervisor, the cleanup
 schedule and the status document keep running. `stop` ends the run.
 `restart --when-idle` wakes the loops, and a restart without
 `--when-idle` replaces the process as usual.
+
+### Spend controls
+
+`workflows:` in `.sortie/config.yaml` caps the tokens one workflow may use
+per period. The key is the loop name (the `WORKFLOW.<name>.md` stem); a name
+without a workflow file is an error at startup.
+
+```yaml
+workflows:
+  build:
+    budget:
+      period: weekly          # weekly (ISO week, Monday start) or monthly (calendar month)
+      timezone: Africa/Johannesburg   # IANA name, default UTC; period boundaries use it
+      max_tokens: 20000000    # 0 or absent turns the budget off
+      warn_percent: 80        # default 80
+      on_exceed: pause        # only pause is accepted
+      poll_interval: 1m       # default 1m
+      # max_usd: 50           # ignored with a startup warning: the engine records no cost
+```
+
+Every `poll_interval` the supervisor opens the workflow's SQLite DB
+read-only and sums `total_tokens` in `run_history` for the runs completed in
+the current period (started, when a run has no completion time). Runs with
+`tokens_measured` 0 are counted as `unmeasured_runs`; their tokens are not
+estimated. A missing DB, table or column counts as zero. The engine writes
+timestamps as RFC3339 in UTC; a timestamp without a zone is read as UTC. When
+a DB cannot be read, the supervisor prints one line and keeps the last
+figures until the next successful poll.
+
+At `warn_percent` the supervisor prints one line to stderr per period and
+sets `warned` in the status document. At `max_tokens` it stops that
+workflow's engine loop and keeps it stopped (`paused_by: budget`). Other
+workflows keep running. The loop starts again at the next period, or on
+`resume` or `budget override`, or at the next poll when the tokens used are
+below the cap again (for example after `max_tokens` was raised and the
+supervisor restarted). The cap is not a hard limit: runs in flight
+when it is reached finish their tokens first, and use up to `poll_interval`
+more. The pause survives a supervisor restart, and a workflow that is over
+its cap is not started. Pause state is stored in `<hash>.budget.json` next
+to the status document. Idle sleep does not start paused workflows at wake.
+A manual pause is kept across periods; the override and the warning reset at
+each period.
 
 Env overrides: `SORTIE_LOOP_REPO`, `SORTIE_LOOP_TOKEN`,
 `SORTIE_LOOP_MILESTONE` (plus `GH_MILESTONE` as a legacy alias),

@@ -8,9 +8,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+	_ "time/tzdata"
 
 	"gopkg.in/yaml.v3"
 )
@@ -39,6 +41,100 @@ type Config struct {
 	Workspaces string  // .sortie/workspaces under Dir
 	Cleanup    Cleanup
 	Sleep      Sleep
+	// Budgets are the per-workflow spend caps by loop name. An entry with
+	// MaxTokens 0 is disabled.
+	Budgets map[string]Budget
+}
+
+// Budget caps the tokens one workflow may use per period.
+type Budget struct {
+	Period       string
+	Location     *time.Location
+	MaxTokens    int64
+	WarnPercent  int
+	PollInterval time.Duration
+	MaxUSD       float64
+}
+
+type budgetFile struct {
+	Period       string  `yaml:"period"`
+	Timezone     string  `yaml:"timezone"`
+	MaxTokens    int64   `yaml:"max_tokens"`
+	WarnPercent  int     `yaml:"warn_percent"`
+	OnExceed     string  `yaml:"on_exceed"`
+	PollInterval string  `yaml:"poll_interval"`
+	MaxUSD       float64 `yaml:"max_usd"`
+}
+
+const (
+	defaultWarnPercent  = 80
+	defaultBudgetPoll   = time.Minute
+	defaultBudgetTZName = "UTC"
+)
+
+func (f budgetFile) resolve(name string) (Budget, error) {
+	key := "workflows." + name + ".budget."
+	b := Budget{
+		Period: f.Period, MaxTokens: f.MaxTokens, WarnPercent: f.WarnPercent,
+		PollInterval: defaultBudgetPoll, MaxUSD: f.MaxUSD,
+	}
+	if b.WarnPercent == 0 {
+		b.WarnPercent = defaultWarnPercent
+	}
+	if f.MaxTokens < 0 {
+		return b, fmt.Errorf("%smax_tokens must not be negative", key)
+	}
+	if f.MaxUSD < 0 {
+		return b, fmt.Errorf("%smax_usd must not be negative", key)
+	}
+	if b.WarnPercent < 1 || b.WarnPercent > 100 {
+		return b, fmt.Errorf("%swarn_percent must be between 1 and 100", key)
+	}
+	if f.OnExceed != "" && f.OnExceed != "pause" {
+		return b, fmt.Errorf("%son_exceed: %q is not supported (only pause)", key, f.OnExceed)
+	}
+	switch f.Period {
+	case "weekly", "monthly":
+	case "":
+		if f.MaxTokens > 0 {
+			return b, fmt.Errorf("%speriod is required when max_tokens is set (weekly or monthly)", key)
+		}
+	default:
+		return b, fmt.Errorf("%speriod: %q is not weekly or monthly", key, f.Period)
+	}
+	tz := f.Timezone
+	if tz == "" {
+		tz = defaultBudgetTZName
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return b, fmt.Errorf("%stimezone: %q is not an IANA time zone", key, tz)
+	}
+	b.Location = loc
+	if f.PollInterval != "" {
+		v, err := time.ParseDuration(f.PollInterval)
+		if err != nil || v <= 0 {
+			return b, fmt.Errorf("%spoll_interval: %q is not a positive duration (for example 1m)", key, f.PollInterval)
+		}
+		b.PollInterval = v
+	}
+	return b, nil
+}
+
+// CheckBudgets fails when workflows: names a loop that has no
+// WORKFLOW.<name>.md file.
+func (c *Config) CheckBudgets() error {
+	names := make([]string, 0, len(c.Budgets))
+	for n := range c.Budgets {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		if _, err := os.Stat(filepath.Join(c.Dir, ".sortie", "workflows", "WORKFLOW."+n+".md")); err != nil {
+			return fmt.Errorf("workflows.%s: no WORKFLOW.%s.md in .sortie/workflows", n, n)
+		}
+	}
+	return nil
 }
 
 // Cleanup configures the workspace cleanup command.
@@ -235,6 +331,9 @@ func Load(dir string) (*Config, error) {
 			Labels    []Label           `yaml:"labels"`
 			Cleanup   cleanupFile       `yaml:"cleanup"`
 			Sleep     sleepFile         `yaml:"sleep"`
+			Workflows map[string]struct {
+				Budget budgetFile `yaml:"budget"`
+			} `yaml:"workflows"`
 		}
 		if err := yaml.Unmarshal(raw, &file); err != nil {
 			return nil, fmt.Errorf("parse .sortie/config.yaml: %w", err)
@@ -253,6 +352,14 @@ func Load(dir string) (*Config, error) {
 			return nil, err
 		}
 		c.Sleep = sl
+		c.Budgets = map[string]Budget{}
+		for name, w := range file.Workflows {
+			b, err := w.Budget.resolve(name)
+			if err != nil {
+				return nil, err
+			}
+			c.Budgets[name] = b
+		}
 	}
 	if c.Filters == nil {
 		c.Filters = map[string]string{}

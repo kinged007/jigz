@@ -35,17 +35,18 @@ type statusDoc struct {
 }
 
 type workflowStatus struct {
-	Name         string    `json:"name"`
-	WorkflowFile string    `json:"workflow_file"`
-	LoopType     string    `json:"loop_type"`
-	Port         int       `json:"port"`
-	PID          int       `json:"pid"`
-	State        string    `json:"state"`
-	StartedAt    time.Time `json:"started_at"`
-	RestartCount int       `json:"restart_count"`
-	LastExitCode *int      `json:"last_exit_code"`
-	ConfigHash   string    `json:"config_hash"`
-	LogPath      string    `json:"log_path"`
+	Name         string        `json:"name"`
+	WorkflowFile string        `json:"workflow_file"`
+	LoopType     string        `json:"loop_type"`
+	Port         int           `json:"port"`
+	PID          int           `json:"pid"`
+	State        string        `json:"state"`
+	StartedAt    time.Time     `json:"started_at"`
+	RestartCount int           `json:"restart_count"`
+	LastExitCode *int          `json:"last_exit_code"`
+	ConfigHash   string        `json:"config_hash"`
+	LogPath      string        `json:"log_path"`
+	Budget       *budgetStatus `json:"budget,omitempty"`
 }
 
 // statusPath returns the status file for a repo root. The name is a
