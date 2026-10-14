@@ -23,7 +23,7 @@ Section numbers below refer to this document.
 | ---- | ----- | -------- | ---- |
 | 1. Idle sleep (section 1) | done | `6728935`, `0dc7e1e`, `efc71ab`, docs `3384ab2` | Disabled by default. |
 | 3. Cleanup (section 3) | done | `7b8e9f7`, `6f08a10`, `e385697`, docs `2508689` | Config, interval runner, `cleanup` subcommand, last-run record. |
-| 2. Workflow consolidation (section 2) | implemented, uncommitted | working tree on `49b6aa3` | Two files. `agent:plan-build` is one session on the pinned engine; stage chains need an engine based on 1.27.0 or later. |
+| 2. Workflow consolidation (section 2) | done | `53aba7c` | Two files. `agent:plan-build` is one session on the pinned engine; stage chains need an engine based on 1.27.0 or later. |
 | 4. Spend controls (section 4) | done | `d132910` | Includes L1 budget fields. The relation to the engine's `budget_exhausted` is not investigated; the control reads `run_history` only. |
 | L1 status document | done, partial | `18eacae`, `04ea228`, `b557387`, `bb5a8cf`, docs `43d3a79`, `e6724ee` | File and `sortie-loop status [--json]`. Sleep, cleanup, budget and `log_path` fields exist. Tested schema versions (L4) are not in the document. |
 | L2 `wake` | done | `efc71ab` | |
@@ -689,7 +689,7 @@ change and is an open question.
 | ----- | ------------------------------------------------- | ------------------------------------------- | ------ |
 | 1     | Cleanup (3); L1, L3; L2 `cleanup`                 | none                                        | done |
 | 2     | Idle sleep (1); L2 `wake`; L1 sleep fields        | `/api/v1/state` verified                    | done |
-| 3     | Workflow consolidation (2)                        | engine facts verified                       | implemented, uncommitted; stage chains wait for an engine re-pin |
+| 3     | Workflow consolidation (2)                        | engine facts verified                       | done; stage chains wait for an engine re-pin |
 | 4     | Spend controls (4); L2 `pause`, `resume`, `budget override`; L1 budget fields | none | done |
 | 5     | L8; L4 tested schema versions in the L1 document  | L1                                          | L8 child logs done; L8 transcript and L4 tested schema versions not started |
 | 6     | L9, L10, L11; L12 (optional)                      | 1, 2, 3, 4 (rules and workflow files), L1   | not started |
