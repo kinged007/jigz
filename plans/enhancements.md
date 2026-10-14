@@ -24,11 +24,11 @@ Section numbers below refer to this document.
 | 1. Idle sleep (section 1) | done | `6728935`, `0dc7e1e`, `efc71ab`, docs `3384ab2` | Disabled by default. |
 | 3. Cleanup (section 3) | done | `7b8e9f7`, `6f08a10`, `e385697`, docs `2508689` | Config, interval runner, `cleanup` subcommand, last-run record. |
 | 2. Workflow consolidation (section 2) | not started | none | Still six workflow files. |
-| 4. Spend controls (section 4) | done | uncommitted | Includes L1 budget fields. The relation to the engine's `budget_exhausted` is not investigated; the control reads `run_history` only. |
+| 4. Spend controls (section 4) | done | `d132910` | Includes L1 budget fields. The relation to the engine's `budget_exhausted` is not investigated; the control reads `run_history` only. |
 | L1 status document | done, partial | `18eacae`, `04ea228`, `b557387`, `bb5a8cf`, docs `43d3a79`, `e6724ee` | File and `sortie-loop status [--json]`. Sleep, cleanup, budget and `log_path` fields exist. Tested schema versions (L4) are not in the document. |
 | L2 `wake` | done | `efc71ab` | |
 | L2 `cleanup` | done | `e385697` | |
-| L2 `pause`, `resume`, `budget override` | done | uncommitted | Part of spend controls. |
+| L2 `pause`, `resume`, `budget override` | done | `d132910` | Part of spend controls. |
 | L3 registry additions | done | `d636dac`, `b3e8f47` | `b3e8f47` adds registry locking and atomic writes. |
 | L4 tested schema versions | not started | none | Central pins its own versions. |
 | L8 child logs | done | `30a4112`, docs `f9f182e` | |
