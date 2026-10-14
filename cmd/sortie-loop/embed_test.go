@@ -40,60 +40,136 @@ func TestSetupSeedsLabelsIntoFreshConfig(t *testing.T) {
 
 func TestSyncWorkflowsKeepsEditsFillsGaps(t *testing.T) {
 	root := t.TempDir()
-	syncWorkflows(root, keepEdits)
-	build := filepath.Join(root, ".sortie", "workflows", "WORKFLOW.build.md")
-	if _, err := os.Stat(build); err != nil {
-		t.Fatalf("setup did not install workflows: %v", err)
+	if legacy := syncWorkflows(root); len(legacy) != 0 {
+		t.Fatalf("fresh repo reported legacy files %v", legacy)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".sortie", "workflows", "prompts", "quick.md")); err != nil {
+	issues := filepath.Join(root, ".sortie", "workflows", "WORKFLOW.issues.md")
+	if _, err := os.Stat(filepath.Join(root, ".sortie", "workflows", "WORKFLOW.prs.md")); err != nil {
+		t.Fatalf("setup did not install the prs workflow: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".sortie", "workflows", "prompts", "docs.md")); err != nil {
 		t.Fatalf("setup did not install prompts: %v", err)
 	}
-	f, _ := os.OpenFile(build, os.O_APPEND|os.O_WRONLY, 0o644)
+	f, _ := os.OpenFile(issues, os.O_APPEND|os.O_WRONLY, 0o644)
 	f.WriteString("\n# local tweak")
 	f.Close()
+	promptFile := filepath.Join(root, ".sortie", "workflows", "prompts", "docs.md")
+	os.WriteFile(promptFile, []byte("mine\n"), 0o644)
 	os.Remove(filepath.Join(root, ".sortie", "workflows", "prompts", "quick.md"))
-	if got := workflowPath(root, "WORKFLOW.build.md"); got != build {
-		t.Fatalf("workflowPath = %q, want %q", got, build)
+	if got := workflowPath(root, "WORKFLOW.issues.md"); got != issues {
+		t.Fatalf("workflowPath = %q, want %q", got, issues)
 	}
-	raw, _ := os.ReadFile(build)
+	raw, _ := os.ReadFile(issues)
 	if !strings.HasSuffix(string(raw), "\n# local tweak") {
-		t.Error("loop run overwrote local workflow edit")
+		t.Error("sync overwrote local workflow edit")
+	}
+	if got, _ := os.ReadFile(promptFile); string(got) != "mine\n" {
+		t.Error("sync overwrote local prompt edit")
 	}
 	if _, err := os.Stat(filepath.Join(root, ".sortie", "workflows", "prompts", "quick.md")); err != nil {
-		t.Error("loop run did not restore missing prompt file")
+		t.Error("sync did not restore missing prompt file")
 	}
 }
 
-func TestSyncWorkflowsAsksBeforeOverwrite(t *testing.T) {
+func TestSyncWorkflowsSkipsConsolidatedFilesWhileLegacyExist(t *testing.T) {
 	root := t.TempDir()
-	syncWorkflows(root, keepEdits)
-	build := filepath.Join(root, ".sortie", "workflows", "WORKFLOW.build.md")
-	const mine = "---\n# hand edited\n"
-	if err := os.WriteFile(build, []byte(mine), 0o644); err != nil {
-		t.Fatal(err)
+	dir := filepath.Join(root, ".sortie", "workflows")
+	os.MkdirAll(dir, 0o755)
+	const old = "---\n# old plan\n"
+	os.WriteFile(filepath.Join(dir, "WORKFLOW.plan.md"), []byte(old), 0o644)
+	os.WriteFile(filepath.Join(dir, "WORKFLOW.merge.md"), []byte(old), 0o644)
+
+	legacy := syncWorkflows(root)
+	if strings.Join(legacy, ",") != "WORKFLOW.plan.md,WORKFLOW.merge.md" && strings.Join(legacy, ",") != "WORKFLOW.merge.md,WORKFLOW.plan.md" {
+		t.Errorf("legacy = %v", legacy)
+	}
+	for _, name := range consolidatedWorkflows {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			t.Errorf("%s written while legacy files exist", name)
+		}
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "WORKFLOW.plan.md")); string(got) != old {
+		t.Error("legacy file was changed")
+	}
+	names := loopNames(discoverWorkflows(root))
+	if names != "merge,plan" {
+		t.Errorf("discoverWorkflows = %s, want only the legacy loops", names)
 	}
 
-	// No answer on stdin: the edit survives setup.
-	withStdin(t, "", func() { syncWorkflows(root, askBeforeOverwrite) })
-	if got, _ := os.ReadFile(build); string(got) != mine {
-		t.Error("setup replaced a customized workflow without confirmation")
+	os.Remove(filepath.Join(dir, "WORKFLOW.plan.md"))
+	os.Remove(filepath.Join(dir, "WORKFLOW.merge.md"))
+	if legacy := syncWorkflows(root); len(legacy) != 0 {
+		t.Errorf("legacy = %v after deleting the legacy files", legacy)
 	}
+	if names := loopNames(discoverWorkflows(root)); names != "issues,prs" {
+		t.Errorf("discoverWorkflows = %s, want issues,prs", names)
+	}
+}
 
-	// An explicit no, likewise.
-	withStdin(t, "n\n", func() { syncWorkflows(root, askBeforeOverwrite) })
-	if got, _ := os.ReadFile(build); string(got) != mine {
-		t.Error("setup replaced a customized workflow after a no")
+func TestWarnLegacyMessage(t *testing.T) {
+	r, w, _ := os.Pipe()
+	saved := os.Stderr
+	os.Stderr = w
+	warnLegacy([]string{"WORKFLOW.plan.md"})
+	warnLegacy(nil)
+	w.Close()
+	os.Stderr = saved
+	out, _ := io.ReadAll(r)
+	got := string(out)
+	if strings.Count(got, "warning:") != 1 || !strings.Contains(got, "WORKFLOW.plan.md") || !strings.Contains(got, "skipped until the legacy files are deleted") {
+		t.Errorf("message = %q", got)
 	}
+}
 
-	// An explicit yes takes the shipped copy.
-	withStdin(t, "y\n", func() { syncWorkflows(root, askBeforeOverwrite) })
-	got, _ := os.ReadFile(build)
-	if string(got) == mine {
-		t.Error("setup did not replace a customized workflow after a yes")
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, _ := os.Pipe()
+	saved := os.Stderr
+	os.Stderr = w
+	fn()
+	w.Close()
+	os.Stderr = saved
+	out, _ := io.ReadAll(r)
+	return string(out)
+}
+
+func TestWarnStalePrompts(t *testing.T) {
+	root := t.TempDir()
+	syncWorkflows(root)
+	if got := captureStderr(t, func() { warnStalePrompts(root) }); got != "" {
+		t.Errorf("shipped prompts warned: %q", got)
 	}
-	if !strings.Contains(string(got), "query_filter") {
-		t.Errorf("reinstalled file is not the shipped copy: %q", got)
+	os.WriteFile(filepath.Join(root, ".sortie", "workflows", "prompts", "build.md"), []byte("old\n"), 0o644)
+	got := captureStderr(t, func() { warnStalePrompts(root) })
+	if strings.Count(got, "note:") != 1 || !strings.Contains(got, "prompts/build.md") {
+		t.Errorf("message = %q", got)
 	}
+}
+
+func TestWarnMissingLabels(t *testing.T) {
+	if got := captureStderr(t, func() { warnMissingLabels(config.DefaultLabels) }); got != "" {
+		t.Errorf("full list warned: %q", got)
+	}
+	got := captureStderr(t, func() { warnMissingLabels([]config.Label{{Name: "agent:plan"}}) })
+	if want := len(config.DefaultLabels) - 1; strings.Count(got, "note:") != want {
+		t.Errorf("got %d notes, want %d: %q", strings.Count(got, "note:"), want, got)
+	}
+	for _, name := range []string{"agent:plan-build", "agent:docs"} {
+		if !strings.Contains(got, `"`+name+`"`) {
+			t.Errorf("no note for %s: %q", name, got)
+		}
+	}
+	if strings.Contains(got, `"agent:plan" `) {
+		t.Errorf("noted a label that is in the list: %q", got)
+	}
+}
+
+func loopNames(loops []loopDef) string {
+	var n []string
+	for _, l := range loops {
+		n = append(n, l.name)
+	}
+	return strings.Join(n, ",")
 }
 
 // withStdin runs fn with os.Stdin replaced by a pipe carrying input, so
@@ -517,7 +593,7 @@ func TestEngineBindirPrefersLoopDirOnPath(t *testing.T) {
 
 func TestDiscoverWorkflowsPicksUpNewFile(t *testing.T) {
 	root := t.TempDir()
-	syncWorkflows(root, keepEdits)
+	syncWorkflows(root)
 	// A hand-added workflow (no rebuild, no code change) is discovered.
 	os.WriteFile(filepath.Join(root, ".sortie", "workflows", "WORKFLOW.triage.md"), []byte("---\n"), 0o644)
 	// Non-workflow files are ignored.
@@ -527,7 +603,7 @@ func TestDiscoverWorkflowsPicksUpNewFile(t *testing.T) {
 	for _, l := range got {
 		names = append(names, l.name)
 	}
-	want := []string{"build", "merge", "plan", "review-fix", "review", "triage"}
+	want := []string{"issues", "prs", "triage"}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Errorf("discoverWorkflows = %v, want %v", names, want)
 	}
@@ -580,7 +656,7 @@ func TestSelectLoops(t *testing.T) {
 // caught here rather than by a supervisor that names it.
 func TestSelectLoopsAgainstInstalledWorkflows(t *testing.T) {
 	root := t.TempDir()
-	syncWorkflows(root, keepEdits)
+	syncWorkflows(root)
 	all := discoverWorkflows(root)
 	if got, err := selectLoops(all, ""); err != nil || len(got) != len(all) {
 		t.Fatalf("selectLoops(\"\") = %d loops, %v; want %d", len(got), err, len(all))

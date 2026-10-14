@@ -23,7 +23,7 @@ Section numbers below refer to this document.
 | ---- | ----- | -------- | ---- |
 | 1. Idle sleep (section 1) | done | `6728935`, `0dc7e1e`, `efc71ab`, docs `3384ab2` | Disabled by default. |
 | 3. Cleanup (section 3) | done | `7b8e9f7`, `6f08a10`, `e385697`, docs `2508689` | Config, interval runner, `cleanup` subcommand, last-run record. |
-| 2. Workflow consolidation (section 2) | not started | none | Still six workflow files. |
+| 2. Workflow consolidation (section 2) | implemented, uncommitted | working tree on `49b6aa3` | Two files. `agent:plan-build` is one session on the pinned engine; stage chains need an engine based on 1.27.0 or later. |
 | 4. Spend controls (section 4) | done | `d132910` | Includes L1 budget fields. The relation to the engine's `budget_exhausted` is not investigated; the control reads `run_history` only. |
 | L1 status document | done, partial | `18eacae`, `04ea228`, `b557387`, `bb5a8cf`, docs `43d3a79`, `e6724ee` | File and `sortie-loop status [--json]`. Sleep, cleanup, budget and `log_path` fields exist. Tested schema versions (L4) are not in the document. |
 | L2 `wake` | done | `efc71ab` | |
@@ -42,9 +42,9 @@ Section numbers below refer to this document.
 
 ### Next actions
 
-1. Workflow consolidation (section 2): two workflow files, dispatch rules,
-   `agent:plan` and `agent:plan-build`, label-driven PR rules, the docs
-   workflow, and `setup` never removing existing workflow files.
+1. Re-pin the fork to an engine release based on 1.27.0 or later, then
+   switch `plan-build` to the stage chain in section 2 and add per-rule
+   models. Optional.
 2. Investigate the semantics of `budget_exhausted` and
    `budget_hold_notices` and their relation to the spend controls.
 3. L9 `sortie-loop validate [--json]`, L10 safe apply, L11 `setup --json`.
@@ -132,6 +132,8 @@ Implementation facts:
 - The cleanup script contract expects `removed: <path>` lines on stdout. The
   user's own script has not been checked against it.
 - Whether `rule_name` equals the stage name once chains run is unverified.
+  The docs show the dashboard's Rule and stage path as rule names joined by
+  `->`. What `run_history.rule_name` stores is unknown.
 
 ### Working conventions
 
@@ -153,9 +155,8 @@ Implementation facts:
 
 ### Next action
 
-Start section 2 with an explorer that maps the current workflow files in
-`cmd/sortie-loop/workflows/` and the file-copy logic of `setup` (`embed.go`,
-`setup.go`). Then an implementer, then a reviewer.
+Review and commit section 2. Then investigate `budget_exhausted` and
+`budget_hold_notices`.
 
 ## 0. Scope and repo split
 
@@ -235,62 +236,108 @@ running and no retrying work, and the supervisor stays running.
 
 ## 2. Workflow consolidation and chains
 
-**Goal.** Replace the six workflow files with two. Process count drops from
-6 to 2.
+**Goal.** Replace the five workflow files with two. Process count drops from
+5 to 2.
 
 
-| File                 | Tracker   | Replaces                        |
-| -------------------- | --------- | ------------------------------- |
-| `WORKFLOW.issues.md` | github    | plan, build                     |
-| `WORKFLOW.prs.md`    | github-pr | review, review-fix, merge, test |
+| File                 | Tracker   | Replaces                   |
+| -------------------- | --------- | -------------------------- |
+| `WORKFLOW.issues.md` | github    | plan, build                |
+| `WORKFLOW.prs.md`    | github-pr | review, review-fix, merge  |
 
 
-**Engine facts (to verify against docs before implementing).**
+**Engine facts (verified against docs.sortie-ai.com and `sortie validate`).**
 
 - `dispatch.rules[]` has `name`, `match`, optional `agent`, `template`,
-per-agent-kind settings (model, effort), `stage`, `next`. `match` keys are
-ANDed; list entries are ORed. First match wins. `dispatch.default` covers
-no match.
-- A rule with `stage` and `next` forms a chain. On success the engine swaps
-the stage label and the next poll dispatches the next rule.
+a per-agent-kind settings block (model, effort), `stage`, `next`. `match` keys
+are ANDed; list entries are ORed. First match wins. `dispatch.default` covers
+no match. A catch-all rule must come after the non-staged rules.
+- A staged rule carries `stage: <label>` and no `match`: the stage label
+selects it. A rule with both is invalid. Two rules cannot share a stage
+label. A stage label must differ from every state name and from the
+escalation and parking labels.
+- `next` names a staged rule. The first rule of a chain has no `stage` and
+matches an ordinary label. `next` requires `tracker.handoff_state`, and
+`next` links must not form a cycle.
+- On success the engine adds the stage label and the next poll dispatches the
+next rule. The last rule ends on `tracker.handoff_state`.
 - Each stage starts a new session. Stages share one workspace directory per
 issue.
-- One successor per stage. No branching, no back-edges, no cycles. Only
-success advances. A blocked stage parks. Failures retry the same stage.
 - `max_sessions` and `max_tokens` sum across stages.
-`dispatch.max_consecutive_hops` limits hops.
+`dispatch.max_consecutive_hops` limits hops; its default is the larger of 10
+and the longest chain.
 - `agent.*` budgets and caps are not overridable per rule. Budgets are not
 supported per stage.
+- Stage chains, per-kind blocks inside a rule and, for the `github` tracker, a
+non-empty `terminal_states` come with upstream engine 1.27.0. The pinned
+fork engine (`engineTag`, `v1.26.0`) rejects a per-kind block in a rule
+and ignores `stage` and `next` with a warning.
 
 ### Issue workflow
 
+Implemented design, valid on the pinned engine:
 
-| Rule         | Match                     | Stage   | Next    |
-| ------------ | ------------------------- | ------- | ------- |
-| `plan`       | label `agent:plan`        | `plan`  | none    |
-| `plan-build` | label `agent:plan-build`  | `plan`  | `build` |
-| `build`      | label `agent:build`       | `build` | none    |
-| `docs`       | label `docs`              | `docs`  | none    |
+| Rule    | Match                                  | Template           |
+| ------- | -------------------------------------- | ------------------ |
+| `plan`  | label `agent:plan`                     | `prompts/plan.md`  |
+| `build` | label `agent:build` or `agent:plan-build` | `prompts/build.md` |
+| `docs`  | label `agent:docs`                        | `prompts/docs.md`  |
 
 
-- `agent:plan` is plan only. The plan stage posts the plan, and the issue is
-handed off with `agent:done` for a human.
-- `agent:plan-build` runs plan then build with no human approval.
-- `agent:build` dispatches the build stage directly.
-- The plan stage always posts the plan as a comment on the issue.
-- The build stage always reads the issue's recent comments before starting,
-including the plan comment and any later human comments. Both the plan and
-build prompt templates state this requirement.
-- Per-stage model and effort use the per-kind settings of each rule, for
-example a stronger model for `plan`.
+- `agent:plan` is plan only. The plan is posted as an issue comment, and the
+issue is handed off with `agent:done` for a human.
+- `agent:build` runs the build prompt.
+- `agent:plan-build` runs the build prompt, which posts the plan as an issue
+comment first when the issue has none, then implements in the same session.
+There is no human step.
+- The plan prompt states that the plan is posted as an issue comment. The
+build prompt states that the build reads the issue's recent comments (the
+plan comment and later human comments) before starting.
+- Rule order settles an issue with several triggers: `plan` is first, so an
+issue with `agent:plan` and `agent:build` is planned first.
+- `query_filter` is `label:agent:plan,agent:plan-build,agent:build,agent:docs,in-progress
+-label:needs-human`, tracker `github`, `terminal_states: [closed]`, handoff
+`agent:done`.
+- One set of hooks (clone, `auto/<issue>` branch, commit and push) serves
+every rule. The push is skipped when the run committed nothing, so a plan
+run creates no branch.
+- Per-rule model and effort are not available on the pinned engine. The
+`pi.model` setting is workflow-wide.
+
+Chain design for an engine that supports stages and per-rule blocks (not
+shipped, because the pinned engine rejects it). A chain needs a separate
+staged rule for the build after `plan-build`, because a staged rule cannot
+carry `match`:
+
+```yaml
+dispatch:
+  rules:
+    - {name: plan,       match: {labels: ["agent:plan"]},       template: ./prompts/plan.md}
+    - {name: plan-build, match: {labels: ["agent:plan-build"]}, template: ./prompts/plan.md, next: build-chain}
+    - {name: build,      match: {labels: ["agent:build"]},      template: ./prompts/build.md}
+    - {name: docs,       match: {labels: ["agent:docs"]},             template: ./prompts/docs.md}
+    - {name: build-chain, stage: stage-build,                   template: ./prompts/build.md}
+```
+
+With it the plan prompt must not hand off when the issue carries
+`agent:plan-build`, and each rule can carry its own `pi:` or `claude-code:`
+block with a model. Adopting it requires re-pinning the fork to a release
+based on engine 1.27.0 or later.
 
 ### PR workflow
 
 - Dispatch rules are label-driven only, with no stages or chains. Engine
 chains cannot branch, and review-fix and merge are separate triggers.
-- `review`, `review-fix`, and `merge` map to three rules selected by
-labels: `agent:review`, `agent:build`, `agent:merge`.
+- `review`, `review-fix`, and `merge` are three rules selected by
+labels: `agent:review`, `agent:build`, `agent:merge`, in that order.
 - The PM agent or a human applies the next label.
+- Workflow-wide settings are merged: `max_turns: 10` (review had 3), one
+set of hooks for the three rules (merge's `after_create` with a full fetch
+and an `origin` remote, the `before_run` heal and unshallow step, and a
+fast-forward of the `pr-<n>` branch to the current PR head because the rules
+share one workspace), `handoff_evidence: off`, `terminal_states: []`.
+- `query_filter` is `label:agent:review,agent:build,agent:merge,in-progress
+-label:needs-human`.
 
 ### New workflows
 
@@ -304,7 +351,7 @@ uncovered code, opens a PR.
 ### Terminal states
 
 Terminal states trigger workspace cleanup. `handoff_state` must not be an
-active or terminal state (to verify against docs before implementing).
+active or terminal state; `sortie validate` enforces this.
 
 
 | Workflow | Active                          | Handoff      | Terminal   |
@@ -320,24 +367,39 @@ described in section 4.
 
 ### Migration
 
-- Labels stay as they are.
-- `setup` never removes or overwrites existing workflow files, because they
-are likely modified. It only adds new files that do not exist. The
-`setup --json` result (L11) lists each skipped existing workflow file.
-- Removing the old six `WORKFLOW.*.md` files is a manual step. After the two
-new files are in place and validated, the user deletes the old files and
-removes their engine children from the supervisor configuration.
-- CI runs `sortie validate` on both new files.
+- Labels `agent:plan-build` and `agent:docs` are added to `DefaultLabels`.
+- `setup` and the loop startup never change or remove an existing workflow
+or prompt file, and the overwrite prompt for them is gone.
+- While any legacy file (`WORKFLOW.plan.md`, `WORKFLOW.build.md`,
+`WORKFLOW.review.md`, `WORKFLOW.review-fix.md`, `WORKFLOW.merge.md`) exists
+in `.sortie/workflows/`, `WORKFLOW.issues.md` and `WORKFLOW.prs.md` are not
+written, because both sets would process the same issues. A warning on
+stderr names the files. A fresh repo gets the two new files.
+- Migration is manual: delete the five old files (and their DB files if the
+history is not needed), rerun `setup`, and rename old loop names to `issues`
+or `prs` in the `filters:` and `workflows:` keys of `.sortie/config.yaml`.
+- Existing installs keep their old `prompts/plan.md` and `prompts/build.md`.
+An old `build.md` does not remove `agent:plan-build`, so a finished
+`agent:plan-build` issue would be dispatched again. `setup` prints a note
+when either file differs from the shipped copy; the user diffs or deletes
+them.
+- `setup` creates only the labels in `labels:` of an existing
+`.sortie/config.yaml`. The user adds `agent:plan-build` and `agent:docs` there;
+`setup` prints a note for each shipped label missing from the list.
+- The `setup --json` result (L11) lists each skipped workflow file.
+- CI does not run `sortie validate`: the stock engine on a CI runner has
+neither the `github-pr` tracker nor the `pi` agent. `TestSortieValidate`
+runs it where a fork binary is available.
 
 **Acceptance criteria.**
 
-- Two engine children run instead of six.
-- An `agent:plan-build` issue reaches build without a human step.
+- Two engine children run instead of five.
+- An `agent:plan-build` issue is planned and built with no human step.
 - An `agent:plan` issue stops after the plan comment.
-- The build stage reads the issue comments before starting.
+- The build prompt reads the issue comments before starting.
 - Each PR trigger label dispatches the matching rule.
 - `setup` leaves existing workflow files unchanged.
-- `sortie validate` passes in CI.
+- `sortie validate` passes on both files with the pinned engine.
 
 ## 3. Retention and cleanup
 
@@ -627,7 +689,7 @@ change and is an open question.
 | ----- | ------------------------------------------------- | ------------------------------------------- | ------ |
 | 1     | Cleanup (3); L1, L3; L2 `cleanup`                 | none                                        | done |
 | 2     | Idle sleep (1); L2 `wake`; L1 sleep fields        | `/api/v1/state` verified                    | done |
-| 3     | Workflow consolidation (2)                        | engine facts verified                       | not started |
+| 3     | Workflow consolidation (2)                        | engine facts verified                       | implemented, uncommitted; stage chains wait for an engine re-pin |
 | 4     | Spend controls (4); L2 `pause`, `resume`, `budget override`; L1 budget fields | none | done |
 | 5     | L8; L4 tested schema versions in the L1 document  | L1                                          | L8 child logs done; L8 transcript and L4 tested schema versions not started |
 | 6     | L9, L10, L11; L12 (optional)                      | 1, 2, 3, 4 (rules and workflow files), L1   | not started |
@@ -647,7 +709,8 @@ L6 are built in `sortie-central`. L7 is not scheduled.
 and how do they relate to the per-workflow token cap?
 - Can the engine record dollar cost per run? This is required for
 `max_usd` and is request L7, which is deferred.
-- Does `rule_name` equal the stage name once chains run?
+- Does `run_history.rule_name` equal the rule name or the stage label once
+chains run? The dashboard shows the stage path as rule names joined by `->`.
 - Are past-run model history and a full event stream needed enough to justify
 an engine change later?
 - Does the pi adapter write a per-run transcript file in the workspace? This is unverified. Per-run transcript access (the rest of L8) depends on it.
@@ -656,4 +719,3 @@ an engine change later?
 a target.
 - Password and TLS exposure details for a public `sortie-central`
 deployment.
-- Engine facts marked "to verify": dispatch rules and chains.

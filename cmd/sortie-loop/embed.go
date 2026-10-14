@@ -7,8 +7,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
+
+	"github.com/kinged007/sortie-loop/internal/config"
 )
 
 //go:embed workflows
@@ -17,11 +20,10 @@ var embeddedWorkflows embed.FS
 //go:embed pm-agent.md
 var embeddedPMAgent embed.FS
 
-// writePolicy decides what syncWorkflows does when an installed file
-// already exists and differs from the embedded copy. Installed workflows
-// and prompts are hand-edited, so setup confirms before replacing one and
-// the loop startup path keeps edits because it must never block on a
-// prompt.
+// writePolicy decides what writeWorkflow does when an installed file
+// already exists and differs from the embedded copy. The project-manager
+// prompt is confirmed by setup; the loop startup path keeps edits because
+// it must never block on a prompt.
 type writePolicy int
 
 const (
@@ -29,35 +31,98 @@ const (
 	askBeforeOverwrite
 )
 
+// legacyWorkflows are the per-role workflow files that WORKFLOW.issues.md
+// and WORKFLOW.prs.md replace. While any of them is installed, the new
+// files are not written, because both sets would process the same issues
+// and PRs.
+var legacyWorkflows = []string{
+	"WORKFLOW.plan.md", "WORKFLOW.build.md", "WORKFLOW.review.md",
+	"WORKFLOW.review-fix.md", "WORKFLOW.merge.md",
+}
+
+var consolidatedWorkflows = []string{"WORKFLOW.issues.md", "WORKFLOW.prs.md"}
+
 // promptIn wraps stdin so answers typed ahead are not dropped between
 // per-file prompts by a reader rebuilt each time.
 var promptIn *bufio.Reader
 
 // syncWorkflows installs the embedded workflow files (WORKFLOW.*.md +
 // prompts/) into <root>/.sortie/workflows/ so they sit visible next to
-// the loop's config, env, and workspaces. A missing file is always
-// written. A file that exists and differs is a hand edit: kept under
-// keepEdits, and under askBeforeOverwrite replaced only once confirmed.
+// the loop's config, env, and workspaces. A missing file is written and
+// an existing file is never changed or removed, because installed
+// workflows and prompts are hand-edited. It returns the legacy workflow
+// files found; while there are any, WORKFLOW.issues.md and
+// WORKFLOW.prs.md are not written.
 // ponytail: no version stamp, so a file left untouched but outdated by a
 // binary upgrade is never noticed; delete it and re-run setup.
-func syncWorkflows(root string, policy writePolicy) {
+func syncWorkflows(root string) []string {
+	dir := filepath.Join(root, ".sortie", "workflows")
+	var legacy []string
+	for _, name := range legacyWorkflows {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			legacy = append(legacy, name)
+		}
+	}
 	entries, err := embeddedWorkflows.ReadDir("workflows")
 	if err != nil {
 		fatal(err)
 	}
 	for _, e := range entries {
-		if e.IsDir() {
+		if e.IsDir() || (len(legacy) > 0 && slices.Contains(consolidatedWorkflows, e.Name())) {
 			continue
 		}
-		writeWorkflow(embeddedWorkflows, filepath.Join(root, ".sortie", "workflows", e.Name()), "workflows/"+e.Name(), policy)
+		writeWorkflow(embeddedWorkflows, filepath.Join(dir, e.Name()), "workflows/"+e.Name(), keepEdits)
 	}
 	prompts, err := embeddedWorkflows.ReadDir("workflows/prompts")
 	if err != nil {
 		fatal(err)
 	}
 	for _, p := range prompts {
-		writeWorkflow(embeddedWorkflows, filepath.Join(root, ".sortie", "workflows", "prompts", p.Name()), "workflows/prompts/"+p.Name(), policy)
+		writeWorkflow(embeddedWorkflows, filepath.Join(dir, "prompts", p.Name()), "workflows/prompts/"+p.Name(), keepEdits)
 	}
+	return legacy
+}
+
+// warnStalePrompts names the installed plan and build prompts that differ
+// from the shipped copies. Existing installs keep their old prompts, and an
+// old build.md that does not remove agent:plan-build would re-dispatch an
+// issue.
+func warnStalePrompts(root string) {
+	for _, name := range []string{"plan.md", "build.md"} {
+		cur, err := os.ReadFile(filepath.Join(root, ".sortie", "workflows", "prompts", name))
+		if err != nil {
+			continue
+		}
+		want, err := embeddedWorkflows.ReadFile("workflows/prompts/" + name)
+		if err == nil && string(cur) != string(want) {
+			fmt.Fprintf(os.Stderr, "note: .sortie/workflows/prompts/%s differs from the shipped copy; diff it or delete it and rerun setup to take the shipped version.\n", name)
+		}
+	}
+}
+
+// warnMissingLabels names the shipped labels absent from a configured
+// labels list, because setup only creates the labels in that list.
+func warnMissingLabels(labels []config.Label) {
+	have := map[string]bool{}
+	for _, l := range labels {
+		have[l.Name] = true
+	}
+	for _, l := range config.DefaultLabels {
+		if !have[l.Name] {
+			fmt.Fprintf(os.Stderr, "note: label %q is not in the labels list of .sortie/config.yaml, so setup does not create it.\n", l.Name)
+		}
+	}
+}
+
+// warnLegacy tells the user why the consolidated workflow files were not
+// written. It prints nothing when legacy is empty.
+func warnLegacy(legacy []string) {
+	if len(legacy) == 0 {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "warning: legacy workflow files found in .sortie/workflows/ (%s).\n"+
+		"  WORKFLOW.issues.md and WORKFLOW.prs.md are skipped until the legacy files are deleted.\n"+
+		"  Delete them, then rerun `sortie-loop setup`.\n", strings.Join(legacy, ", "))
 }
 
 // syncPMAgent installs the project-manager prompt into <root>/.sortie/
@@ -89,7 +154,7 @@ func writeWorkflow(fsys fs.FS, dest, src string, policy writePolicy) {
 }
 
 // confirmOverwrite asks before replacing something a person may have
-// changed: a hand-edited workflow file, or an existing label whose colour
+// changed: a hand-edited project-manager prompt, or an existing label whose colour
 // or description differs. what is the text to show. Only an explicit yes
 // proceeds, so a closed, piped, or non-interactive stdin declines instead
 // of guessing.
@@ -123,7 +188,7 @@ func displayPath(dest string) string {
 // embedded copies so checkouts set up before workflows moved into .sortie
 // still run.
 func workflowPath(root, name string) string {
-	syncWorkflows(root, keepEdits)
+	syncWorkflows(root)
 	return filepath.Join(root, ".sortie", "workflows", name)
 }
 
@@ -133,7 +198,7 @@ func workflowPath(root, name string) string {
 // or hand-written) starts a triage loop with no code change — the loop
 // name is the filename stem ("triage").
 func discoverWorkflows(root string) []loopDef {
-	syncWorkflows(root, keepEdits)
+	warnLegacy(syncWorkflows(root))
 	entries, err := os.ReadDir(filepath.Join(root, ".sortie", "workflows"))
 	if err != nil {
 		fatal(err)

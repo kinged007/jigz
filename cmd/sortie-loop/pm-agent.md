@@ -15,9 +15,11 @@ Your jobs, in order:
 | Label          | Kind             | Color    | Meaning                                                              |
 | -------------- | ---------------- | -------- | -------------------------------------------------------------------- |
 | `agent:plan`   | trigger (yellow) | `fbca04` | write an implementation plan, no code                                |
+| `agent:plan-build` | trigger (yellow) | `fbca04` | plan this issue, then implement it with no human step (issues only) |
 | `agent:build`  | trigger (yellow) | `fbca04` | on an issue: implement it. on a PR: apply the posted review findings |
 | `agent:review` | trigger (yellow) | `fbca04` | review this PR (PRs only)                                            |
 | `agent:merge`  | trigger (yellow) | `fbca04` | merge this PR (PRs only)                                             |
+| `agent:docs`   | trigger (yellow) | `fbca04` | update the docs for merged changes and open a PR (issues only)       |
 | `agent:done`   | worker-done (green) | `0e8a16` | a run finished. **Not the end — it means waiting for your decision** |
 | `in-progress`  | blocker (purple) | `5319e7` | an agent has this item right now                                     |
 | `needs-human`  | blocker (red)    | `d73a4a` | blocked on a person                                                  |
@@ -39,8 +41,8 @@ The four `blocker` labels are the only items an agent never touches.
 An agent picks up an item only when all three hold:
 
 1. it is assigned to the token owner (`@me`), **and**
-2. it carries **exactly one** dispatch trigger (`agent:plan`, `agent:build`,
-   `agent:review`, `agent:merge`), **and**
+2. it carries **exactly one** dispatch trigger (`agent:plan`, `agent:plan-build`,
+   `agent:build`, `agent:review`, `agent:merge`, `agent:docs`), **and**
 3. it carries no label that holds it back — no blocker, and no `agent:done`.
 
 `agent:done` + `agent:build` starts nothing. The item sits there, no agent runs,
@@ -87,6 +89,8 @@ run. Never change the name, color, or description of a label that already exists
 
 ```sh
 gh label create "agent:review" --repo "$REPO" --color fbca04 --description "Trigger: review this PR"
+gh label create "agent:plan-build" --repo "$REPO" --color fbca04 --description "Trigger: plan this issue, then implement it with no human step"
+gh label create "agent:docs" --repo "$REPO" --color fbca04 --description "Trigger: update the docs for merged changes and open a PR"
 ```
 
 ## Reading GitHub
@@ -132,7 +136,7 @@ If you are running the Triage workflow, then you will only work with UNASSIGNED 
 
 Ignore anything carrying any of these — an agent already owns it or a person does:
 
-`agent:plan` `agent:build` `agent:review` `agent:merge` `in-progress`
+`agent:plan` `agent:plan-build` `agent:build` `agent:review` `agent:merge` `agent:docs` `in-progress`
 `needs-human` `united-into` `backlog` `duplicate` `wontfix` 
 
 `backlog` or `wontfix` is a human's decision, not yours: never remove it, never dispatch an
@@ -160,14 +164,14 @@ Your jobs, in order:
    This is not dispatching — you are deciding the next stage for work that already ran.
    No cap applies. Read the last agent comment, the last comment you left, and **every label on the item** — see
    *Reading GitHub* for the surfaces a report can be on — then land it on exactly
-   one of: `agent:plan`, `agent:build`, `agent:review`, `agent:merge`,
-   `needs-human`, `united-into`, or closed. "No news" is not an outcome. If an item
+   one of: `agent:plan`, `agent:plan-build`, `agent:build`, `agent:review`,
+   `agent:merge`, `agent:docs`, `needs-human`, `united-into`, or closed. "No news" is not an outcome. If an item
    genuinely needs nothing, the blocker that stops it coming back is a comment saying
    why, plus the label that matches.
 
 2. **Route assigned, not started work** - items assigned to @me but have not started yet.
    Same as above. Read the last agent comment, the last comment you left, and **every label on the item** — see *Reading GitHub* for the surfaces a report can be on — then land it on exactly
-   one of: `agent:plan`, `agent:build`, `agent:review`, `agent:merge`, `needs-human`, `united-into`, or closed. 
+   one of: `agent:plan`, `agent:plan-build`, `agent:build`, `agent:review`, `agent:merge`, `agent:docs`, `needs-human`, `united-into`, or closed. 
 
 3. **Triage the backlog** - untriaged issues need a dispatch trigger.
    Dispatch cap applies. Only route items that are UNASSIGNED (`no:assignee`) and contain the `needs-triage` label, and unblocked. Pick exactly one of: `agent:plan`, `agent:build`, `needs-human`, `united-into`, and assign them to @me.
@@ -474,7 +478,7 @@ that is already on `agent:done`.
   No cap. This is a decision, not a dispatch.
 - **Dispatching** (Jobs #2–4): assign a trigger to an item that has no trigger
   yet. Cap: **10 items** per run. Count only items carrying a live trigger
-  (`agent:plan`, `agent:build`, `agent:review`, `agent:merge`) without a blocker
+  (`agent:plan`, `agent:plan-build`, `agent:build`, `agent:review`, `agent:merge`, `agent:docs`) without a blocker
   and without `agent:done`. If the count is already 10 or more, do not add new
   triggers.
 

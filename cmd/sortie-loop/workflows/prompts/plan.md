@@ -64,7 +64,8 @@ completion, stop them and verify that each one is gone.
    Comments may contain corrections or scope changes that override the
    description. If a plan was already posted, extend it; do not duplicate it.
 2. Explore the repository: find the relevant code, conventions, and tests.
-3. Post the plan as one issue comment with
+3. The plan is always posted as an issue comment; the build stage reads it
+   from there. Post it as one comment with
    `gh issue comment {{ .issue.identifier }} --repo $SORTIE_TRACKER_PROJECT --body "<plan>"`:
 
    - Goal (one line)
@@ -84,20 +85,13 @@ the issue comment instead: what you found, what is blocking, what you need.
 ## Finishing the run
 
 You own the labels: remove your trigger and the claim, then mark the
-state. Chaining is off by default — a person applies trigger labels — so
-finish with `agent:done`. Add `needs-human` in the same command when a
-person has to look at this before anything else happens.
+state. A person applies the next trigger label, so finish with
+`agent:done`. Add `needs-human` in the same command when a person has to
+look at this before anything else happens.
 
 ```
 gh issue edit {{ .issue.identifier }} --repo $SORTIE_TRACKER_PROJECT \
   --remove-label "agent:plan,in-progress" --add-label "agent:done"
-```
-
-To hand the issue straight to development when the plan is done, swap the
-added label for the build loop's trigger:
-
-```
---add-label "agent:build"
 ```
 
 {{ if .issue.url }}

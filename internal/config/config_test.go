@@ -39,17 +39,11 @@ func TestLoadEnvAndMilestone(t *testing.T) {
 	if cfg.Repo != "o/r" || cfg.Token != "tok" || cfg.Tracker != "o/r" {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
-	if cfg.FilterFor("build") != `label:agent:build,in-progress -label:agent:plan -label:needs-human milestone:"v2"` {
-		t.Errorf("build filter: %q", cfg.FilterFor("build"))
+	if cfg.FilterFor("issues") != `label:agent:plan,agent:plan-build,agent:build,agent:docs,in-progress -label:needs-human milestone:"v2"` {
+		t.Errorf("issues filter: %q", cfg.FilterFor("issues"))
 	}
-	if cfg.FilterFor("review") != `label:agent:review,in-progress -label:agent:build -label:agent:merge -label:needs-human milestone:"v2"` {
-		t.Errorf("review filter should exclude needs-human, got %q", cfg.FilterFor("review"))
-	}
-	if cfg.FilterFor("merge") != `label:agent:merge,in-progress -label:agent:build -label:agent:review -label:needs-human milestone:"v2"` {
-		t.Errorf("merge filter should exclude needs-human, got %q", cfg.FilterFor("merge"))
-	}
-	if cfg.FilterFor("review-fix") != `label:agent:build,in-progress -label:agent:review -label:agent:merge -label:needs-human milestone:"v2"` {
-		t.Errorf("review-fix filter should exclude needs-human, got %q", cfg.FilterFor("review-fix"))
+	if cfg.FilterFor("prs") != `label:agent:review,agent:build,agent:merge,in-progress -label:needs-human milestone:"v2"` {
+		t.Errorf("prs filter: %q", cfg.FilterFor("prs"))
 	}
 	// Unknown loops get the default filter (no label constraint).
 	if cfg.FilterFor("triage") != `-label:needs-human milestone:"v2"` {
@@ -70,34 +64,22 @@ func TestLoadAssigneeDefaultAndOptOut(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.FilterFor("plan") != `label:agent:plan,in-progress -label:agent:build -label:needs-human milestone:"v2" assignee:@me` {
-		t.Errorf("plan filter: %q", cfg.FilterFor("plan"))
+	if cfg.FilterFor("issues") != `label:agent:plan,agent:plan-build,agent:build,agent:docs,in-progress -label:needs-human milestone:"v2" assignee:@me` {
+		t.Errorf("issues filter: %q", cfg.FilterFor("issues"))
 	}
-	if cfg.FilterFor("review") != `label:agent:review,in-progress -label:agent:build -label:agent:merge -label:needs-human milestone:"v2" assignee:@me` {
-		t.Errorf("review filter: %q", cfg.FilterFor("review"))
-	}
-	if cfg.FilterFor("merge") != `label:agent:merge,in-progress -label:agent:build -label:agent:review -label:needs-human milestone:"v2" assignee:@me` {
-		t.Errorf("merge filter: %q", cfg.FilterFor("merge"))
-	}
-	if cfg.FilterFor("review-fix") != `label:agent:build,in-progress -label:agent:review -label:agent:merge -label:needs-human milestone:"v2" assignee:@me` {
-		t.Errorf("review-fix filter: %q", cfg.FilterFor("review-fix"))
+	if cfg.FilterFor("prs") != `label:agent:review,agent:build,agent:merge,in-progress -label:needs-human milestone:"v2" assignee:@me` {
+		t.Errorf("prs filter: %q", cfg.FilterFor("prs"))
 	}
 	t.Setenv("SORTIE_LOOP_ASSIGNEE", "")
 	cfg, err = Load(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.FilterFor("plan") != `label:agent:plan,in-progress -label:agent:build -label:needs-human milestone:"v2"` {
-		t.Errorf("opt-out plan filter: %q", cfg.FilterFor("plan"))
+	if cfg.FilterFor("issues") != `label:agent:plan,agent:plan-build,agent:build,agent:docs,in-progress -label:needs-human milestone:"v2"` {
+		t.Errorf("opt-out issues filter: %q", cfg.FilterFor("issues"))
 	}
-	if cfg.FilterFor("review") != `label:agent:review,in-progress -label:agent:build -label:agent:merge -label:needs-human milestone:"v2"` {
-		t.Errorf("opt-out review filter: %q", cfg.FilterFor("review"))
-	}
-	if cfg.FilterFor("merge") != `label:agent:merge,in-progress -label:agent:build -label:agent:review -label:needs-human milestone:"v2"` {
-		t.Errorf("opt-out merge filter: %q", cfg.FilterFor("merge"))
-	}
-	if cfg.FilterFor("review-fix") != `label:agent:build,in-progress -label:agent:review -label:agent:merge -label:needs-human milestone:"v2"` {
-		t.Errorf("opt-out review-fix filter: %q", cfg.FilterFor("review-fix"))
+	if cfg.FilterFor("prs") != `label:agent:review,agent:build,agent:merge,in-progress -label:needs-human milestone:"v2"` {
+		t.Errorf("opt-out prs filter: %q", cfg.FilterFor("prs"))
 	}
 }
 
@@ -128,7 +110,7 @@ func TestLoadFilterOverrides(t *testing.T) {
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, ".sortie"), 0o755)
 	os.WriteFile(filepath.Join(dir, ".sortie", "config.yaml"),
-		[]byte("repo: file/o\ntoken: filetok\nfilters:\n  triage: label:agent:triage\n  build: label:agent:custom\n"), 0o644)
+		[]byte("repo: file/o\ntoken: filetok\nfilters:\n  triage: label:agent:triage\n  issues: label:agent:custom\n"), 0o644)
 	t.Setenv("SORTIE_LOOP_REPO", "")
 	t.Setenv("SORTIE_LOOP_TOKEN", "")
 	t.Setenv("SORTIE_LOOP_MILESTONE", "")
@@ -143,11 +125,11 @@ func TestLoadFilterOverrides(t *testing.T) {
 	if cfg.FilterFor("triage") != "label:agent:triage" {
 		t.Errorf("override filter: %q", cfg.FilterFor("triage"))
 	}
-	if cfg.FilterFor("build") != "label:agent:custom" {
-		t.Errorf("known-loop override: %q", cfg.FilterFor("build"))
+	if cfg.FilterFor("issues") != "label:agent:custom" {
+		t.Errorf("known-loop override: %q", cfg.FilterFor("issues"))
 	}
-	if cfg.FilterFor("merge") != "label:agent:merge,in-progress -label:agent:build -label:agent:review -label:needs-human" {
-		t.Errorf("untouched default: %q", cfg.FilterFor("merge"))
+	if cfg.FilterFor("prs") != "label:agent:review,agent:build,agent:merge,in-progress -label:needs-human" {
+		t.Errorf("untouched default: %q", cfg.FilterFor("prs"))
 	}
 }
 
@@ -157,9 +139,11 @@ func TestLoadFilterOverrides(t *testing.T) {
 func TestDefaultLabels(t *testing.T) {
 	want := []Label{
 		{"agent:plan", "fbca04", "Trigger: write an implementation plan for this issue"},
+		{"agent:plan-build", "fbca04", "Trigger: plan this issue, then implement it with no human step"},
 		{"agent:build", "fbca04", "Trigger: implement this issue, or apply review feedback on this PR"},
 		{"agent:review", "fbca04", "Trigger: review this PR"},
 		{"agent:merge", "fbca04", "Trigger: merge this PR"},
+		{"agent:docs", "fbca04", "Trigger: update the docs for merged changes and open a PR"},
 		{"in-progress", "5319e7", "State: claimed by an agent"},
 		{"agent:done", "0e8a16", "State: agent finished"},
 		{"needs-human", "d73a4a", "Escalation: agent needs a person"},

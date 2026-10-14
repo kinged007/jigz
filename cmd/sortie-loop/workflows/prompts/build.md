@@ -93,8 +93,10 @@ Only needed when the change has a UI or a runtime to exercise.
 
 ## Plan first
 
-If no plan was posted on the issue, write one before implementing and post
-it as an issue comment:
+The plan is an issue comment, and the build stage reads the issue's recent
+comments before starting. If no plan was posted on the issue (an
+`agent:plan-build` issue), write one before implementing and post it as an
+issue comment:
 
 - Goal (one line)
 - Findings (what the code does today)
@@ -115,10 +117,11 @@ services or rewrites a public contract.
 1. If the issue carries the `agent:plan` label, post a brief issue
    comment saying planning is still pending and stop without making changes
    (the label was added after dispatch).
-2. Before starting, read all comments on the issue with
-   `gh issue view {{ .issue.identifier }} --repo $SORTIE_TRACKER_PROJECT --comments`.
-   Comments may contain corrections, reproduction details, or scope changes
-   that override the description. If an approved plan was posted, follow it.
+2. Before starting, read the issue's recent comments with
+   `gh issue view {{ .issue.identifier }} --repo $SORTIE_TRACKER_PROJECT --comments`:
+   the plan comment and any later human comments. Comments may contain
+   corrections, reproduction details, or scope changes that override the
+   description. If an approved plan was posted, follow it.
 3. Implement the change and run the project's checks before finishing (see
    repo README). Review your own diff (`git diff`) for correctness,
    regressions, and convention compliance.
@@ -203,7 +206,7 @@ gh pr edit <pr> --repo $SORTIE_TRACKER_PROJECT \
 
 # the issue: this run is over
 gh issue edit {{ .issue.identifier }} --repo $SORTIE_TRACKER_PROJECT \
-  --remove-label "agent:build,in-progress" --add-label "agent:done"
+  --remove-label "agent:build,agent:plan-build,in-progress" --add-label "agent:done"
 ```
 
 `agent:done` keeps every loop away from the item, so a trigger meant for

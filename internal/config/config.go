@@ -286,13 +286,15 @@ type Label struct {
 // Three roles, one colour each: a yellow trigger starts a loop, in-progress
 // is the claim an agent holds while it works, agent:done is the state an
 // agent leaves behind when it finishes, and needs-human escalates to a
-// person. Every name is prefixed agent: except the four that describe the
+// person. Every name is prefixed agent: except those that describe the
 // item or the person's decision rather than the agent.
 var DefaultLabels = []Label{
 	{"agent:plan", "fbca04", "Trigger: write an implementation plan for this issue"},
+	{"agent:plan-build", "fbca04", "Trigger: plan this issue, then implement it with no human step"},
 	{"agent:build", "fbca04", "Trigger: implement this issue, or apply review feedback on this PR"},
 	{"agent:review", "fbca04", "Trigger: review this PR"},
 	{"agent:merge", "fbca04", "Trigger: merge this PR"},
+	{"agent:docs", "fbca04", "Trigger: update the docs for merged changes and open a PR"},
 	{"in-progress", "5319e7", "State: claimed by an agent"},
 	{"agent:done", "0e8a16", "State: agent finished"},
 	{"needs-human", "d73a4a", "Escalation: agent needs a person"},
@@ -412,16 +414,14 @@ func Load(dir string) (*Config, error) {
 // scope, no label constraint), so it starts but matches nothing until
 // the workflow's active_states or a filters: override narrows it.
 //
-// Every filter matches its own trigger plus in-progress, so an item whose
-// agent died mid-run is picked up again by the same loop. Sibling loops
-// exclude each other's triggers, so an orphan in progress is never claimed
-// by the wrong loop.
+// Every filter matches its triggers plus in-progress, so an item whose
+// agent died mid-run is picked up again by the same loop. The issue and PR
+// loops each list items of one kind, so they do not claim each other's
+// items; the order of a workflow's dispatch rules settles an item that
+// carries several triggers.
 var defaultFilters = map[string]string{
-	"plan":       "label:agent:plan,in-progress -label:agent:build -label:needs-human",
-	"build":      "label:agent:build,in-progress -label:agent:plan -label:needs-human",
-	"review":     "label:agent:review,in-progress -label:agent:build -label:agent:merge -label:needs-human",
-	"review-fix": "label:agent:build,in-progress -label:agent:review -label:agent:merge -label:needs-human",
-	"merge":      "label:agent:merge,in-progress -label:agent:build -label:agent:review -label:needs-human",
+	"issues": "label:agent:plan,agent:plan-build,agent:build,agent:docs,in-progress -label:needs-human",
+	"prs":    "label:agent:review,agent:build,agent:merge,in-progress -label:needs-human",
 }
 
 // DefaultLabelFilter returns the shipped query filter for a loop with no

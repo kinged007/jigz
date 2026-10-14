@@ -19,7 +19,8 @@ import (
 // their vocabulary is fixed.
 var allowedLabels = map[string]bool{
 	"agent:plan": true, "agent:build": true, "agent:review": true,
-	"agent:merge": true, "in-progress": true, "agent:done": true,
+	"agent:merge": true, "agent:plan-build": true, "agent:docs": true,
+	"in-progress": true, "agent:done": true,
 	"needs-human": true,
 	// Parked quick track only: nothing seeds or watches agent:quick until the
 	// track is switched back on, but its prompt still has to stay name-clean.
@@ -127,8 +128,8 @@ func TestWorkflowLabels(t *testing.T) {
 			t.Errorf("%s: query_filter %q != config default %q (the loop overwrites one with the other)", name, tr.QueryFilter, def)
 		}
 	}
-	if seen != 5 {
-		t.Errorf("checked %d workflows, want 5", seen)
+	if seen != 2 {
+		t.Errorf("checked %d workflows, want 2", seen)
 	}
 }
 
@@ -157,7 +158,7 @@ func TestPromptLabels(t *testing.T) {
 				if !allowedLabels[l] {
 					t.Errorf("%s: unknown label %q in %q", e.Name(), l, m[0])
 				}
-				if removed && strings.HasPrefix(l, "agent:") && l != "agent:done" {
+				if removed && (strings.HasPrefix(l, "agent:") && l != "agent:done") {
 					releasedTrigger = true
 				}
 				if !removed && l == "agent:done" {
@@ -218,7 +219,7 @@ func TestSortieValidate(t *testing.T) {
 		t.Skip("no sortie binary available (set SORTIE_BIN, or build the fork to /tmp/gobin/sortie-fork)")
 	}
 	root := t.TempDir()
-	syncWorkflows(root, keepEdits)
+	syncWorkflows(root)
 	dir := filepath.Join(root, ".sortie", "workflows")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -234,7 +235,7 @@ func TestSortieValidate(t *testing.T) {
 		if e.IsDir() || !strings.HasPrefix(e.Name(), "WORKFLOW.") {
 			continue
 		}
-		if e.Name() == "WORKFLOW.build.md" {
+		if e.Name() == "WORKFLOW.issues.md" {
 			build = e.Name()
 		}
 		cmd := exec.Command(bin, "validate", e.Name())
@@ -245,13 +246,13 @@ func TestSortieValidate(t *testing.T) {
 		}
 	}
 	if build == "" {
-		t.Fatal("WORKFLOW.build.md not installed")
+		t.Fatal("WORKFLOW.issues.md not installed")
 	}
 	// The engine must also accept the filter sortie-loop injects at launch.
 	cmd := exec.Command(bin, "validate", build)
 	cmd.Dir = dir
 	cmd.Env = append(env,
-		"SORTIE_TRACKER_QUERY_FILTER=label:agent:build,in-progress -label:agent:plan -label:needs-human assignee:@me",
+		"SORTIE_TRACKER_QUERY_FILTER="+config.DefaultLabelFilter("issues")+" assignee:@me",
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Errorf("injected filter rejected: %v\n%s", err, out)
@@ -300,7 +301,7 @@ func TestDefaultLabelsCoverWorkflows(t *testing.T) {
 	for _, l := range config.DefaultLabels {
 		have[l.Name] = true
 	}
-	for _, l := range []string{"agent:plan", "agent:build", "agent:review", "agent:merge", "in-progress", "agent:done", "needs-human"} {
+	for _, l := range []string{"agent:plan", "agent:plan-build", "agent:build", "agent:review", "agent:merge", "agent:docs", "in-progress", "agent:done", "needs-human"} {
 		if !have[l] {
 			t.Errorf("DefaultLabels is missing %q", l)
 		}

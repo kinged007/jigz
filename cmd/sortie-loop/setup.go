@@ -81,7 +81,8 @@ func runSetup(dir, repo string) {
 		}
 		fmt.Println("created", cfgPath)
 	}
-	syncWorkflows(abs, askBeforeOverwrite)
+	warnLegacy(syncWorkflows(abs))
+	warnStalePrompts(abs)
 	fmt.Println("workflows ready in", filepath.Join(abs, ".sortie", "workflows"))
 	syncPMAgent(abs, askBeforeOverwrite)
 	fmt.Println("project manager prompt ready in", filepath.Join(abs, ".sortie", "pm-agent.md"))
@@ -100,12 +101,13 @@ func runSetup(dir, repo string) {
 	// list entries under `labels:`, re-run setup, and they are created.
 	// Sync is additive — labels absent from the list are left alone.
 	// An existing label whose colour or description differs is a hand
-	// edit, so it is confirmed before being overwritten, the same as a
-	// workflow file.
+	// edit, so it is confirmed before being overwritten, the same as the
+	// project-manager prompt.
 	cfg, err := config.Load(abs)
 	if err != nil {
 		fatal(err)
 	}
+	warnMissingLabels(cfg.Labels)
 	for _, l := range cfg.Labels {
 		cur, err := labelOn(repo, l.Name)
 		if err != nil {

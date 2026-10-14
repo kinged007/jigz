@@ -1,8 +1,9 @@
 {{/* Quick track (parked): surgical change merged straight to the base
-   branch, no PR. Not reachable out of the box — the dev workflow routes
-   every issue to build.md and no shipped loop watches `agent:quick`. To
-   switch it on, uncomment the quick dispatch rule in WORKFLOW.build.md and
-   add agent:quick to DefaultLabels in internal/config/config.go. */}}
+   branch, no PR. Not reachable out of the box — no shipped rule watches
+   `agent:quick`. To switch it on, add a rule matching label `agent:quick`
+   with this template to dispatch.rules in WORKFLOW.issues.md, add
+   `agent:quick` to the query_filter there and in defaultFilters in
+   internal/config/config.go, and add it to DefaultLabels. */}}
 You are a full-stack developer making a small, surgical change in the
 repository checked out in your workspace. Your branch
 `auto/{{ .issue.identifier }}` is already checked out. Before starting,

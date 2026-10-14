@@ -33,13 +33,15 @@ to the `gh` CLI to read comments, open PRs, and move labels.
 There is no queue and no webhook. Every loop polls GitHub roughly every
 60 seconds with a search query built from three parts:
 
-1. **Label filter** — each loop watches its own trigger label plus
-   `in-progress`. `build` looks for `label:agent:build,in-progress`,
-   `review` for `label:agent:review,in-progress`, and so on (see Loops
-   below). Adding a trigger label enqueues the item; the agent removing
-   it plus adding `agent:done` takes it out of every loop. Sibling loops
-   exclude each other's triggers, so an item left mid-run by a crashed
-   process is re-picked by the loop that started it, not by a neighbour.
+1. **Label filter** — each loop watches its trigger labels plus
+   `in-progress`. `prs` looks for
+   `label:agent:review,agent:build,agent:merge,in-progress`, and `issues`
+   for its own list (see Loops below). Adding a trigger label enqueues the
+   item; the agent removing it plus adding `agent:done` takes it out of
+   every loop. The `issues` loop lists issues and the `prs` loop lists PRs,
+   so an item left mid-run by a crashed process is re-picked by the loop
+   that started it. The loop's dispatch rules choose the job from the
+   trigger label; the first matching rule wins.
 2. **Assignee scope** — by default every query ends in `assignee:@me`,
    meaning only items assigned to the token owner are picked up. This
    keeps several people (or bots) from fighting over one backlog. Set
@@ -64,16 +66,18 @@ approved PR `agent:merge`.
 
 ## Labels
 
-Thirteen labels, one role each. The four triggers are applied by a person, a
+Fifteen labels, one role each. The six triggers are applied by a person, a
 chained agent, or the PM prompt; P0–P3 are a person's triage call; the rest
 are set by the agents themselves.
 
 | Label | Colour | Role |
 |-------|--------|------|
 | `agent:plan` | yellow | Trigger: write an implementation plan for this issue |
+| `agent:plan-build` | yellow | Trigger: plan this issue, then implement it with no human step |
 | `agent:build` | yellow | Trigger: implement this issue, or apply review feedback on this PR |
 | `agent:review` | yellow | Trigger: review this PR |
 | `agent:merge` | yellow | Trigger: merge this PR |
+| `agent:docs` | yellow | Trigger: update the docs for merged changes and open a PR |
 | `in-progress` | purple | Claim: an agent is working on this right now |
 | `agent:done` | green | State: the agent finished |
 | `needs-human` | red | Escalation: a person has to look at this |
@@ -118,27 +122,59 @@ the next stage is always added in the same command as its removal. No
 agent applies `agent:merge`: an approved PR waits for a person, or for
 the PM prompt in `.sortie/pm-agent.md`, to label it.
 
-The chained label must land on the item the next loop watches: PR loops
-(`review`, `review-fix`, `merge`) watch PRs, so label the PR, not the
-issue it came from. `.sortie/workflows/prompts/review.md` Step 4 and
+The chained label must land on the item the next loop watches: the `prs`
+loop watches PRs, so label the PR, not the issue it came from. `.sortie/workflows/prompts/review.md` Step 4 and
 `review-fix.md` Step 5 carry these forms.
 
 ## The loops
 
-Five workflows ship by default (each is one `WORKFLOW.*.md` file, each
-runs as its own loop process):
+Two workflows ship by default (each is one `WORKFLOW.*.md` file, each
+runs as its own loop process). Each file has one dispatch rule per
+trigger label:
 
-| Loop | Watches | Does |
-|------|---------|------|
-| `plan` | issues with `agent:plan` | Writes an implementation plan as an issue comment. The agent removes `agent:plan` and adds `agent:done`; a human reviews the plan and labels the issue `agent:build` to trigger development. |
-| `build` | issues with `agent:build` | Implements the change and opens a PR, then labels that PR `agent:review` and assigns it to the token owner. (The parked `agent:quick` track merges straight to the base branch with no PR — see `prompts/quick.md`.) |
-| `review` | PRs with `agent:review` | Reviews the PR in three passes, then routes on its own verdict: `agent:build` when there are findings to fix, `agent:done` when the review is clean. |
-| `review-fix` | PRs with `agent:build` | Applies posted review feedback, pushes to the PR branch, then hands the PR back as `agent:review` for another pass. |
-| `merge` | PRs with `agent:merge` | Reads the PR plus all comments, files follow-up issues for leftovers, and merges into the PR's base branch. Conflicts end on `agent:done,needs-human` and the loop drops the PR. Uses `git merge --ff-only`, so a branch that drifted behind base stalls and escalates instead of rebasing. |
+| Loop | Rule | Watches | Does |
+|------|------|---------|------|
+| `issues` | `plan` | issues with `agent:plan` | Writes an implementation plan as an issue comment. The agent removes `agent:plan` and adds `agent:done`; a human reviews the plan and labels the issue `agent:build` to trigger development. |
+| `issues` | `build` | issues with `agent:build` or `agent:plan-build` | Reads the issue's recent comments (the plan comment and later human comments), implements the change and opens a PR, then labels that PR `agent:review` and assigns it to the token owner. For `agent:plan-build` with no plan comment, it posts the plan first and implements in the same run. (The parked `agent:quick` track merges straight to the base branch with no PR — see `prompts/quick.md`.) |
+| `issues` | `docs` | issues with `agent:docs` | Updates the docs for merged changes and opens a PR. |
+| `prs` | `review` | PRs with `agent:review` | Reviews the PR in three passes, then routes on its own verdict: `agent:build` when there are findings to fix, `agent:done` when the review is clean. |
+| `prs` | `review-fix` | PRs with `agent:build` | Applies posted review feedback, pushes to the PR branch, then hands the PR back as `agent:review` for another pass. |
+| `prs` | `merge` | PRs with `agent:merge` | Reads the PR plus all comments, files follow-up issues for leftovers, and merges into the PR's base branch. Conflicts end on `agent:done,needs-human` and the loop drops the PR. Uses `git merge --ff-only`, so a branch that drifted behind base stalls and escalates instead of rebasing. |
 
 The same `agent:build` trigger runs `build` on an issue and `review-fix` on a
 PR: the tracker kind decides which loop can see the item at all, and each
 agent reads the item to know which job it is.
+
+Workflow-wide settings are shared by the rules of one file: hooks,
+`max_turns` and the other `agent:` keys. The `prs` workflow uses
+`max_turns: 10` and one set of workspace hooks (full fetch of the PR head
+with an `origin` remote) for all three rules. The `issues` workflow pushes
+the `auto/<issue>` branch only when the run committed something.
+
+### Migrating from the five-file layout
+
+`setup` and the loop startup never change or remove an existing workflow
+or prompt file. While any of `WORKFLOW.plan.md`, `WORKFLOW.build.md`,
+`WORKFLOW.review.md`, `WORKFLOW.review-fix.md` or `WORKFLOW.merge.md`
+exists in `.sortie/workflows/`, `WORKFLOW.issues.md` and `WORKFLOW.prs.md`
+are not written, because both sets would process the same issues. A
+warning on stderr says so. To migrate:
+
+1. Delete the five old files, and their `.sortie-<name>.db` files if you
+   do not need the run history.
+2. Rerun `sortie-loop setup` to install the two new files.
+3. In `.sortie/config.yaml`, rename old loop names to `issues` or `prs` in
+   the `filters:` and `workflows:` (budget) keys.
+4. Existing installs keep their old `prompts/plan.md` and `prompts/build.md`,
+   because setup never overwrites a file. Diff them against the shipped
+   copies or delete them and rerun `setup`. An old `build.md` that does not
+   remove `agent:plan-build` in its finishing step leaves that label on the
+   issue, so the issue is dispatched again. `setup` prints a note when
+   either file differs from the shipped copy.
+5. Add the `agent:plan-build` and `agent:docs` entries to the `labels:` list of an
+   existing `.sortie/config.yaml` (copy them from the list above), then
+   rerun `setup`. `setup` only creates the labels in that list and prints a
+   note for each shipped label that is missing from it.
 
 The loop set is just every `WORKFLOW.*.md` in `.sortie/workflows/` —
 drop in a new file (e.g. `WORKFLOW.triage.md`) and it starts as a loop
@@ -146,7 +182,7 @@ named by its stem on the next run. Per-loop label queries can be
 narrowed via the `filters:` map in `.sortie/config.yaml` without
 re-running setup.
 
-`SORTIE_LOOP_ONLY=plan,build` narrows the run to the named loops, for a
+`SORTIE_LOOP_ONLY=issues` narrows the run to the named loops, for a
 supervisor that drives several repos and wants a different set per
 repo. Unset (the default) runs every installed loop. A name that
 matches no installed workflow is fatal rather than silently dropped, so
@@ -272,8 +308,7 @@ so `sortie-loop setup ./repo --repo owner/name` and
 `sortie-loop setup --repo owner/name ./repo` do the same thing.
 
 `setup` confirms before changing a label whose colour or description
-differs from the shipped one, the same way it confirms before replacing
-an edited workflow file.
+differs from the shipped one. It never changes an existing workflow file.
 
 `sortie-loop status [--json] [repo-root]` reports the run serving the
 repo-root: version, pid, state, and per workflow its state, port, pid,
@@ -399,6 +434,8 @@ assignee: "@me" # token owner only; "" = shared backlog
 # A custom loop adds its labels here, then setup is re-run to create them.
 labels:
 - {name: "agent:plan", color: "fbca04", description: "Trigger: write an implementation plan for this issue"}
+- {name: "agent:plan-build", color: "fbca04", description: "Trigger: plan this issue, then implement it with no human step"}
+- {name: "agent:docs", color: "fbca04", description: "Trigger: update the docs for merged changes and open a PR"}
 # ... (full default list seeded by setup)
 ```
 
@@ -510,7 +547,7 @@ without a workflow file is an error at startup.
 
 ```yaml
 workflows:
-  build:
+  issues:
     budget:
       period: weekly          # weekly (ISO week, Monday start) or monthly (calendar month)
       timezone: Africa/Johannesburg   # IANA name, default UTC; period boundaries use it
@@ -563,8 +600,7 @@ The merge loop watches `label:agent:merge`, so it picks the PR up on the
 next poll (~60s), triages comments, merges, and ends on `agent:done`.
 Blocking findings and conflicts still stop the merge and escalate via
 `needs-human` — automation holds everywhere except where judgment is
-required. Note: re-running `setup` after a sortie-loop upgrade overwrites
-local workflow edits, so keep a copy of the one-liner.
+required.
 
 ## Agent identity (name/avatar on GitHub)
 
@@ -609,10 +645,9 @@ yours is older.
 ## Customizing agents and workflows
 
 The shipped default is the `pi` agent. Every `WORKFLOW.*.md` also
-documents a commented-out `claude-code` alternative (build/review-fix/
-merge on `sonnet`, plan/review on `opus`) — swap the `agent:` block
-for the commented one, keeping the same `max_turns` and timeouts
-(build's dispatch rules must name `claude-code` too). The `model:` value
+documents a commented-out `claude-code` alternative (`sonnet`) — swap
+the `agent:` block for the commented one, keeping the same `max_turns`
+and timeouts. The `model:` value
 passes through to `claude --model` unvalidated, so only use aliases
 your installed CLI accepts. The pinned engine only knows `pi` and
 `claude-code` (plus a few others); other adapters need a newer or
