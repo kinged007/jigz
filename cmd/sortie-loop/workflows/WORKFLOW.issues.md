@@ -9,12 +9,12 @@ tracker:
   # between its plan and build stages.
   # Assignee scope is appended by sortie-loop config at launch, not here.
   query_filter: "label:agent:plan,agent:plan-build,agent:build,agent:docs,in-progress -label:needs-human"
-  # `todo` must stay first. Open issues carrying no state label derive
-  # active_states[0] as their state, so without a leading non-target entry
-  # the dispatch-time in-progress transition is a silent no-op and the
-  # `in-progress` label never lands on the issue. `todo` is a derivation
-  # fallback, not a label: no issue ever carries it.
-  active_states: [todo, in-progress]
+  # 1.27+: an open issue runs only when it carries a label from
+  # active_states. Triggers alone would not satisfy the gate, so every
+  # dispatch trigger is also an active state. in-progress re-picks a run
+  # that was interrupted and keeps a chained issue active between its plan
+  # and build stages.
+  active_states: [agent:plan, agent:plan-build, agent:build, agent:docs, in-progress]
   in_progress_state: in-progress
   # Backstop only: the agent moves the issue itself (removes its trigger and
   # in-progress, adds agent:done). If it forgot or its gh call failed, this

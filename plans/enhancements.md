@@ -334,7 +334,7 @@ labels: `agent:review`, `agent:build`, `agent:merge`, in that order.
 set of hooks for the three rules (merge's `after_create` with a full fetch
 and an `origin` remote, the `before_run` heal and unshallow step, and a
 fast-forward of the `pr-<n>` branch to the current PR head because the rules
-share one workspace), `handoff_evidence: off`, `terminal_states: []`.
+share one workspace), `handoff_evidence: off`, `terminal_states: [closed]`.
 - `query_filter` is `label:agent:review,agent:build,agent:merge,in-progress
 -label:needs-human`.
 
@@ -353,10 +353,10 @@ Terminal states trigger workspace cleanup. `handoff_state` must not be an
 active or terminal state; `sortie validate` enforces this.
 
 
-| Workflow | Active                          | Handoff      | Terminal   |
-| -------- | ------------------------------- | ------------ | ---------- |
-| issues   | open issue with a trigger label | `agent:done` | `[closed]` |
-| prs      | open PR with a trigger label    | `agent:done` | `[]`       |
+| Workflow | Active                                                                                                      | Handoff      | Terminal   |
+| -------- | ----------------------------------------------------------------------------------------------------------- | ------------ | ---------- |
+| issues   | open issue/PR carrying a label from tracker.active_states (dispatch triggers are listed there so a trigger alone dispatches) | `agent:done` | `[closed]` |
+| prs      | open issue/PR carrying a label from tracker.active_states (dispatch triggers are listed there so a trigger alone dispatches) | `agent:done` | `[closed]` |
 
 
 ### Budgets

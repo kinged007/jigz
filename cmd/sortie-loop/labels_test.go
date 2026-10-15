@@ -28,7 +28,9 @@ var allowedLabels = map[string]bool{
 }
 
 // virtualStates are derivation fallbacks, never labels: no item carries them.
-var virtualStates = map[string]bool{"todo": true}
+// No virtual fallback remains under 1.27; kept as an empty set so the
+// active_states membership check below stays uniform.
+var virtualStates = map[string]bool{}
 
 // labelArg matches the value of a --add-label / --remove-label argument in a
 // prompt, including the multi-line form (`\` before the next line).
@@ -92,11 +94,15 @@ func TestWorkflowLabels(t *testing.T) {
 		if tr.InProgressState != "in-progress" {
 			t.Errorf("%s: in_progress_state = %q, want in-progress", name, tr.InProgressState)
 		}
-		if len(tr.ActiveStates) == 0 || tr.ActiveStates[0] != "todo" {
-			t.Errorf("%s: active_states = %v, want todo first as the derivation fallback", name, tr.ActiveStates)
+		if len(tr.ActiveStates) == 0 {
+			t.Errorf("%s: active_states must be non-empty (1.27)", name)
 		}
 		if !contains(tr.ActiveStates, "in-progress") {
 			t.Errorf("%s: active_states %v must contain in-progress", name, tr.ActiveStates)
+		}
+		hasTrigger := contains(tr.ActiveStates, "agent:plan") || contains(tr.ActiveStates, "agent:plan-build") || contains(tr.ActiveStates, "agent:build") || contains(tr.ActiveStates, "agent:docs") || contains(tr.ActiveStates, "agent:review") || contains(tr.ActiveStates, "agent:merge")
+		if !hasTrigger {
+			t.Errorf("%s: active_states %v must contain at least one dispatch trigger (1.27: a trigger alone must satisfy the gate)", name, tr.ActiveStates)
 		}
 		if tr.HandoffState != "agent:done" {
 			t.Errorf("%s: handoff_state = %q, want agent:done", name, tr.HandoffState)

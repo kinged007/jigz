@@ -11,10 +11,10 @@ tracker:
   # implement on an issue (WORKFLOW.issues.md) and apply the posted review
   # findings on a PR.
   query_filter: "label:agent:review,agent:build,agent:merge,in-progress -label:needs-human"
-  # `todo` first so a PR carrying only a trigger label derives a state other
-  # than in-progress and the claim actually lands; it is a derivation
-  # fallback, never a label.
-  active_states: [todo, in-progress]
+  # 1.27+: a PR runs only when it carries a label from active_states. Every
+  # dispatch trigger is listed there so a PR labeled only with its trigger
+  # is still a candidate. in-progress re-picks an interrupted run.
+  active_states: [agent:review, agent:build, agent:merge, in-progress]
   in_progress_state: in-progress
   # Backstop only: the agent removes its trigger and in-progress and adds
   # agent:done (or the next trigger: agent:review after a fix, agent:build
