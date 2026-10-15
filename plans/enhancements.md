@@ -14,7 +14,7 @@ listed under Open questions.
 
 ## Implementation status and handoff
 
-State as of `3384ab2` on `main` (the `feat/sleep` branch is equal to it).
+State as of `1e64a17` on `main` (ahead of `origin/main` by 4 commits: `c329bc8`, `bed152c`, `b9e7eb2`, `1e64a17`).
 Section numbers below refer to this document.
 
 ### State
@@ -24,7 +24,7 @@ Section numbers below refer to this document.
 | 1. Idle sleep (section 1) | done | `6728935`, `0dc7e1e`, `efc71ab`, docs `3384ab2` | Disabled by default. |
 | 3. Cleanup (section 3) | done | `7b8e9f7`, `6f08a10`, `e385697`, docs `2508689` | Config, interval runner, `cleanup` subcommand, last-run record. |
 | 2. Workflow consolidation (section 2) | done | `53aba7c` | Two files. `agent:plan-build` is one session on the pinned engine; stage chains need an engine based on 1.27.0 or later. |
-| 4. Spend controls (section 4) | done | `d132910` | Includes L1 budget fields. The relation to the engine's `budget_exhausted` is not investigated; the control reads `run_history` only. |
+| 4. Spend controls (section 4) | done | `d132910` | Includes L1 budget fields. Relation to engine `budget_exhausted` investigated (see `/tmp/budget-investigation.md`); control reads `run_history` only. |
 | L1 status document | done, partial | `18eacae`, `04ea228`, `b557387`, `bb5a8cf`, docs `43d3a79`, `e6724ee` | File and `sortie-loop status [--json]`. Sleep, cleanup, budget and `log_path` fields exist. Tested schema versions (L4) are not in the document. |
 | L2 `wake` | done | `efc71ab` | |
 | L2 `cleanup` | done | `e385697` | |
@@ -32,30 +32,30 @@ Section numbers below refer to this document.
 | L3 registry additions | done | `d636dac`, `b3e8f47` | `b3e8f47` adds registry locking and atomic writes. |
 | L4 tested schema versions | not started | none | Central pins its own versions. |
 | L8 child logs | done | `30a4112`, docs `f9f182e` | |
-| L8 per-run transcript | not started | none | Depends on an open question. |
-| L9 `validate` | not started | none | |
-| L10 safe apply | partial | existing `restart --when-idle` | Reload for repo config does not exist. |
-| L11 `setup --json` | not started | none | |
+| L8 per-run transcript | not started | none | Depends on an open question (pi transcript file unverified). |
+| L9 `validate` | done | `1e64a17` | `sortie-loop validate [--json]` checks repo config and runs `sortie validate` per workflow (read-only, no file creation). |
+| L10 safe apply | done | `bed152c` + existing `restart --when-idle` | `reload` via SIGHUP for repo config; `restart --when-idle` for workflow changes. |
+| L11 `setup --json` | done | `c329bc8` | Non-interactive JSON mode; auto-declines mismatched labels and pm-agent overwrites. |
 | L12 Windows parity | not started | none | Optional. |
 | L7 cost per run | deferred | none | Needs an engine change. |
 | sortie-central (items 5, 6) | not started | separate repo | |
+
+Budget semantics: investigated in `/tmp/budget-investigation.md` (engine `budget_exhausted`/`budget_hold_notices` is a per-issue lifetime cap; loop cap is per-workflow per-period). L9 validates loop caps only and ignores engine holds for pass/fail. No code change needed beyond docs.
 
 ### Next actions
 
 1. Re-pin the fork to an engine release based on 1.27.0 or later, then
    switch `plan-build` to the stage chain in section 2 and add per-rule
    models. Optional.
-2. Investigate the semantics of `budget_exhausted` and
-   `budget_hold_notices` and their relation to the spend controls.
-3. L9 `sortie-loop validate [--json]`, L10 safe apply, L11 `setup --json`.
-   These are independent of consolidation and can be done in parallel with
-   it, because they touch different files. L9 rules for spend controls wait
-   for step 2.
-4. L12 only if Windows is a target.
+2. L4 tested schema versions in the L1 document, and L8 per-run transcript (needs pi transcript file verification). Not blocked by L9-L11.
+3. L12 only if Windows is a target.
+4. Verify L9-L11 end-to-end with a live supervisor (status/reload/validate/--json) — unit tests only so far.
 
 ### Code map
 
 Files are in `cmd/sortie-loop/` unless stated.
+
+New since `3384ab2`: `validate.go` + `validate_cmd.go` (`validate` command), `reload.go` (reload client), `setup --json` branch in `setup.go`, SIGHUP reload in `supervise.go`, `parseArgs`/`usage`/`run` in `main.go`.
 
 | Feature | Location |
 | ------- | -------- |
@@ -155,8 +155,7 @@ Implementation facts:
 
 ### Next action
 
-Review and commit section 2. Then investigate `budget_exhausted` and
-`budget_hold_notices`.
+L9-L11 are done and merged. Next: L4/L8 (needs engine/doc verification) or end-to-end live-supervisor checks. Sortie-central items 5-6 remain in the other repo.
 
 ## 0. Scope and repo split
 
