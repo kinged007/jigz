@@ -16,22 +16,29 @@ const (
 	statusSchemaVersion = 1
 )
 
+// testedSchemaVersions lists the workflow DB schema_migrations versions
+// this release was tested against (L4). All workflow DBs currently share
+// version 16 (verified via .sortie/workflows/*.db), alongside engine
+// v1.26.0 (engineTag in version.go).
+var testedSchemaVersions = []int{16}
+
 // statusDoc is the machine-readable state of one supervisor, written to
 // the status file derived from the repo root. Later features add
 // top-level sections without changing the fields below.
 type statusDoc struct {
-	SchemaVersion int              `json:"schema_version"`
-	Version       string           `json:"version"`
-	EngineVersion string           `json:"engine_version"`
-	PID           int              `json:"pid"`
-	Repo          string           `json:"repo"`
-	RepoName      string           `json:"repo_name"`
-	StartedAt     time.Time        `json:"started_at"`
-	UpdatedAt     time.Time        `json:"updated_at"`
-	State         string           `json:"state"`
-	Workflows     []workflowStatus `json:"workflows"`
-	Cleanup       *cleanupRecord   `json:"cleanup,omitempty"`
-	Sleep         sleepStatus      `json:"sleep"`
+	SchemaVersion        int              `json:"schema_version"`
+	Version              string           `json:"version"`
+	EngineVersion        string           `json:"engine_version"`
+	TestedSchemaVersions []int            `json:"tested_schema_versions"`
+	PID                  int              `json:"pid"`
+	Repo                 string           `json:"repo"`
+	RepoName             string           `json:"repo_name"`
+	StartedAt            time.Time        `json:"started_at"`
+	UpdatedAt            time.Time        `json:"updated_at"`
+	State                string           `json:"state"`
+	Workflows            []workflowStatus `json:"workflows"`
+	Cleanup              *cleanupRecord   `json:"cleanup,omitempty"`
+	Sleep                sleepStatus      `json:"sleep"`
 }
 
 type workflowStatus struct {

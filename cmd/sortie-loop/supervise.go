@@ -589,18 +589,19 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	doc := statusDoc{
-		SchemaVersion: statusSchemaVersion,
-		Version:       version,
-		EngineVersion: engineVersion(),
-		PID:           os.Getpid(),
-		Repo:          s.root,
-		RepoName:      repoName(s.root),
-		StartedAt:     s.startedAt.UTC(),
-		UpdatedAt:     time.Now().UTC(),
-		State:         state,
-		Workflows:     []workflowStatus{},
-		Cleanup:       readCleanupRecord(s.root),
-		Sleep:         s.sleepStatusLocked(),
+		SchemaVersion:        statusSchemaVersion,
+		Version:              version,
+		EngineVersion:        engineVersion(),
+		TestedSchemaVersions: testedSchemaVersions,
+		PID:                  os.Getpid(),
+		Repo:                 s.root,
+		RepoName:             repoName(s.root),
+		StartedAt:            s.startedAt.UTC(),
+		UpdatedAt:            time.Now().UTC(),
+		State:                state,
+		Workflows:            []workflowStatus{},
+		Cleanup:              readCleanupRecord(s.root),
+		Sleep:                s.sleepStatusLocked(),
 	}
 	add := func(p *loopProc) {
 		st := "running"

@@ -49,6 +49,9 @@ func TestStatusAfterStart(t *testing.T) {
 		doc.Version != version || doc.StartedAt.IsZero() {
 		t.Errorf("unexpected top-level status: %+v", doc)
 	}
+	if len(doc.TestedSchemaVersions) == 0 || doc.TestedSchemaVersions[0] != 16 {
+		t.Errorf("tested_schema_versions = %v, want [16]", doc.TestedSchemaVersions)
+	}
 	if len(doc.Workflows) != 1 {
 		t.Fatalf("got %d workflows, want 1", len(doc.Workflows))
 	}
@@ -209,5 +212,45 @@ func TestLastEnvTakesTheLastEntry(t *testing.T) {
 	}
 	if got := lastEnv(env, "MISSING"); got != "" {
 		t.Errorf("got %q, want empty", got)
+	}
+}
+
+func TestStatusDocWithoutTestedSchemaVersionsStillLoads(t *testing.T) {
+	// Old documents have no tested_schema_versions; new readers must ignore the absence.
+	data := `{"schema_version":1,"version":"dev","engine_version":"1.26.0","pid":1,"repo":"/r","repo_name":"o/n","started_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z","state":"running","workflows":[],"sleep":{"enabled":false,"awake":true}}`
+	var doc statusDoc
+	if err := json.Unmarshal([]byte(data), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.TestedSchemaVersions != nil {
+		t.Errorf("want nil tested_schema_versions for old doc, got %v", doc.TestedSchemaVersions)
+	}
+}
+
+func TestStatusJSONPassthroughKeepsTestedSchemaVersions(t *testing.T) {
+	_, root := startedSup(t, "while true; do sleep 1; done\n")
+	out, err := statusOutput(root, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := raw["tested_schema_versions"]; !ok {
+		t.Errorf("status --json missing tested_schema_versions: %s", out)
+	}
+	var vals []int
+	if err := json.Unmarshal(raw["tested_schema_versions"], &vals); err != nil {
+		t.Fatal(err)
+	}
+	if len(vals) == 0 || vals[0] != 16 {
+		t.Errorf("tested_schema_versions = %v, want [16]", vals)
+	}
+}
+
+func TestTestedSchemaVersionsConstant(t *testing.T) {
+	if len(testedSchemaVersions) != 1 || testedSchemaVersions[0] != 16 {
+		t.Errorf("testedSchemaVersions = %v, want [16]", testedSchemaVersions)
 	}
 }
