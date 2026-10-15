@@ -14,7 +14,7 @@ listed under Open questions.
 
 ## Implementation status and handoff
 
-State as of `1e64a17` on `main` (ahead of `origin/main` by 4 commits: `c329bc8`, `bed152c`, `b9e7eb2`, `1e64a17`).
+State as of `9a7e4a9` on `main` (ahead of `origin/main` by 6 commits: `c329bc8`, `bed152c`, `b9e7eb2`, `1e64a17`, `9521df1`, `9a7e4a9`).
 Section numbers below refer to this document.
 
 ### State
@@ -25,37 +25,39 @@ Section numbers below refer to this document.
 | 3. Cleanup (section 3) | done | `7b8e9f7`, `6f08a10`, `e385697`, docs `2508689` | Config, interval runner, `cleanup` subcommand, last-run record. |
 | 2. Workflow consolidation (section 2) | done | `53aba7c` | Two files. `agent:plan-build` is one session on the pinned engine; stage chains need an engine based on 1.27.0 or later. |
 | 4. Spend controls (section 4) | done | `d132910` | Includes L1 budget fields. Relation to engine `budget_exhausted` investigated (see `/tmp/budget-investigation.md`); control reads `run_history` only. |
-| L1 status document | done, partial | `18eacae`, `04ea228`, `b557387`, `bb5a8cf`, docs `43d3a79`, `e6724ee` | File and `sortie-loop status [--json]`. Sleep, cleanup, budget and `log_path` fields exist. Tested schema versions (L4) are not in the document. |
+| L1 status document | done | `9a7e4a9` + prior rows | `tested_schema_versions: [16]` added (L4); sleep, cleanup, budget, `log_path` present. |
 | L2 `wake` | done | `efc71ab` | |
 | L2 `cleanup` | done | `e385697` | |
 | L2 `pause`, `resume`, `budget override` | done | `d132910` | Part of spend controls. |
 | L3 registry additions | done | `d636dac`, `b3e8f47` | `b3e8f47` adds registry locking and atomic writes. |
-| L4 tested schema versions | not started | none | Central pins its own versions. |
+| L4 tested schema versions | done | `9a7e4a9` | `tested_schema_versions` in L1 document; central pins its own set. |
 | L8 child logs | done | `30a4112`, docs `f9f182e` | |
-| L8 per-run transcript | not started | none | Depends on an open question (pi transcript file unverified). |
+| L8 per-run transcript | deferred | none | No pi transcript file found; needs engine change. |
 | L9 `validate` | done | `1e64a17` | `sortie-loop validate [--json]` checks repo config and runs `sortie validate` per workflow (read-only, no file creation). |
 | L10 safe apply | done | `bed152c` + existing `restart --when-idle` | `reload` via SIGHUP for repo config; `restart --when-idle` for workflow changes. |
 | L11 `setup --json` | done | `c329bc8` | Non-interactive JSON mode; auto-declines mismatched labels and pm-agent overwrites. |
 | L12 Windows parity | not started | none | Optional. |
-| L7 cost per run | deferred | none | Needs an engine change. |
+| L7 cost per run | deferred | none | Needs an engine change (L8 transcript likewise). |
 | sortie-central (items 5, 6) | not started | separate repo | |
 
-Budget semantics: investigated in `/tmp/budget-investigation.md` (engine `budget_exhausted`/`budget_hold_notices` is a per-issue lifetime cap; loop cap is per-workflow per-period). L9 validates loop caps only and ignores engine holds for pass/fail. No code change needed beyond docs.
+Budget semantics: investigated in `/tmp/budget-investigation.md` (engine `budget_exhausted`/`budget_hold_notices` is a per-issue lifetime cap; loop cap is per-workflow per-period). L9 validates loop caps only and ignores engine holds for pass/fail.
+L8 transcript: probed in `/tmp/l8-transcript-probe.md` — no per-run transcript file exists; defer until engine writes one.
+L9-L11 live verification (no supervisor): `/tmp/l9-l11-live-verify.md` — all commands pass (validate ok, reload/status errors as spec, setup --json creates 12 then skips 12, validate read-only).
 
 ### Next actions
 
 1. Re-pin the fork to an engine release based on 1.27.0 or later, then
    switch `plan-build` to the stage chain in section 2 and add per-rule
    models. Optional.
-2. L4 tested schema versions in the L1 document, and L8 per-run transcript (needs pi transcript file verification). Not blocked by L9-L11.
-3. L12 only if Windows is a target.
-4. Verify L9-L11 end-to-end with a live supervisor (status/reload/validate/--json) — unit tests only so far.
+2. L12 only if Windows is a target.
+3. Verify L9-L11 with a live supervisor (status/reload/validate/--json) — done without supervisor, live-supervisor run still outstanding.
+4. Sortie-central items 5-6 remain in the other repo.
 
 ### Code map
 
 Files are in `cmd/sortie-loop/` unless stated.
 
-New since `3384ab2`: `validate.go` + `validate_cmd.go` (`validate` command), `reload.go` (reload client), `setup --json` branch in `setup.go`, SIGHUP reload in `supervise.go`, `parseArgs`/`usage`/`run` in `main.go`.
+New since `3384ab2`: `validate.go` + `validate_cmd.go` (`validate` command, `listWorkflows` read-only), `reload.go` (reload client), `setup --json` branch in `setup.go`, SIGHUP reload in `supervise.go`, `status.go` + `supervise.go` L4 `tested_schema_versions`, `parseArgs`/`usage`/`run` in `main.go`.
 
 | Feature | Location |
 | ------- | -------- |
