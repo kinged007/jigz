@@ -85,14 +85,30 @@ the issue comment instead: what you found, what is blocking, what you need.
 ## Finishing the run
 
 You own the labels: remove your trigger and the claim, then mark the
-state. A person applies the next trigger label, so finish with
+state. If the issue carries `agent:plan-build`, do not add `agent:done` —
+the stage chain will advance via `stage-build`. Otherwise finish with
 `agent:done`. Add `needs-human` in the same command when a person has to
 look at this before anything else happens.
+
+When the issue carries `agent:plan-build`, the stage chain advances
+automatically — do not hand off to `agent:done`:
+
+```
+gh issue edit {{ .issue.identifier }} --repo $SORTIE_TRACKER_PROJECT \
+  --remove-label "agent:plan-build,in-progress"
+```
+
+Otherwise a person applies the next trigger label, so finish with
+`agent:done`:
 
 ```
 gh issue edit {{ .issue.identifier }} --repo $SORTIE_TRACKER_PROJECT \
   --remove-label "agent:plan,in-progress" --add-label "agent:done"
 ```
+
+Summary: if the issue carries `agent:plan-build`, do not add `agent:done`
+— the stage chain will advance via `stage-build`. Otherwise add
+`agent:done`.
 
 {{ if .issue.url }}
 

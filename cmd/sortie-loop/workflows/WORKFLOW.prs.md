@@ -21,9 +21,9 @@ tracker:
   # after a review with findings; plus needs-human when it cannot proceed).
   handoff_state: agent:done
   handoff_evidence: off
-  # Nothing is terminal: agent:done does not close the PR, and terminal
-  # states would close it on transition.
-  terminal_states: []
+  # A closed PR is terminal, which triggers workspace cleanup.
+  # agent:done is not terminal: it does not close the PR.
+  terminal_states: [closed]
   comments:
     on_completion: false
 

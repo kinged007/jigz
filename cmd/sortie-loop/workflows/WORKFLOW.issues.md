@@ -102,18 +102,11 @@ pi:
 # the plan comment before implementing when none exists.
 dispatch:
   rules:
-    - name: plan
-      match:
-        labels: ["agent:plan"]
-      template: ./prompts/plan.md
-    - name: build
-      match:
-        labels: ["agent:build", "agent:plan-build"]
-      template: ./prompts/build.md
-    - name: docs
-      match:
-        labels: ["agent:docs"]
-      template: ./prompts/docs.md
+    - {name: plan,       match: {labels: ["agent:plan"]},       template: ./prompts/plan.md}
+    - {name: plan-build, match: {labels: ["agent:plan-build"]}, template: ./prompts/plan.md, next: build-chain}
+    - {name: build,      match: {labels: ["agent:build"]},      template: ./prompts/build.md}
+    - {name: docs,       match: {labels: ["agent:docs"]},       template: ./prompts/docs.md}
+    - {name: build-chain, stage: stage-build,                   template: ./prompts/build.md}
 ---
 
 {{/* Issue workflow: plan, build and docs rules. Prompts live in
