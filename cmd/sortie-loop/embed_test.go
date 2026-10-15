@@ -511,7 +511,7 @@ func TestSetupHonoursSortieBin(t *testing.T) {
 		// will fatal. The engine step runs before that, which is all this
 		// is checking, so the failure past it is expected.
 		defer func() { recover() }()
-		runSetup(repo, "owner/name")
+		runSetup(repo, "owner/name", false)
 	})
 	if strings.Contains(out, "engine not installed") {
 		t.Errorf("setup downloaded an engine despite SORTIE_BIN:\n%s", out)

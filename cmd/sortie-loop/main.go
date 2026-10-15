@@ -14,6 +14,7 @@ import (
 // cmdline is the parsed command line.
 type cmdline struct {
 	setup       bool
+	setupJSON   bool
 	repo        string
 	dir         string
 	noServer    bool
@@ -56,6 +57,12 @@ func parseArgs(argv []string) (cmdline, error) {
 		switch name {
 		case "setup":
 			c.setup = true
+		case "--json":
+			if c.setup {
+				c.setupJSON = true
+				continue
+			}
+			return c, fmt.Errorf("unknown flag %q", arg)
 		case "stop", "restart", "status", "cleanup", "wake", "pause", "resume", "budget":
 			// A subcommand: everything after it belongs to runRemote,
 			// which does its own parsing, so stop collecting here.
@@ -107,7 +114,7 @@ var usageWriter = func(s string) { fmt.Println(s) }
 
 func usage() {
 	usageWriter(`Usage: sortie-loop [--no-server] [--no-dashboard] [--dashboard-port=N] [--unite] [repo-root]
-         sortie-loop setup [repo-root] [--repo=owner/name]
+         sortie-loop setup [repo-root] [--repo=owner/name] [--json]
          sortie-loop stop [--when-idle] [repo-root]
          sortie-loop restart [--when-idle] [repo-root]
          sortie-loop status [--json] [repo-root]
@@ -165,7 +172,7 @@ func run() (code int) {
 		return 0
 	}
 	if c.setup {
-		runSetup(c.dir, c.repo)
+		runSetup(c.dir, c.repo, c.setupJSON)
 		return 0
 	}
 	if c.remote == "status" {
