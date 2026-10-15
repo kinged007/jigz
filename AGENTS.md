@@ -29,6 +29,6 @@ The repo uses the `pi` agent. Any new workflows or prompts belong in `.sortie/wo
 
 ## Permissions / notes
 
-- Read `docs/03-tenantflex.md` in the profile plan: do not publish tenantflex org code without written owner approval.
+- This repo is self-contained. Do not commit secrets (API keys, tokens, .env); use .env.example as the template if needed.
 - No secrets in commits. Do not copy `.env` files or tokens into docs.
 - The engine (`sortie` binary) is fetched at install time and not vendored here.
