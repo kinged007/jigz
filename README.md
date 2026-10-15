@@ -2,9 +2,6 @@
 
 [![CI](https://github.com/kinged007/sortie-loop/actions/workflows/ci.yml/badge.svg)](https://github.com/kinged007/sortie-loop/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/kinged007/sortie-loop)](https://github.com/kinged007/sortie-loop/releases) [![Go](https://img.shields.io/badge/Go-1.26-blue)](go.mod)
 
-![Dashboard](docs/screenshot.png)
-<!-- Screenshot to be added: capture `sortie-loop dashboard` showing loops, active work items and token/cost columns. Replace this file with a real PNG/GIF. -->
-
 Run autonomous coding agents against your GitHub issues with one command.
 
 `sortie-loop` watches a repo's issues and pull requests, and for each
