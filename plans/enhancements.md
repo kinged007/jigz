@@ -14,7 +14,7 @@ listed under Open questions.
 
 ## Implementation status and handoff
 
-State as of `f9677c4` on `main` (ahead of `origin/main` by 7 commits: `c329bc8`, `bed152c`, `b9e7eb2`, `1e64a17`, `9521df1`, `9a7e4a9`, `f9677c4`).
+State as of `9b790ff` on `main` (v0.3.0, engine v1.27.0). Section numbers below refer to this document.
 Section numbers below refer to this document.
 
 ### State
@@ -23,7 +23,7 @@ Section numbers below refer to this document.
 | ---- | ----- | -------- | ---- |
 | 1. Idle sleep (section 1) | done | `6728935`, `0dc7e1e`, `efc71ab`, docs `3384ab2` | Disabled by default. |
 | 3. Cleanup (section 3) | done | `7b8e9f7`, `6f08a10`, `e385697`, docs `2508689` | Config, interval runner, `cleanup` subcommand, last-run record. |
-| 2. Workflow consolidation (section 2) | done | `53aba7c` | Two files. `agent:plan-build` is one session on the pinned engine; stage chains need an engine based on 1.27.0 or later. |
+| 2. Workflow consolidation (section 2) | done | `9b790ff` | 1.27.0 stage chain: `plan-build` `next: build-chain` → `build-chain` `stage: stage-build`; PR workflow `terminal_states` fixed. |
 | 4. Spend controls (section 4) | done | `d132910` | Includes L1 budget fields. Relation to engine `budget_exhausted` investigated (see `/tmp/budget-investigation.md`); control reads `run_history` only. |
 | L1 status document | done | `9a7e4a9` + prior rows | `tested_schema_versions: [16]` added (L4); sleep, cleanup, budget, `log_path` present. |
 | L2 `wake` | done | `efc71ab` | |
@@ -46,9 +46,7 @@ L9-L11 live verification: `/tmp/l9-l11-live-verify.md` (no supervisor) + `/tmp/l
 
 ### Next actions
 
-1. Re-pin the fork to an engine release based on 1.27.0 or later, then
-   switch `plan-build` to the stage chain in section 2 and add per-rule
-   models. Optional — see `/tmp/windows-stage-chain-note.md` §2 for files to change (`version.go:8`, workflows, labels/validate tests).
+1. Engine re-pin done (`9b790ff`, v0.3.0): `engineTag` v1.27.0, staged chain shipped, legacy `.sortie/workflows` patched to `[closed]` locally.
 2. L12 only if Windows is a target. Status: optional; ~60% parity — `wake`/`cleanup`/`validate`/`status` already file-based; `stop`/`restart`/`reload` still need request-file/poll alternative (see `/tmp/windows-stage-chain-note.md` §1).
 3. Sortie-central items 5-6 remain in the other repo.
 4. End-to-end live-supervisor run already done (`/tmp/live-supervisor-verify.md`); repeat only after engine re-pin or workflow changes.
