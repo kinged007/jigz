@@ -14,7 +14,7 @@ listed under Open questions.
 
 ## Implementation status and handoff
 
-State as of `9a7e4a9` on `main` (ahead of `origin/main` by 6 commits: `c329bc8`, `bed152c`, `b9e7eb2`, `1e64a17`, `9521df1`, `9a7e4a9`).
+State as of `f9677c4` on `main` (ahead of `origin/main` by 7 commits: `c329bc8`, `bed152c`, `b9e7eb2`, `1e64a17`, `9521df1`, `9a7e4a9`, `f9677c4`).
 Section numbers below refer to this document.
 
 ### State
@@ -42,16 +42,16 @@ Section numbers below refer to this document.
 
 Budget semantics: investigated in `/tmp/budget-investigation.md` (engine `budget_exhausted`/`budget_hold_notices` is a per-issue lifetime cap; loop cap is per-workflow per-period). L9 validates loop caps only and ignores engine holds for pass/fail.
 L8 transcript: probed in `/tmp/l8-transcript-probe.md` — no per-run transcript file exists; defer until engine writes one.
-L9-L11 live verification (no supervisor): `/tmp/l9-l11-live-verify.md` — all commands pass (validate ok, reload/status errors as spec, setup --json creates 12 then skips 12, validate read-only).
+L9-L11 live verification: `/tmp/l9-l11-live-verify.md` (no supervisor) + `/tmp/live-supervisor-verify.md` (live supervisor f9677c4) — both pass. Live run: status `liveness: running` + `tested_schema_versions:[16]`, validate ok, reload `"reloaded":true` with `updated_at` advance and sleep toggle without child restart, clean shutdown.
 
 ### Next actions
 
 1. Re-pin the fork to an engine release based on 1.27.0 or later, then
    switch `plan-build` to the stage chain in section 2 and add per-rule
-   models. Optional.
-2. L12 only if Windows is a target.
-3. Verify L9-L11 with a live supervisor (status/reload/validate/--json) — done without supervisor, live-supervisor run still outstanding.
-4. Sortie-central items 5-6 remain in the other repo.
+   models. Optional — see `/tmp/windows-stage-chain-note.md` §2 for files to change (`version.go:8`, workflows, labels/validate tests).
+2. L12 only if Windows is a target. Status: optional; ~60% parity — `wake`/`cleanup`/`validate`/`status` already file-based; `stop`/`restart`/`reload` still need request-file/poll alternative (see `/tmp/windows-stage-chain-note.md` §1).
+3. Sortie-central items 5-6 remain in the other repo.
+4. End-to-end live-supervisor run already done (`/tmp/live-supervisor-verify.md`); repeat only after engine re-pin or workflow changes.
 
 ### Code map
 
