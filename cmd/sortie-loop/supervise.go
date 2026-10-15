@@ -38,6 +38,13 @@ var (
 	// sigRestartIdle replaces every loop, one at a time, each at its
 	// first moment with no work in flight, and stays up.
 	sigRestartIdle = syscall.SIGUSR2
+	// sigReload asks the supervisor to re-read .sortie/config.yaml and
+	// apply supervisor-level settings (sleep, cleanup, budgets) without
+	// restarting children. SIGHUP is preferred over a third SIGUSR* so
+	// the request stays a signal rather than a file. An accidental
+	// terminal close also sends SIGHUP, but reload never exits the run:
+	// validation failures only republish the status.
+	sigReload = syscall.SIGHUP
 )
 
 // drainSettle is how long a freshly started loop is left alone before it
@@ -298,9 +305,79 @@ func (s *supervisor) terminate(name string) {
 
 // run supervises the loops until the process should end, and returns the
 // exit code.
+func (s *supervisor) reload() {
+	cfg, err := config.Load(s.root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "sortie-loop: reload:", err)
+		s.republish()
+		return
+	}
+	if err := cfg.CheckCleanup(); err != nil {
+		fmt.Fprintln(os.Stderr, "sortie-loop: reload:", err)
+		s.republish()
+		return
+	}
+	if err := cfg.CheckBudgets(); err != nil {
+		fmt.Fprintln(os.Stderr, "sortie-loop: reload:", err)
+		s.republish()
+		return
+	}
+	for name, b := range cfg.Budgets {
+		if b.MaxUSD > 0 {
+			fmt.Fprintf(os.Stderr, "sortie-loop: workflows.%s.budget.max_usd is ignored: the engine records no cost per run\n", name)
+		}
+	}
+	s.mu.Lock()
+	s.sleepCfg = cfg.Sleep
+	s.mu.Unlock()
+	s.reloadBudgets(cfg.Budgets)
+	s.reloadCleanup(cfg)
+	s.republish()
+	fmt.Fprintln(os.Stderr, "sortie-loop: reloaded config")
+}
+
+func (s *supervisor) reloadBudgets(budgets map[string]config.Budget) {
+	s.mu.Lock()
+	filtered := map[string]config.Budget{}
+	for n, b := range budgets {
+		if _, ok := s.defs[n]; ok && b.MaxTokens > 0 {
+			filtered[n] = b
+		}
+	}
+	if len(filtered) == len(s.budgets) {
+		match := true
+		for n, b := range filtered {
+			if cur, ok := s.budgets[n]; !ok || cur != b {
+				match = false
+				break
+			}
+		}
+		if match {
+			s.mu.Unlock()
+			return
+		}
+	}
+	s.budgets = filtered
+	s.mu.Unlock()
+	s.budgetPoll(true)
+	s.saveBudgetStates()
+}
+
+func (s *supervisor) reloadCleanup(cfg *config.Config) {
+	s.mu.Lock()
+	wasEnabled := s.cleanupCancel != nil
+	s.mu.Unlock()
+	if wasEnabled || cfg.Cleanup.Enabled {
+		s.stopCleanup()
+		if cfg.Cleanup.Enabled {
+			s.startCleanup(cfg)
+		}
+	}
+}
+
 func (s *supervisor) run() int {
-	sig := make(chan os.Signal, 4)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM, sigStopIdle, sigRestartIdle)
+	sig := make(chan os.Signal, 5)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM, sigStopIdle, sigRestartIdle, sigReload)
 	tick := time.NewTicker(2 * time.Second)
 	defer tick.Stop()
 	for {
@@ -329,6 +406,9 @@ func (s *supervisor) run() int {
 
 func (s *supervisor) onSignal(sg os.Signal) (int, bool) {
 	switch sg {
+	case sigReload:
+		s.reload()
+		return 0, false
 	case syscall.SIGINT, syscall.SIGTERM:
 		s.stopAll(false, false)
 		s.exitWhenEmpty = true

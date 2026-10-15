@@ -63,7 +63,7 @@ func parseArgs(argv []string) (cmdline, error) {
 				continue
 			}
 			return c, fmt.Errorf("unknown flag %q", arg)
-		case "stop", "restart", "status", "cleanup", "wake", "pause", "resume", "budget":
+		case "stop", "restart", "status", "cleanup", "wake", "pause", "resume", "budget", "reload", "validate":
 			// A subcommand: everything after it belongs to runRemote,
 			// which does its own parsing, so stop collecting here.
 			c.remote = name
@@ -123,6 +123,7 @@ func usage() {
          sortie-loop pause <workflow> [--json] [repo-root]
          sortie-loop resume <workflow> [--json] [repo-root]
          sortie-loop budget override <workflow> [--json] [repo-root]
+         sortie-loop reload [--json] [repo-root]
   Run every WORKFLOW.*.md loop in .sortie/workflows/ against the repo at repo-root (default: cwd).
   SORTIE_LOOP_ONLY=plan,build  start only these loops (default: all of them)
   Settings live in <root>/.sortie/config.yaml; repo id defaults to the git remote.
@@ -134,6 +135,7 @@ func usage() {
   pause stops one workflow's engine loop and keeps it stopped, also after a budget pause; resume starts it again.
   budget override lifts a budget pause and turns the cap off for the rest of the period (settings: workflows: in config.yaml).
   resume of a loop that is at or over its cap also turns the cap off for the rest of the period, because the loop would otherwise be paused again at the next poll.
+  reload re-reads .sortie/config.yaml without restarting children; supervisor-level settings (sleep, cleanup, budgets) take effect immediately, workflow filter changes need restart --when-idle.
   --version prints the tool version and the engine it drives; --dump-version prints only the engine version.`)
 }
 
@@ -189,6 +191,10 @@ func run() (code int) {
 	}
 	if c.remote == "cleanup" {
 		runCleanupCmd(c.remoteArgs)
+		return 0
+	}
+	if c.remote == "reload" {
+		runReload(c.remoteArgs)
 		return 0
 	}
 	if c.remote != "" {
