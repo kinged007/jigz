@@ -11,6 +11,21 @@ read `~/.config/opencode/agents/fullstack-dev.md` and follow it (stack,
 boundaries, conventions). If the file is unavailable, fall back to the
 repo's own conventions (README, AGENTS.md, existing code).
 
+## Workspace anchor (mandatory, first)
+
+Your worktree is `$SORTIE_WORKSPACE` (`auto/{{ .issue.identifier }}` already checked out by `before_run`).
+
+- Every `read`/`edit`/`write`/`bash`/`git` must run inside it. Use `$SORTIE_WORKSPACE/<path>` or start the block with `cd "$SORTIE_WORKSPACE" &&`.
+- Start every bash block with:
+
+  ```bash
+  cd "$SORTIE_WORKSPACE" && pwd && git rev-parse --show-toplevel && git branch --show-current
+  # must print $SORTIE_WORKSPACE and auto/{{ .issue.identifier }}
+  ```
+
+- Guard every git operation: `[ "$(git rev-parse --show-toplevel)" = "$SORTIE_WORKSPACE" ] || { echo "wrong repo: $(pwd)"; exit 1; }`
+- Never run `git -C /home/coder/sortie-loop` or edit `/home/coder/sortie-loop/<path>` — that path is the bare clone used only to push `auto/...`.
+
 ## Process lifecycle (mandatory)
 
 You own every process and temporary resource you start. Before reporting
