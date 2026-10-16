@@ -13,6 +13,7 @@ import (
 
 // cmdline is the parsed command line.
 type cmdline struct {
+	start       bool
 	setup       bool
 	setupJSON   bool
 	repo        string
@@ -40,6 +41,10 @@ var errHelp = errors.New("help")
 // `sortie-loop setup --repo owner/name ./repo` both target ./repo.
 func parseArgs(argv []string) (cmdline, error) {
 	var c cmdline
+	if len(argv) > 0 && argv[0] == "start" {
+		c.start = true
+		argv = argv[1:]
+	}
 	var bare []string
 	for i := 0; i < len(argv); i++ {
 		arg := argv[i]
@@ -56,6 +61,9 @@ func parseArgs(argv []string) (cmdline, error) {
 		}
 		switch name {
 		case "setup":
+			if c.start {
+				return c, fmt.Errorf("unknown flag %q", arg)
+			}
 			c.setup = true
 		case "--json":
 			if c.setup {
@@ -64,6 +72,9 @@ func parseArgs(argv []string) (cmdline, error) {
 			}
 			return c, fmt.Errorf("unknown flag %q", arg)
 		case "stop", "restart", "status", "cleanup", "wake", "pause", "resume", "budget", "reload", "validate":
+			if c.start {
+				return c, fmt.Errorf("unknown flag %q", arg)
+			}
 			// A subcommand: everything after it belongs to runRemote,
 			// which does its own parsing, so stop collecting here.
 			c.remote = name
@@ -114,6 +125,7 @@ var usageWriter = func(s string) { fmt.Println(s) }
 
 func usage() {
 	usageWriter(`Usage: sortie-loop [--no-server] [--no-dashboard] [--dashboard-port=N] [--unite] [repo-root]
+         sortie-loop start [--no-server] [--no-dashboard] [--dashboard-port=N] [--unite] [repo-root]
          sortie-loop setup [repo-root] [--repo=owner/name] [--json]
          sortie-loop stop [--when-idle] [repo-root]
          sortie-loop restart [--when-idle] [repo-root]
@@ -173,6 +185,10 @@ func run() (code int) {
 	}
 	if c.showVersion {
 		fmt.Printf("sortie-loop %s (engine %s)\n", version, engineVersion())
+		return 0
+	}
+	if c.start {
+		runStart(c)
 		return 0
 	}
 	if c.setup {
