@@ -75,7 +75,7 @@ agent:
   max_retry_backoff_ms: 120000
 
 pi:
-  model: "coding-med"
+  model: "sonnet"
 
 # Alternative agent: Claude Code. To switch, comment out the active
 # `agent:`/`pi:` blocks above and uncomment the blocks below.
