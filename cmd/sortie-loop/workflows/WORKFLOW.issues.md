@@ -21,6 +21,7 @@ tracker:
   # transition adds agent:done on a clean exit. agent:done is not an active
   # state, so nothing re-dispatches a finished issue.
   handoff_state: agent:done
+  handoff_evidence: off
   # A closed issue is terminal, which triggers workspace cleanup.
   # agent:done is not terminal: it does not close the issue.
   terminal_states: [closed]
@@ -102,11 +103,26 @@ pi:
 # the plan comment before implementing when none exists.
 dispatch:
   rules:
-    - {name: plan,       match: {labels: ["agent:plan"]},       template: ./prompts/plan.md}
-    - {name: plan-build, match: {labels: ["agent:plan-build"]}, template: ./prompts/plan.md, next: build-chain}
-    - {name: build,      match: {labels: ["agent:build"]},      template: ./prompts/build.md}
-    - {name: docs,       match: {labels: ["agent:docs"]},       template: ./prompts/docs.md}
-    - {name: build-chain, stage: stage-build,                   template: ./prompts/build.md}
+    - name: plan
+      match:
+        labels: ["agent:plan"]
+      template: ./prompts/plan.md
+    - name: plan-build
+      match:
+        labels: ["agent:plan-build"]
+      template: ./prompts/plan.md
+      next: build-chain
+    - name: build
+      match:
+        labels: ["agent:build"]
+      template: ./prompts/build.md
+    - name: docs
+      match:
+        labels: ["agent:docs"]
+      template: ./prompts/docs.md
+    - name: build-chain
+      stage: stage-build
+      template: ./prompts/build.md
 ---
 
 {{/* Issue workflow: plan, build and docs rules. Prompts live in
