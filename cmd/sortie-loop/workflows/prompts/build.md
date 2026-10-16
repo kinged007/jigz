@@ -211,15 +211,28 @@ verification and comment on every turn.
 
 ## Finishing the run
 
-You own the labels. If you opened a PR, hand it to the review loop and
-close out the issue in the same turn:
+You own the labels. If you opened a PR, route it and close out the
+issue in the same turn. Auto-review is controlled by
+`SORTIE_AUTO_REVIEW` (env, default `true` when unset; also skipped when
+the PR carries `no-auto-review`): when `false`/skipped, finish with
+`agent:done` instead of handing to the review loop.
 
-```
-# the PR: the next loop in is the review
-gh pr edit <pr> --repo $SORTIE_TRACKER_PROJECT \
-  --add-assignee @me --add-label "agent:review"
+```bash
+# the PR: route according to SORTIE_AUTO_REVIEW (default true)
+# per-PR opt-out: label no-auto-review also skips review
+_auto_review="${SORTIE_AUTO_REVIEW:-true}"
+if gh pr view <pr> --repo $SORTIE_TRACKER_PROJECT --json labels --jq '.labels[].name' 2>/dev/null | grep -qx "no-auto-review"; then
+  _auto_review="false"
+fi
+if [ "$_auto_review" = "true" ]; then
+  gh pr edit <pr> --repo $SORTIE_TRACKER_PROJECT \
+    --add-assignee @me --add-label "agent:review"
+else
+  gh pr edit <pr> --repo $SORTIE_TRACKER_PROJECT \
+    --remove-label "agent:review,in-progress" --add-label "agent:done"
+fi
 
-# the issue: this run is over
+# the issue: this run is over (always)
 gh issue edit {{ .issue.identifier }} --repo $SORTIE_TRACKER_PROJECT \
   --remove-label "agent:build,agent:plan-build,in-progress" --add-label "agent:done"
 ```

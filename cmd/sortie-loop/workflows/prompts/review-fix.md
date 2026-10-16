@@ -124,6 +124,12 @@ then fix them on the PR branch:
      --remove-label "agent:build,in-progress,agent:done" --add-label "agent:review"
    ```
 
+   Then terminate so the runner does not re-send:
+
+   ```bash
+   mkdir -p .sortie && echo "needs-human-review" > .sortie/status
+   ```
+
    `agent:done` keeps every loop away from the PR, so a trigger meant
    for the next stage has to be in the same command as its removal.
 

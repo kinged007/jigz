@@ -189,6 +189,18 @@ branches, or push anything. Do not open issues or PRs.
 
 ## Step 4: Finish — set the label and release the claim
 
+Guard against duplicate posts — this prompt is re-sent every turn while
+the PR stays in an active state. If this head already has a review,
+exit without posting:
+
+```bash
+head="$(git rev-parse HEAD 2>/dev/null || echo "")"
+if [ -n "$head" ] && gh api "repos/$SORTIE_TRACKER_PROJECT/pulls/{{ .issue.identifier }}/reviews" --jq '.[].commit_id' 2>/dev/null | grep -qx "$head"; then
+  mkdir -p .sortie && echo "needs-human-review" > .sortie/status
+  exit 0
+fi
+```
+
 You own the labels, and the review you just posted carries the outcome,
 so you route the PR yourself. Always drop your trigger and the claim; add
 the next loop's trigger when there is work left, `agent:done` when there
@@ -210,6 +222,15 @@ review is finished; what happens next is a person's call:
 gh pr edit {{ .issue.identifier }} --repo $SORTIE_TRACKER_PROJECT \
   --remove-label "agent:review,in-progress" --add-label "agent:done"
 ```
+
+Then terminate the run so the runner does not re-send this prompt:
+
+```bash
+mkdir -p .sortie && echo "needs-human-review" > .sortie/status
+```
+
+Without `.sortie/status` the runner re-sends this prompt every
+`stall_timeout_ms` until `max_turns` and you post duplicate reviews.
 
 `agent:done` keeps every loop away from the PR, so a trigger meant for
 the next stage has to be in the same command as its removal.

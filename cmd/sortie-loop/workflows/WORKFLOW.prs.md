@@ -116,5 +116,5 @@ dispatch:
      clean, review-fix adds agent:review for another pass, merge finishes
      with agent:done. Blocked work keeps its trigger and adds needs-human,
      which the query_filter exclusion drops. The body below never renders;
-     it documents the routing. */}}
+     it documents the routing. Auto-review default true, opt-out via SORTIE_AUTO_REVIEW=false or label no-auto-review. */}}
 PR workflow routing only — the prompt comes from the dispatch template.
