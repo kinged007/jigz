@@ -1,0 +1,66 @@
+{{define "usage"}}{{template "shell-top" .}}
+<div class="pagehead">
+  <div>
+    <h1>Usage and cost</h1>
+    <p class="sub">Tokens used by finished runs, from central's run history. Days are {{"UTC"}} days. Cost is not shown: the engine records no cost yet.</p>
+  </div>
+</div>
+{{if .Unavailable}}<div class="banner">Run history is unavailable.</div>{{else}}
+<div class="row" style="margin-bottom:.75rem">
+  <div class="seg" role="group" aria-label="Period">{{range .Periods}}<a href="/usage?period={{.}}&amp;group={{$.Group}}" {{if eq . $.Period}}aria-current="true"{{end}}>{{.}}</a>{{end}}</div>
+  <div class="seg" role="group" aria-label="Group by">{{range .Groups}}<a href="/usage?period={{$.Period}}&amp;from={{$.From}}&amp;to={{$.To}}&amp;group={{.}}" {{if eq . $.Group}}aria-current="true"{{end}}>{{.}}</a>{{end}}</div>
+  {{if eq .Period "custom"}}<form class="row" method="get" action="/usage">
+    <input type="hidden" name="period" value="custom"><input type="hidden" name="group" value="{{.Group}}">
+    <label class="f">From<input type="date" name="from" value="{{.From}}"></label>
+    <label class="f">To<input type="date" name="to" value="{{.To}}"></label>
+    <button type="submit">Apply</button>
+  </form>{{else}}<span class="muted">{{.From}} to {{.To}} (UTC)</span>{{end}}
+</div>
+<div class="tiles">
+  <div class="tile"><b>{{commas .Totals.Total}}</b><span>tokens, measured runs</span></div>
+  <div class="tile"><b>{{commas .Totals.Runs}}</b><span>runs in range</span></div>
+  {{with .PRsOpened}}<div class="tile"><b>{{commas .Total}}</b><span>PRs opened {{template "info" "Source: GitHub pull requests central has cached, by created_at in the range. Only pull requests found through central's runs are counted."}}</span></div>{{end}}
+  {{with .PRsMerged}}<div class="tile"><b>{{commas .Total}}</b><span>PRs merged {{template "info" "Source: GitHub pull requests central has cached, by merged_at in the range. Only pull requests found through central's runs are counted."}}</span></div>{{end}}
+  <div class="tile"><b {{if .Totals.Unmeasured}}style="color:var(--warn)"{{end}}>{{commas .Totals.Unmeasured}}</b><span>unmeasured runs, excluded from totals</span></div>
+  <div class="tile off" aria-disabled="true"><b>needs engine cost data (planned)</b><span>cost</span></div>
+</div>
+{{if .Empty}}<p class="empty">No runs in this range. Pick a longer period.</p>{{else}}
+<div class="card"><h2>Tokens per project over time {{template "info" "Source: run_history total_tokens of measured runs (tokens_measured = 1), per UTC day of started_at."}}</h2>{{.ProjectsChart}}</div>
+<div class="card"><h2>Tokens by {{.Group}}</h2>{{.GroupChart}}</div>
+<div class="tw"><table>
+<thead><tr>
+  <th>{{.Group}}</th><th class="num">runs</th>
+  <th class="num" title="Runs whose adapter reported no tokens. Their tokens are not in the columns to the right.">unmeasured</th>
+  <th class="num" title="Input tokens, including cache reads">input</th><th class="num">output</th><th class="num">cache read</th>
+  <th class="num">total</th><th class="num" title="The engine does not record cost yet">cost</th><th></th>
+</tr></thead>
+<tbody>
+{{range .Rows}}<tr>
+  <td>{{.Label}}</td><td class="num">{{commas .Runs}}</td><td class="num">{{commas .Unmeasured}}</td>
+  <td class="num">{{commas .Input}}</td><td class="num">{{commas .Output}}</td><td class="num">{{commas .CacheRead}}</td>
+  <td class="num"><b>{{commas .Total}}</b></td><td class="num">&mdash;</td>
+  <td><a href="{{.Href}}">view runs</a></td>
+</tr>
+{{end}}
+</tbody>
+</table></div>
+<p class="sub">Unmeasured runs are counted separately and excluded from every token figure on this page.</p>
+<h2>Top issues by tokens</h2>
+{{if .Top}}<div class="tw"><table>
+<thead><tr><th>issue or PR</th><th class="num">runs</th><th class="num" title="Summed over all stages and retries">tokens</th><th></th></tr></thead>
+<tbody>
+{{range .Top}}<tr><td>{{.DisplayIdentifier}}</td><td class="num">{{commas .Runs}}</td><td class="num">{{commas .Total}}</td><td><a href="{{.Href}}">view runs</a></td></tr>
+{{end}}
+</tbody></table></div>{{else}}<p class="empty">No measured runs in this range.</p>{{end}}
+{{end}}
+<h2>Token cap per workflow</h2>
+<p class="muted">needs sortie-loop budget status (planned)</p>
+{{if .Holds}}<div class="tw"><table>
+<thead><tr><th>budget hold</th><th></th></tr></thead>
+<tbody>
+{{range .Holds}}<tr><td>{{.Msg}}</td><td><a href="{{.Href}}">project</a></td></tr>
+{{end}}
+</tbody></table></div>{{end}}
+{{end}}
+{{template "chartjs"}}
+{{template "shell-bottom" .}}{{end}}

@@ -1,0 +1,17 @@
+{{define "agents"}}{{template "shell-top" .}}
+<div class="pagehead">
+  <div>
+    <h1>Agents</h1>
+    <p class="sub">The agent settings in force for each project and workflow: central defaults, then the project, then a workflow override, and the workflow file where central sets nothing. A value central sets is written into the file when the config is applied. A dash means nothing sets it, so the engine's own default applies.</p>
+  </div>
+  {{if .Auth.Authenticated}}<a class="btn" href="/edit/agent/defaults">Edit defaults</a>{{else}}<button type="button" {{ctl false ""}}>Edit defaults</button>{{end}}
+</div>
+<p class="legend"><span><span class="org o-default">default</span> central defaults</span><span><span class="org o-repo">repo</span> project override</span><span><span class="org o-workflow">workflow</span> workflow override</span><span><span class="org o-file">file</span> workflow file only</span></p>
+<div class="tw"><table class="agents">
+<thead><tr><th>Project / workflow</th>{{range .Columns}}<th>{{.Label}}</th>{{end}}<th>Edit</th></tr></thead><tbody>
+{{range .Rows}}{{if .Group}}<tr class="group"><td colspan="{{$.Span}}">{{.Label}}{{if $.Auth.Authenticated}} <a class="btn" href="{{.EditURL}}">Edit project overrides</a>{{else}} <button type="button" {{ctl false ""}}>Edit project overrides</button>{{end}}</td></tr>
+{{else}}<tr><td>{{.Label}}{{if .Note}} <span class="muted">{{.Note}}</span>{{end}}</td>{{range .Cells}}<td>{{if .Value}}<code>{{.Value}}</code> <span class="org o-{{.Origin}}">{{.Origin}}</span>{{if .File}}<br><span class="muted">file <code>{{.File}}</code></span>{{end}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>{{end}}<td>{{if $.Auth.Authenticated}}<a class="btn" href="{{.EditURL}}">Edit</a>{{else}}<button type="button" {{ctl false ""}}>Edit</button>{{end}}</td></tr>
+{{end}}{{end}}
+</tbody></table></div>
+{{template "statuspoll"}}
+{{template "shell-bottom" .}}{{end}}

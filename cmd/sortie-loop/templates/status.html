@@ -1,0 +1,29 @@
+{{/* The load and the clock. This is its own fragment because it sits in
+     the header, outside the live block, and a CPU percentage is only
+     meaningful when it is re-read: a single sample of /proc/stat is
+     cumulative since boot. */}}
+{{define "status"}}<div class="status" id="status">
+  <span class="metric">
+    {{template "icon-memory"}}
+    <span class="figures">
+      <span class="pct">{{pct .Sys.MemUsed .Sys.MemTotal}}</span>
+      <span class="sub">{{gib .Sys.MemTotal}}</span>
+    </span>
+  </span>
+  <span class="metric">
+    {{template "icon-cpu"}}
+    <span class="figures">
+      <span class="pct">{{cpu .Sys.CPU}}</span>
+      <span class="sub">{{.Sys.Cores}} cores</span>
+    </span>
+  </span>
+  <span class="metric">
+    {{template "icon-disk"}}
+    <span class="figures">
+      <span class="pct">{{pct .Sys.DiskUsed .Sys.DiskTotal}}</span>
+      <span class="sub">{{gib .Sys.DiskTotal}}</span>
+    </span>
+  </span>
+  <span class="clock" id="clock">{{.Now.Format "15:04:05"}}</span>
+</div>
+{{end}}

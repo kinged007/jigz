@@ -1,0 +1,55 @@
+{{define "settings"}}{{template "shell-top" .}}
+<div class="pagehead">
+  <div>
+    <h1>Settings</h1>
+    <p class="sub">Central's own configuration, access, versions and paths.</p>
+  </div>
+  <div class="row">
+    {{if .Auth.Authenticated}}<a class="btn" href="/edit/central">Edit central config</a><a class="btn" href="/backups">Backups</a>
+    {{else}}<button type="button" {{ctl false ""}}>Edit central config</button><button type="button" {{ctl false ""}}>Backups</button>{{end}}
+    {{template "fleetactions" .}}
+  </div>
+</div>
+<div class="grid2">
+  <div class="card"><h2>Access</h2>
+    <table class="kv"><tbody>
+      <tr><td>Password</td><td>{{if .Auth.PasswordSet}}<span class="chip s-succeeded">set</span>{{else}}<span class="chip s-warn">not set</span>{{end}}</td></tr>
+      <tr><td>Public read</td><td>{{if .Access.PublicRead}}on{{else}}off{{end}}</td></tr>
+      <tr><td>Trusted proxy</td><td>{{if .Access.TrustedProxy}}on{{else}}off{{end}}</td></tr>
+    </tbody></table>
+    <ul class="muted">
+      <li>The password is read from <code>SORTIE_CENTRAL_PASSWORD</code> in the <code>.env</code> file beside the config. Central never stores or shows it. To change it, edit that file and restart central.</li>
+      {{if not .Auth.PasswordSet}}<li>No password is set, so the app is open to anyone who can reach it.</li>{{end}}
+      <li>Public read on: anyone can view pages, and every change still needs the password. Off: pages need a login too.</li>
+    </ul>
+  </div>
+  <div class="card"><h2>GitHub enrichment</h2>
+    <table class="kv"><tbody>
+      <tr><td>Enabled</td><td>{{if .GitHub.Enrich}}on{{else}}off{{end}}</td></tr>
+      <tr><td>Commits and checks</td><td>{{if .GitHub.DetailsOn}}on{{else}}off{{end}}</td></tr>
+      <tr><td>Pass interval</td><td>{{.GitHubInterval}}</td></tr>
+      <tr><td>API URL</td><td><code>{{.GitHubAPI}}</code></td></tr>
+      {{range .Statuses}}<tr><td>{{.Name}}</td><td>{{.Value}}</td></tr>{{end}}
+    </tbody></table>
+    <ul class="muted">
+      <li>Off by default. When on, central reads pull requests from GitHub with each project's own token (<code>token_env</code>) to fill branch, PR link and opened and merged times. It never writes to GitHub.</li>
+      <li>Commits and checks is off by default. When on (and enrichment is on), central also reads the commits, changed files and check runs of each pull request, with up to two more requests per pull request.</li>
+    </ul>
+  </div>
+  <div class="card"><h2>Versions</h2>
+    <table class="kv"><tbody>{{range .Versions}}<tr><td>{{.Name}}</td><td><code>{{.Value}}</code></td></tr>{{end}}</tbody></table>
+  </div>
+  <div class="card"><h2>Retention</h2>
+    <table class="kv"><tbody>
+      <tr><td>Host and fleet samples</td><td>{{.SampleDays}} days</td></tr>
+      <tr><td>Run history</td><td>kept indefinitely</td></tr>
+      <tr><td>Audit log</td><td>kept indefinitely</td></tr>
+      <tr><td>Backups per file</td><td>{{.BackupsKept}}</td></tr>
+    </tbody></table>
+  </div>
+  <div class="card"><h2>Paths</h2>
+    <table class="kv"><tbody>{{range .Paths}}<tr><td>{{.Name}}</td><td><code>{{.Value}}</code></td></tr>{{end}}</tbody></table>
+  </div>
+</div>
+{{template "statuspoll"}}
+{{template "shell-bottom" .}}{{end}}

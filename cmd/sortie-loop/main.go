@@ -13,16 +13,18 @@ import (
 
 // cmdline is the parsed command line.
 type cmdline struct {
-	setup       bool
-	setupJSON   bool
-	repo        string
-	dir         string
-	noServer    bool
-	noDashboard bool
-	unite       bool
-	dashPort    int
-	dumpVersion bool
-	showVersion bool
+	setup           bool
+	setupJSON       bool
+	repo            string
+	dir             string
+	noServer        bool
+	noDashboard     bool
+	unite           bool
+	dashPort        int
+	host            string
+	loopURLTemplate string
+	dumpVersion     bool
+	showVersion     bool
 	// remote is "stop", "restart", "status", "cleanup", "wake", "pause", "resume" or "budget" when one of those
 	// subcommands was given, and remoteArgs is everything after it.
 	remote     string
@@ -97,6 +99,18 @@ func parseArgs(argv []string) (cmdline, error) {
 				return c, fmt.Errorf("invalid --dashboard-port=%q", v)
 			}
 			c.dashPort = n
+		case "--host":
+			v, err := value()
+			if err != nil {
+				return c, err
+			}
+			c.host = v
+		case "--loop-url-template":
+			v, err := value()
+			if err != nil {
+				return c, err
+			}
+			c.loopURLTemplate = v
 		default:
 			if strings.HasPrefix(arg, "-") {
 				return c, fmt.Errorf("unknown flag %q", arg)
@@ -113,7 +127,7 @@ func parseArgs(argv []string) (cmdline, error) {
 var usageWriter = func(s string) { fmt.Println(s) }
 
 func usage() {
-	usageWriter(`Usage: sortie-loop [--no-server] [--no-dashboard] [--dashboard-port=N] [--unite] [repo-root]
+	usageWriter(`Usage: sortie-loop [--no-server] [--no-dashboard] [--dashboard-port=N] [--host=ADDR] [--loop-url-template=TEMPLATE] [--unite] [repo-root]
          sortie-loop setup [repo-root] [--repo=owner/name] [--json]
          sortie-loop stop [--when-idle] [repo-root]
          sortie-loop restart [--when-idle] [repo-root]
@@ -211,7 +225,7 @@ func run() (code int) {
 	if dir == "" {
 		dir = "."
 	}
-	noServer, noDashboard, dashPort, unite := c.noServer, c.noDashboard, c.dashPort, c.unite
+	noServer, noDashboard, dashPort, unite, hostFlag, loopURLTemplate := c.noServer, c.noDashboard, c.dashPort, c.unite, c.host, c.loopURLTemplate
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		fatal(err)
@@ -325,7 +339,7 @@ func run() (code int) {
 	// dashPort is negative when this run joins a live unite dashboard:
 	// its loops register above, and the existing page picks them up.
 	if !noDashboard && dashPort > 0 {
-		serveDashboard(dashPort, unite, sup)
+		serveDashboard(dashPort, unite, sup, hostFlag, loopURLTemplate)
 	} else if dashPort < 0 {
 		fmt.Printf("dashboard http://127.0.0.1:%d (unite: all repos)\n", -dashPort)
 	}

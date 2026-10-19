@@ -1,0 +1,66 @@
+{{define "runs"}}{{template "shell-top" .}}
+<style>
+table.runs td { vertical-align: top; }
+table.runs .ident { white-space: nowrap; }
+table.runs .ttl { max-width: 24rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+table.runs .out { min-width: 10rem; }
+</style>
+<div class="pagehead">
+  <div>
+    <h1>Runs</h1>
+    <p class="sub">{{.Total}} finished runs{{if .Q.Filtered}} match the filters{{end}}. Active runs stay on top.</p>
+  </div>
+  {{if .CSVURL}}<a class="btn" href="{{.CSVURL}}" title="Download the runs matching the filter as CSV">Export CSV</a>{{end}}
+</div>
+{{if .Unavailable}}<div class="banner">Run history is unavailable.</div>{{else}}
+<form class="filters" method="get" action="/runs" role="search">
+  <label class="f">Project<select name="project"><option value="">all</option>{{range .Opts.Projects}}<option {{if eq . $.Q.Project}}selected{{end}}>{{.}}</option>{{end}}</select></label>
+  <label class="f">Workflow<select name="workflow"><option value="">all</option>{{range .Opts.Workflows}}<option {{if eq . $.Q.Workflow}}selected{{end}}>{{.}}</option>{{end}}</select></label>
+  <label class="f">State<select name="state"><option value="">all</option>{{range .States}}<option {{if eq . $.Q.State}}selected{{end}}>{{.}}</option>{{end}}</select></label>
+  <label class="f">Model<select name="model"><option value="">all</option>{{range .Opts.Models}}<option {{if eq . $.Q.Model}}selected{{end}}>{{.}}</option>{{end}}</select></label>
+  <label class="f">Adapter<select name="adapter"><option value="">all</option>{{range .Opts.Adapters}}<option {{if eq . $.Q.Adapter}}selected{{end}}>{{.}}</option>{{end}}</select></label>
+  <label class="f">From<input type="date" name="from" value="{{.Q.From}}"></label>
+  <label class="f">To<input type="date" name="to" value="{{.Q.To}}"></label>
+  <label class="f">Identifier<input type="search" name="q" value="{{.Q.Q}}" placeholder="owner/repo#12"></label>
+  <button class="primary" type="submit">Apply</button>
+  {{if .Q.Filtered}}<a class="btn" href="/runs">Reset</a>{{end}}
+</form>
+{{if or .Live .Rows}}
+<div class="tw"><table class="runs">
+<thead><tr>
+  <th>Issue or PR</th><th>Project</th><th>Workflow</th><th>State</th><th>Model</th>
+  <th>Started (UTC)</th><th class="num">Duration</th><th class="num">Tokens</th><th class="num">Cost</th><th>Adapter</th>{{if .GitHub}}<th title="Pull requests central has cached from GitHub">PR</th>{{end}}<th>Outcome</th>
+</tr></thead>
+<tbody>
+{{if .Live}}<tr class="group"><td colspan="{{.Cols}}">Active ({{len .Live}})</td></tr>{{end}}
+{{range .Live}}{{template "runrow" .}}{{end}}
+{{if and .Live .Rows}}<tr class="group"><td colspan="{{.Cols}}">Finished</td></tr>{{end}}
+{{range .Rows}}{{template "runrow" .}}{{end}}
+</tbody>
+</table></div>
+<p class="row">
+  <span class="muted" style="margin-right:auto">Page {{.Page}} of {{.Pages}}. 50 per page.</span>
+  <a class="btn {{if not .Prev}}off{{end}}" {{if .Prev}}href="{{.Prev}}"{{end}}>Previous</a>
+  <a class="btn {{if not .Next}}off{{end}}" {{if .Next}}href="{{.Next}}"{{end}}>Next</a>
+</p>
+{{else}}
+<div class="empty"><b>No runs match these filters.</b><br>Try a wider date range or clear the search.<br><br><a class="btn" href="/runs">Reset filters</a></div>
+{{end}}
+{{end}}
+{{template "statuspoll"}}
+{{template "shell-bottom" .}}{{end}}
+
+{{define "runrow"}}<tr>
+  <td><div class="ident"><a href="{{if .Href}}{{.Href}}{{else}}{{.IssueURL}}{{end}}"{{if not .Href}} target="_blank" rel="noopener"{{end}} title="{{.Identifier}}">{{.Short}}</a></div>{{if .Title}}<div class="muted ttl" title="{{.Title}}">{{.Title}}</div>{{end}}</td>
+  <td title="{{.Project}}">{{.Repo}}</td>
+  <td>{{.Workflow}}</td>
+  <td><span class="chip s-{{.State}}">{{.State}}</span></td>
+  <td>{{if .Model}}{{.Model}}{{if .ModelSource}}<span class="tag" title="{{if eq .ModelSource "observed"}}Recorded by the engine for this run{{else}}Taken from the workflow settings; the engine did not record it{{end}}">{{.ModelSource}}</span>{{end}}{{else}}<span class="na">not available</span>{{end}}</td>
+  <td>{{if .Started}}{{.Started}}{{else}}<span class="na">not available</span>{{end}}</td>
+  <td class="num">{{if .Duration}}{{.Duration}}{{if .Active}}&hellip;{{end}}{{else}}<span class="na">not available</span>{{end}}</td>
+  <td class="num">{{if .Tokens}}{{.Tokens}}{{else if .Unmeasured}}<span class="chip s-warn" title="The engine did not report tokens for this run">unmeasured</span>{{else}}<span class="na">not available</span>{{end}}</td>
+  <td class="num" title="The engine reports no cost">&mdash;</td>
+  <td>{{if .Adapter}}{{.Adapter}}{{else}}<span class="na">not available</span>{{end}}</td>
+  {{if .Delivery}}<td>{{range .PRs}}<div><a href="{{.URL}}" target="_blank" rel="noopener">#{{.Number}}</a> <span class="chip s-{{.State}}">{{.State}}</span></div>{{else}}<span class="na">not available yet</span>{{end}}</td>{{end}}
+  <td class="out">{{if .Active}}&mdash;{{else if .Error}}<span title="{{.Error}}">{{.Outcome.Text}}</span>{{else}}{{.Outcome.Text}}{{end}}</td>
+</tr>{{end}}

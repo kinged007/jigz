@@ -1,0 +1,89 @@
+{{define "wizhidden"}}<input type="hidden" name="csrf" value="{{.Auth.CSRF}}"><input type="hidden" name="step" value="{{.Step}}">{{range .Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}{{end}}
+
+{{define "wizard"}}{{template "shell-top" .}}
+<p class="sub"><a href="/projects">Projects</a> / new</p>
+<h1>Add project</h1>
+<p class="sub">Registers a repository, installs its workflows and starts its loops.</p>
+<ol class="steps" aria-label="Steps">{{range .Steps}}<li class="{{.Class}}" {{if eq .Class "cur"}}aria-current="step"{{end}}>{{.Name}}</li>{{end}}</ol>
+{{if .Probs}}<div class="banner err" role="alert"><b>{{len .Probs}} problem{{if gt (len .Probs) 1}}s{{end}} found. Nothing was written.</b>
+  <ul>{{range .Probs}}<li>{{if .Path}}<a href="#f-{{.Path}}">{{.Path}}</a>: {{end}}{{.Msg}}</li>{{end}}</ul></div>{{end}}
+<form method="post" action="/projects/new">
+{{template "wizhidden" .}}
+{{if eq .Step 1}}
+  <div class="card">
+    {{template "field" (index .F "repo")}}
+    {{template "field" (index .F "path")}}
+    <p class="muted" style="margin:0 0 .5rem">Empty uses <code>{{.DefPath}}</code>, with the owner and name of the repository.</p>
+    {{template "field" (index .F "token_env")}}
+    <p class="muted" style="margin:0 0 .5rem">Central checks that the variable is set in its own environment. The value is never shown.</p>
+    {{if .Checked}}<div class="banner {{if not .Token.Warn}}ok{{end}}" role="status">{{.Token.Detail}}</div>{{end}}
+  </div>
+  <p class="row"><button type="submit" class="primary">Next</button><button type="submit" name="check" value="1" formnovalidate>Check token</button><a class="btn" href="/projects">Cancel</a></p>
+{{else if eq .Step 2}}
+  <div class="banner {{if not .Token.Warn}}ok{{end}}">{{.Token.Detail}}</div>
+  <div class="card"><h3>Workflows</h3>
+    {{if .Known}}
+    <p class="muted" style="margin-top:0">The workflow names already used by projects in this config. None ticked starts every workflow setup installs.</p>
+    <div class="row" id="f-workflows">{{range .Known}}<label class="check" style="opacity:1;cursor:default"><input type="checkbox" name="workflows" value="{{.Name}}" {{if .Checked}}checked{{end}}> {{.Name}}</label>{{end}}</div>
+    {{else}}
+    <p class="muted" style="margin:0">No project has workflows yet, so every workflow <code>sortie-loop setup</code> installs is started. To pick some, edit the project's workflow list afterwards.</p>
+    {{end}}
+  </div>
+  <div class="card"><h3>Agent defaults</h3>
+    <p class="muted" style="margin-top:0">Empty fields use the central defaults shown in them.</p>
+    {{template "field" (index .F "agent.kind")}}
+    {{template "field" (index .F "agent.model")}}
+  </div>
+  <div class="card"><h3>Which issues</h3>
+    {{template "field" (index .F "assignee")}}
+    {{template "field" (index .F "milestone")}}
+    {{template "field" (index .F "filters")}}
+  </div>
+  <p class="row"><button type="submit" class="primary">Next</button><button type="submit" name="back" value="1">Back</button></p>
+{{else}}
+  {{if .Dry}}
+  <div class="card"><h3>Dry run: what will be created</h3>
+    <p class="muted" style="margin-top:0">Nothing has been written yet.</p>
+    <table><tbody>{{range .Dry}}<tr><td>{{.What}}</td><td>{{if .Warn}}<b style="color:var(--warn)">{{.Detail}}</b>{{else}}{{.Detail}}{{end}}</td></tr>{{end}}</tbody></table>
+  </div>
+  {{if .Warns}}<details class="warns"><summary>{{len .Warns}} warning{{if gt (len .Warns) 1}}s{{end}} from the config check</summary><ul>{{range .Warns}}<li>{{.}}</li>{{end}}</ul></details>{{end}}
+  <h3>Config diff</h3>
+  <pre class="diff" tabindex="0" aria-label="Unified diff">{{range .Diff}}<span class="{{.Class}}">{{.Text}}</span>{{end}}</pre>
+  {{end}}
+  <p class="row">{{if .CanBuild}}<button type="submit" class="primary">Create project</button>{{end}}<button type="submit" name="back" value="1">Back</button></p>
+{{end}}
+</form>
+{{template "statuspoll"}}
+{{template "shell-bottom" .}}{{end}}
+
+{{define "projectresult"}}{{template "shell-top" .}}
+<p class="sub"><a href="/projects">Projects</a> / {{if eq .Kind "add"}}new{{else}}remove{{end}}</p>
+<h1>{{if eq .Kind "add"}}Add{{else}}Remove{{end}} {{.Slug}}</h1>
+<ol class="steps" aria-label="Steps">{{range .Steps}}<li class="{{if eq .Status "ok"}}done{{else if eq .Status "failed"}}fail{{else}}skip{{end}}">{{.Name}}</li>{{end}}</ol>
+<div class="card"><h3>Result {{if .Failed}}<span class="chip v-invalid">failed at {{.Failed}}</span>{{else}}<span class="chip v-valid">{{if eq .Kind "add"}}project created{{else}}project removed{{end}}</span>{{end}}</h3>
+<ol class="out">{{range .Steps}}<li class="{{if eq .Status "failed"}}bad{{end}}">
+  {{if eq .Status "ok"}}<span class="chip v-valid">done</span>{{else if eq .Status "failed"}}<span class="chip v-invalid">failed</span>{{else}}<span class="chip">skipped</span>{{end}}
+  <b>{{.Name}}</b> <span class="muted">{{.Note}}</span>
+  {{if .Output}}<pre style="margin-top:.4rem">{{.Output}}</pre>{{end}}</li>{{end}}</ol>
+{{if .Failed}}<div class="banner err">{{if eq .Kind "add"}}The repo entry stays in the config with <code>enabled: false</code>. Fix the cause, then turn it on in the project editor.{{else}}The steps after the failed one did not run. The project is disabled but still in the config.{{end}}</div>{{end}}
+<p class="row">{{if eq .Kind "add"}}<a class="btn primary" href="/projects/{{.Slug}}">Open project</a><a class="btn" href="/projects/new">Add another</a>{{else if .Failed}}<a class="btn primary" href="/projects/{{.Slug}}">Open project</a>{{end}}<a class="btn" href="/projects">All projects</a></p>
+</div>
+{{template "statuspoll"}}
+{{template "shell-bottom" .}}{{end}}
+
+{{define "projectremove"}}{{template "shell-top" .}}
+<p class="sub"><a href="/projects">Projects</a> / <a href="/projects/{{.Slug}}">{{.Slug}}</a> / remove</p>
+<h1>Remove {{.Slug}}</h1>
+<p>This disables the project, {{if .Running}}stops its running loops now (work in flight is cancelled and retried if the project is added again), {{end}}and takes its entry out of the config. A backup of the config is kept.</p>
+<form method="post" action="/projects/{{.Slug}}/remove">
+  <input type="hidden" name="csrf" value="{{.Auth.CSRF}}"><input type="hidden" name="confirm" value="1">
+  <div class="card"><h3>Files</h3>
+    <label class="check" style="opacity:1;cursor:default"><input type="checkbox" name="delete_files" value="1" {{if .DeleteFiles}}checked{{end}} {{if .NoDelete}}disabled{{end}}> also delete files</label>
+    <p class="muted">Deletes <code>{{.Dir}}</code> with its workspaces and databases. Cannot be undone. Off by default.</p>
+    {{if .NoDelete}}<p class="muted">Not available: {{.NoDelete}}.</p>{{else}}
+    <label class="f"><span>Type <code>{{.Slug}}</code> to confirm deleting the files</span><input name="typed" autocomplete="off" spellcheck="false"></label>{{end}}
+  </div>
+  <p class="row"><button type="submit" class="primary">Remove project</button><a class="btn" href="/projects/{{.Slug}}">Cancel</a></p>
+</form>
+{{template "statuspoll"}}
+{{template "shell-bottom" .}}{{end}}

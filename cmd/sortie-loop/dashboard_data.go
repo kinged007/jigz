@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,16 +34,17 @@ type loopStats struct {
 	BudgetExhausted int      `json:"budget_exhausted"`
 	SlotsFree       int      `json:"slots_free"`
 	// All-time figures from the DB.
-	AllInput   int64   `json:"all_input"`
-	AllOutput  int64   `json:"all_output"`
-	AllTotal   int64   `json:"all_total"`
-	AllCache   int64   `json:"all_cache"`
-	Runs       int     `json:"runs"`
-	Succeeded  int     `json:"succeeded"`
-	Failed     int     `json:"failed"`
-	RuntimeSec float64 `json:"runtime_sec"`
-	DBLive     bool    `json:"db_live"`
-	DBError    string  `json:"db_error,omitempty"`
+	AllInput   int64    `json:"all_input"`
+	AllOutput  int64    `json:"all_output"`
+	AllTotal   int64    `json:"all_total"`
+	AllCache   int64    `json:"all_cache"`
+	Runs       int      `json:"runs"`
+	Succeeded  int      `json:"succeeded"`
+	Failed     int      `json:"failed"`
+	RuntimeSec float64  `json:"runtime_sec"`
+	Cost       *float64 `json:"cost,omitempty"`
+	DBLive     bool     `json:"db_live"`
+	DBError    string   `json:"db_error,omitempty"`
 }
 
 type runRow struct {
@@ -52,6 +54,7 @@ type runRow struct {
 	Tokens     int64  `json:"tokens"`
 	Model      string `json:"model"`
 	StartedAt  string `json:"started_at"`
+	PickUp     string `json:"picked_up,omitempty"`
 }
 
 type issueStats struct {
@@ -211,4 +214,169 @@ func fmtDuration(sec float64) string {
 		return fmt.Sprintf("%dm%ds", m, int(d.Seconds())%60)
 	}
 	return fmt.Sprintf("%ds", int(d.Seconds()))
+}
+
+func size(b int64) string {
+	const (
+		kiB = 1 << 10
+		miB = 1 << 20
+		giB = 1 << 30
+	)
+	switch {
+	case b < 0:
+		return "\u2014"
+	case b < miB:
+		return fmt.Sprintf("%.0f KiB", float64(b)/kiB)
+	case b < giB:
+		return fmt.Sprintf("%.0f MiB", float64(b)/miB)
+	default:
+		return fmt.Sprintf("%.1f GiB", float64(b)/giB)
+	}
+}
+
+func cpuPct(v float64) string {
+	if v < 0 {
+		return "\u2014"
+	}
+	return fmt.Sprintf("%.0f%%", v)
+}
+
+func pct(used, total int64) string {
+	if total <= 0 {
+		return "\u2014"
+	}
+	return fmt.Sprintf("%.0f%%", float64(used)/float64(total)*100)
+}
+
+func gib(b int64) string {
+	if b <= 0 {
+		return "\u2014"
+	}
+	return fmt.Sprintf("%.1f GiB", float64(b)/(1<<30))
+}
+
+func agentLabel(kind string) string {
+	switch kind {
+	case "":
+		return ""
+	case "claude-code":
+		return "Claude"
+	case "pi":
+		return "Pi"
+	case "codex":
+		return "Codex"
+	case "cursor":
+		return "Cursor"
+	default:
+		return kind
+	}
+}
+
+func commas(v any) string {
+	var n int64
+	switch t := v.(type) {
+	case int:
+		n = int64(t)
+	case int64:
+		n = t
+	default:
+		return fmt.Sprint(v)
+	}
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	s := strconv.FormatInt(n, 10)
+	var b strings.Builder
+	for i, c := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteRune(c)
+	}
+	if neg {
+		return "-" + b.String()
+	}
+	return b.String()
+}
+
+func usd(c *float64) string {
+	if c == nil {
+		return "\u2014"
+	}
+	switch {
+	case *c >= 100:
+		return fmt.Sprintf("$%.0f", *c)
+	case *c >= 1:
+		return fmt.Sprintf("$%.2f", *c)
+	case *c > 0:
+		return fmt.Sprintf("$%.3f", *c)
+	default:
+		return "$0.00"
+	}
+}
+
+func at(ts string) string {
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return "\u2014"
+	}
+	return t.Local().Format("2006-01-02 15:04 MST")
+}
+
+func since(started string) string {
+	t, err := time.Parse(time.RFC3339, started)
+	if err != nil {
+		return "\u2014"
+	}
+	d := time.Since(t)
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm %ds", int(d.Minutes()), int(d.Seconds())%60)
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh %dm", int(d.Hours()), int(d.Minutes())%60)
+	default:
+		days := int(d.Hours()) / 24
+		return fmt.Sprintf("%dd %dh", days, int(d.Hours())%24)
+	}
+}
+
+func trunc(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "..."
+}
+
+func utc(ts string) string {
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return ""
+	}
+	return t.UTC().Format("2006-01-02 15:04")
+}
+
+func liveHref(project, workflow, identifier string) string {
+	return "/runs/" + project + "/" + workflow + "/" + identifier
+}
+
+// pickedUp is when the loop first started work on an issue on its
+// current pass: the earliest attempt since the last one that succeeded.
+func pickedUp(db *sql.DB, identifier string) string {
+	var at sql.NullString
+	err := db.QueryRow(`SELECT MIN(started_at) FROM run_history
+		WHERE (display_identifier = ?1 OR identifier = ?1)
+		AND id > COALESCE((SELECT MAX(id) FROM run_history
+			WHERE (display_identifier = ?1 OR identifier = ?1) AND status = 'succeeded'), 0)`,
+		identifier).Scan(&at)
+	if err != nil || !at.Valid {
+		return ""
+	}
+	return at.String
 }

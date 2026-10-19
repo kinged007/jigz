@@ -1,0 +1,742 @@
+package plan
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	config "github.com/kinged007/sortie-loop/internal/fleetconfig"
+)
+
+func resolved(t *testing.T, dir string, mutate ...func(*config.Resolved)) config.Resolved {
+	t.Helper()
+	r := config.Resolved{Repo: config.Repo{Repo: "owner/alpha"}, Dir: dir}
+	for _, m := range mutate {
+		m(&r)
+	}
+	return r
+}
+
+func workflows(t *testing.T, dir string, names ...string) {
+	t.Helper()
+	w := filepath.Join(dir, ".sortie", "workflows")
+	if err := os.MkdirAll(w, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range names {
+		// Shaped like a shipped workflow: a polling: block, an agent:
+		// block, and an adapter block carrying the model.
+		body := "---\npolling:\n  interval_ms: 60000\n\nagent:\n  kind: pi\n  max_turns: 5\n  max_concurrent_agents: 1\n\npi:\n  model: \"\"\n---\nbody\n"
+		if err := os.WriteFile(filepath.Join(w, "WORKFLOW."+n+".md"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// config.yaml is an overlay: only keys central holds may appear, so
+// everything else keeps sortie-loop's default.
+func TestApplyWritesOnlyConfiguredKeys(t *testing.T) {
+	dir := t.TempDir()
+	r := resolved(t, dir)
+	if err := Apply(r); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, ".sortie", "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(raw)
+	if !strings.Contains(body, "repo: owner/alpha") {
+		t.Errorf("config.yaml missing repo:\n%s", body)
+	}
+	for _, absent := range []string{"milestone:", "assignee:", "filters:", "token:", "labels:"} {
+		if strings.Contains(body, absent) {
+			t.Errorf("config.yaml sets %s with nothing configured:\n%s", absent, body)
+		}
+	}
+}
+
+// Re-applying must not churn the file: the supervisor rewrites it on
+// every start, and a changed mtime alone would look like a change.
+func TestApplyIsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	r := resolved(t, dir, func(r *config.Resolved) {
+		r.Milestone = "v1"
+		r.Assignee = &[]string{"someone"}[0]
+		r.Repo.Filters = map[string]string{"build": "label:agent:build"}
+	})
+	if err := Apply(r); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, ".sortie", "config.yaml")
+	first, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(r); err != nil {
+		t.Fatal(err)
+	}
+	second, _ := os.ReadFile(path)
+	if string(first) != string(second) {
+		t.Errorf("Apply is not idempotent:\n%s\n---\n%s", first, second)
+	}
+	if !strings.Contains(string(first), `milestone: v1`) || !strings.Contains(string(first), "assignee: someone") {
+		t.Errorf("configured scope missing from:\n%s", first)
+	}
+}
+
+// The token must not reach disk from any path.
+func TestApplyNeverWritesAToken(t *testing.T) {
+	t.Setenv("SORTIE_TEST_TOKEN", "ghp_secret")
+	dir := t.TempDir()
+	r := resolved(t, dir, func(r *config.Resolved) { r.Repo.TokenEnv = "SORTIE_TEST_TOKEN" })
+	if err := Apply(r); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, ".sortie", "config.yaml"))
+	if strings.Contains(string(raw), "ghp_secret") {
+		t.Errorf("token written to config.yaml:\n%s", raw)
+	}
+}
+
+const realWorkflow = `---
+tracker:
+  kind: github
+  api_key: $SORTIE_TRACKER_API_KEY
+pi:
+  model: ""
+# a comment that must survive
+claude-code:
+  model: ""
+---
+
+body text
+`
+
+func TestPatchBlockRewritesOnlyTheTargetedLine(t *testing.T) {
+	got, changed, err := patchBlock([]byte(realWorkflow), "pi", "model", "$SORTIE_CENTRAL_MODEL", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Error("changed = false on a file that needed a patch")
+	}
+	out := string(got)
+	if !strings.Contains(out, "  model: $SORTIE_CENTRAL_MODEL") {
+		t.Errorf("model line not rewritten:\n%s", out)
+	}
+	// The other adapter's model must be untouched, the comment kept, and
+	// the body byte-identical.
+	if !strings.Contains(out, "claude-code:\n  model: \"\"") {
+		t.Errorf("claude-code block was modified:\n%s", out)
+	}
+	if !strings.Contains(out, "# a comment that must survive") {
+		t.Errorf("comment dropped:\n%s", out)
+	}
+	if !strings.HasSuffix(out, "\n---\n\nbody text\n") {
+		t.Errorf("front matter fence or body changed:\n%s", out)
+	}
+	// Idempotent: a second pass must be a no-op.
+	again, changed, err := patchBlock(got, "pi", "model", "$SORTIE_CENTRAL_MODEL", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed || string(again) != out {
+		t.Errorf("patchBlock is not idempotent (changed=%v):\n%s\n---\n%s", changed, out, again)
+	}
+}
+
+func TestPatchBlockPicksTheNamedBlock(t *testing.T) {
+	got, _, err := patchBlock([]byte(realWorkflow), "claude-code", "model", "$X", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(got)
+	if !strings.Contains(out, "claude-code:\n  model: $X") {
+		t.Errorf("claude-code model not rewritten:\n%s", out)
+	}
+	if !strings.Contains(out, "pi:\n  model: \"\"") {
+		t.Errorf("pi block was modified:\n%s", out)
+	}
+}
+
+func TestPatchBlockReportsAMissingBlock(t *testing.T) {
+	for name, body := range map[string]string{
+		"no fence":     "agent:\n  kind: pi\n",
+		"unterminated": "---\nagent:\n  kind: pi\n",
+		"no block":     "---\nagent:\n  kind: pi\n---\n",
+	} {
+		if _, _, err := patchBlock([]byte(body), "pi", "model", "$X", false); err == nil {
+			t.Errorf("%s: patchBlock = nil error, want an error", name)
+		}
+	}
+}
+
+// A block that exists but lacks the key is a workflow that simply never
+// set one, so the key is added under its header rather than refused.
+func TestPatchBlockInsertsAnAbsentKey(t *testing.T) {
+	body := "---\nagent:\n  kind: pi\n  max_turns: 5\n---\nbody\n"
+	got, changed, err := patchBlock([]byte(body), "agent", "max_concurrent_agents", "3", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("changed = false")
+	}
+	out := string(got)
+	if !strings.Contains(out, "agent:\n  max_concurrent_agents: 3\n") {
+		t.Errorf("key not inserted under its block header:\n%s", out)
+	}
+	if !strings.Contains(out, "  max_turns: 5\n") {
+		t.Errorf("existing sibling lost:\n%s", out)
+	}
+	if !strings.HasSuffix(out, "---\nbody\n") {
+		t.Errorf("body changed:\n%s", out)
+	}
+}
+
+// No agent or workflow settings at all means the only edit is the
+// deployment key central owns, so every other knob keeps the shipped
+// workflow exactly as sortie-loop installed it. loop_bind_host is the
+// exception and is always written, so that clearing -loop-host reverts
+// an address an earlier run left in the file.
+func TestApplySettingsSkipsWhenUnset(t *testing.T) {
+	dir := t.TempDir()
+	workflows(t, dir, "build")
+	path := filepath.Join(dir, ".sortie", "workflows", "WORKFLOW.build.md")
+	before, _ := os.ReadFile(path)
+	if err := (Plan{}).ApplySettings(resolved(t, dir)); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(path)
+	got := string(after)
+	if !strings.Contains(got, "server:\n  host: 127.0.0.1") {
+		t.Errorf("the loop bind address was not written:\n%s", got)
+	}
+	// Everything else must be byte-identical apart from that block.
+	if strings.Replace(got, "server:\n  host: 127.0.0.1\n", "", 1) != string(before) {
+		t.Errorf("ApplySettings wrote more than the loop bind address:\n%s", got)
+	}
+}
+
+// A model with no override keeps the original single-line behaviour.
+func TestApplySettingsWritesTheModelLine(t *testing.T) {
+	dir := t.TempDir()
+	workflows(t, dir, "build")
+	r := resolved(t, dir)
+	r.Agent.Model = "gpt-5"
+	r.Knobs = config.Settings(map[string]string{"model": "gpt-5"})
+	if err := (Plan{}).ApplySettings(r); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, ".sortie", "workflows", "WORKFLOW.build.md"))
+	if !strings.Contains(string(raw), "  model: $SORTIE_CENTRAL_MODEL") {
+		t.Errorf("model line not written:\n%s", raw)
+	}
+}
+
+// Each workflow gets its own model variable, so one file's value cannot
+// be read as another's.
+func TestApplySettingsWritesPerWorkflowKnobs(t *testing.T) {
+	dir := t.TempDir()
+	workflows(t, dir, "plan", "build")
+	r := resolved(t, dir)
+	r.Workflows = []string{"plan", "build"}
+	r.Knobs = config.Settings(map[string]string{
+		"model":                 "gpt-5",
+		"max_concurrent_agents": "2",
+	})
+	r.Overrides = map[string]config.Settings{
+		"build": {"model": "opus", "max_concurrent_agents": "6"},
+	}
+	if err := (Plan{}).ApplySettings(r); err != nil {
+		t.Fatal(err)
+	}
+	read := func(n string) string {
+		raw, err := os.ReadFile(filepath.Join(dir, ".sortie", "workflows", "WORKFLOW."+n+".md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	plan, build := read("plan"), read("build")
+	if !strings.Contains(plan, "  model: $SORTIE_CENTRAL_MODEL\n") {
+		t.Errorf("plan model line:\n%s", plan)
+	}
+	if !strings.Contains(build, "  model: $SORTIE_CENTRAL_MODEL_BUILD\n") {
+		t.Errorf("build model line:\n%s", build)
+	}
+	// plan takes the repository value, written to its file because
+	// build overrides the knob.
+	if !strings.Contains(plan, "  max_concurrent_agents: 2") {
+		t.Errorf("plan did not take the repository value:\n%s", plan)
+	}
+	if !strings.Contains(build, "  max_concurrent_agents: 6") {
+		t.Errorf("build did not take its own value:\n%s", build)
+	}
+}
+
+func TestWorkflowFilesFollowsSelection(t *testing.T) {
+	dir := t.TempDir()
+	workflows(t, dir, "build", "merge", "plan")
+
+	all, err := (Plan{}).workflowFiles(resolved(t, dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(all); n != 3 {
+		t.Errorf("no selection: got %d files, want all 3", n)
+	}
+	two, err := (Plan{}).workflowFiles(resolved(t, dir, func(r *config.Resolved) {
+		r.Workflows = []string{"plan", "build"}
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, f := range two {
+		names = append(names, filepath.Base(f))
+	}
+	// Directory order, so the validate run and the started set agree.
+	if strings.Join(names, ",") != "WORKFLOW.build.md,WORKFLOW.plan.md" {
+		t.Errorf("selected files = %v, want build and plan only", names)
+	}
+}
+
+// The shipped workflows name the polling key interval_ms inside the
+// polling: block, not polling_interval_ms. Writing the knob's own name
+// there would add a key the engine ignores, leaving the poll interval
+// silently at the shipped 60000.
+func TestPollingKnobUsesItsBlockKey(t *testing.T) {
+	if got := knobTargets["polling_interval_ms"]; got.block != "polling" || got.key != "interval_ms" {
+		t.Fatalf("polling_interval_ms target = %+v, want polling/interval_ms", got)
+	}
+	dir := t.TempDir()
+	workflows(t, dir, "build")
+	r := resolved(t, dir)
+	r.Knobs = config.Settings{"polling_interval_ms": "15000"}
+	r.Overrides = map[string]config.Settings{
+		"build": {"polling_interval_ms": "15000"},
+	}
+	if err := (Plan{}).ApplySettings(r); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, ".sortie", "workflows", "WORKFLOW.build.md"))
+	if !strings.Contains(string(raw), "polling:\n  interval_ms: 15000") {
+		t.Errorf("poll interval not written to the real key:\n%s", raw)
+	}
+	if strings.Contains(string(raw), "polling_interval_ms") {
+		t.Errorf("wrote a key the engine does not read:\n%s", raw)
+	}
+}
+
+// A workflow that ships only the default kind's adapter block has no
+// codex: block, so setting the model for a different kind has to add
+// one. The engine reads the block named by the active kind.
+func TestAdapterBlockIsCreatedForANonDefaultKind(t *testing.T) {
+	dir := t.TempDir()
+	workflows(t, dir, "build")
+	r := resolved(t, dir)
+	r.Agent.Kind = "codex"
+	r.Knobs = config.Settings{"model": "gpt-5.6-luna"}
+	if err := (Plan{}).ApplySettings(r); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, ".sortie", "workflows", "WORKFLOW.build.md"))
+	if !strings.Contains(string(raw), "codex:\n  model: $SORTIE_CENTRAL_MODEL\n") {
+		t.Errorf("codex adapter block not created:\n%s", raw)
+	}
+	// The pi block is left alone: the engine only reads the active
+	// kind's block, and rewriting it would edit a block nothing reads.
+	if !strings.Contains(string(raw), "pi:\n  model: \"\"") {
+		t.Errorf("pi block was modified:\n%s", raw)
+	}
+	// The kind itself is the env's business, not the file's.
+	if !strings.Contains(string(raw), "agent:\n  kind: pi\n") {
+		t.Errorf("agent block was modified:\n%s", raw)
+	}
+	// Still valid front matter: one closing fence, comments intact.
+	if strings.Count(string(raw), "\n---\n") != 1 {
+		t.Errorf("front matter fences changed:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "---\nbody\n") {
+		t.Errorf("body changed:\n%s", raw)
+	}
+}
+
+// A missing load-bearing block stays an error: inventing an agent: or
+// polling: block could disable the loop in a way that only shows up
+// when an issue is dispatched.
+func TestLoadbearingBlockIsNeverInvented(t *testing.T) {
+	body := "---\npi:\n  model: \"\"\n---\nbody\n"
+	for _, block := range []string{"agent", "polling"} {
+		if _, _, err := patchBlock([]byte(body), block, "x", "1", false); err == nil {
+			t.Errorf("%s: nil error, want an error rather than an invented block", block)
+		}
+	}
+}
+
+// The engine binds its dashboard to server.host from the workflow file,
+// and central never runs the engine -- sortie-loop does -- so the
+// workflow file is the only channel. The shipped workflows carry no
+// server: block, so it has to be created rather than reported missing.
+func TestLoopBindHostIsWrittenIntoEveryWorkflow(t *testing.T) {
+	dir := t.TempDir()
+	workflows(t, dir, "plan", "build")
+	r := resolved(t, dir)
+	f := filepath.Join(dir, ".sortie", "workflows", "WORKFLOW.plan.md")
+
+	// An unset flag still writes the engine's own loopback default, so a
+	// value from an earlier run is reverted rather than left in place.
+	if err := (Plan{}).ApplySettings(r); err != nil {
+		t.Fatalf("ApplySettings: %v", err)
+	}
+	raw, err := os.ReadFile(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "server:\n  host: 127.0.0.1") {
+		t.Errorf("an unset loop host must write the engine default:\n%s", raw)
+	}
+
+	p := Plan{LoopBindHost: "0.0.0.0"}
+	if err := p.ApplySettings(r); err != nil {
+		t.Fatalf("ApplySettings: %v", err)
+	}
+	raw, err = os.ReadFile(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(raw)
+	if !strings.Contains(got, "server:\n  host: 0.0.0.0") {
+		t.Errorf("server.host was not written into the workflow:\n%s", got)
+	}
+	// The edit is line-level like every other one: the blocks around it
+	// have to survive intact.
+	for _, keep := range []string{"polling:", "interval_ms: 60000", "agent:", "max_concurrent_agents: 1"} {
+		if !strings.Contains(got, keep) {
+			t.Errorf("patching server.host damaged the rest of the front matter, lost %q:\n%s", keep, got)
+		}
+	}
+	// Re-applying must not churn the file.
+	before := string(raw)
+	if err := p.ApplySettings(r); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = os.ReadFile(f)
+	if string(raw) != before {
+		t.Error("re-applying the same loop host rewrote the file")
+	}
+
+	// Turning the flag back off has to revert the file, not leave the
+	// dashboard exposed with nothing in the command line to say so.
+	if err := (Plan{}).ApplySettings(r); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = os.ReadFile(f)
+	if strings.Contains(string(raw), "0.0.0.0") {
+		t.Errorf("clearing the loop host left the exposed address in place:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "host: 127.0.0.1") {
+		t.Errorf("clearing the loop host did not restore the default:\n%s", raw)
+	}
+}
+
+// A clean install puts the engine in <prefix>/share/sortie-loop, not on
+// PATH, because install.sh honours --prefix. A lookup that stops at PATH
+// reports "engine not found" on a perfectly complete installation, which
+// is exactly what happens the moment sortie-central is installed to
+// somewhere other than ~/.local.
+func TestSortieBinIsFoundInAPrefixShareDirectory(t *testing.T) {
+	prefix := t.TempDir()
+	binDir := filepath.Join(prefix, "bin")
+	share := filepath.Join(prefix, "share", "sortie-loop")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(share, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A stub that answers --dump-version the way sortie-loop does.
+	loop := filepath.Join(binDir, "sortie-loop")
+	stub := "#!/bin/sh\n[ \"$1\" = \"--dump-version\" ] && echo 1.2.3 && exit 0\nexit 0\n"
+	if err := os.WriteFile(loop, []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	engine := filepath.Join(share, "sortie-1.2.3")
+	if err := os.WriteFile(engine, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Neither the engine's real location nor its name is on PATH, and
+	// SORTIE_BIN is unset, so only the share-directory search can find it.
+	t.Setenv("SORTIE_BIN", "")
+	t.Setenv("PATH", "/nonexistent")
+	p := Plan{LoopBin: loop}
+	got, err := p.sortieBin()
+	if err != nil {
+		t.Fatalf("sortieBin: %v", err)
+	}
+	if got != engine {
+		t.Errorf("sortieBin = %q, want the versioned engine %q", got, engine)
+	}
+}
+
+// A sortie-loop installed beside this binary has to be found without
+// PATH, or running sortie-central by absolute path fails.
+func TestLoopBinaryPrefersASiblingOverPATH(t *testing.T) {
+	prefix := t.TempDir()
+	loop := filepath.Join(prefix, "sortie-loop")
+	if err := os.WriteFile(loop, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SORTIE_LOOP_BIN", "")
+	t.Setenv("PATH", "/nonexistent")
+	if got := (Plan{LoopBin: loop}).LoopBinary(); got != loop {
+		t.Errorf("LoopBinary = %q, want the explicit %q", got, loop)
+	}
+	// With nothing beside it, it falls back to PATH lookup by name.
+	if got := (Plan{}).LoopBinary(); got != "sortie-loop" {
+		t.Errorf("LoopBinary = %q, want the bare name for PATH lookup", got)
+	}
+}
+
+// Setting a model and then removing it must leave the shipped file byte
+// for byte. Central patches in place and never restores, so anything it
+// writes has to be removable: a dangling $SORTIE_CENTRAL_MODEL is an
+// unresolved reference, and an adapter block central created is a
+// top-level key the engine rejects, and either one stops the loop.
+func TestRemovingAModelRestoresTheShippedFile(t *testing.T) {
+	for _, kind := range []string{"codex", "claude-code", "pi"} {
+		t.Run(kind, func(t *testing.T) {
+			dir := t.TempDir()
+			workflows(t, dir, "plan")
+			path := filepath.Join(dir, ".sortie", "workflows", "WORKFLOW.plan.md")
+			// The baseline is the file as central leaves it with no
+			// model, not the untouched shipped copy: central always writes
+			// the loop bind address, so that line is not part of what this
+			// test is about.
+			if err := (Plan{}).ApplySettings(resolved(t, dir)); err != nil {
+				t.Fatal(err)
+			}
+			shipped, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			on := resolved(t, dir)
+			on.Agent.Kind = kind
+			on.Agent.Model = "some-model"
+			on.Knobs = config.Settings{"kind": kind, "model": "some-model"}
+			if err := (Plan{}).ApplySettings(on); err != nil {
+				t.Fatal(err)
+			}
+			mid, _ := os.ReadFile(path)
+			if !strings.Contains(string(mid), modelRef) {
+				t.Fatalf("the model was not delivered:\n%s", mid)
+			}
+
+			off := resolved(t, dir)
+			off.Agent.Kind = ""
+			off.Agent.Model = ""
+			off.Knobs = nil
+			if err := (Plan{}).ApplySettings(off); err != nil {
+				t.Fatal(err)
+			}
+			after, _ := os.ReadFile(path)
+			if string(after) != string(shipped) {
+				t.Errorf("removing the model did not restore the file:\n--- want ---\n%s\n--- got ---\n%s", shipped, after)
+			}
+		})
+	}
+}
+
+// The reference must never survive into a file whose variable is no
+// longer generated, whichever adapter it was written into.
+func TestNoReferenceSurvivesAnUnsetModel(t *testing.T) {
+	dir := t.TempDir()
+	workflows(t, dir, "plan")
+	path := filepath.Join(dir, ".sortie", "workflows", "WORKFLOW.plan.md")
+	r := resolved(t, dir)
+	r.Agent.Kind, r.Agent.Model, r.Knobs = "codex", "m", config.Settings{"kind": "codex", "model": "m"}
+	if err := (Plan{}).ApplySettings(r); err != nil {
+		t.Fatal(err)
+	}
+	off := resolved(t, dir)
+	if err := (Plan{}).ApplySettings(off); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(path)
+	if strings.Contains(string(got), modelRef) {
+		t.Errorf("a reference to %s survived:\n%s", modelRef, got)
+	}
+	// The adapter block central created has to go with it: an emptied
+	// block is still a key the engine does not know.
+	if strings.Contains(string(got), "\ncodex:") {
+		t.Errorf("the codex block central created survived:\n%s", got)
+	}
+}
+
+// A block the operator wrote is not central's to delete, so only the
+// reference is reverted.
+func TestAHandWrittenAdapterBlockIsKept(t *testing.T) {
+	dir := t.TempDir()
+	workflows(t, dir, "plan")
+	path := filepath.Join(dir, ".sortie", "workflows", "WORKFLOW.plan.md")
+	body, _ := os.ReadFile(path)
+	body = append(body, []byte("codex:\n  model: \"hand-written\"\n  reasoning_effort: high\n")...)
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := resolved(t, dir)
+	r.Agent.Kind, r.Agent.Model = "codex", "m"
+	r.Knobs = config.Settings{"kind": "codex", "model": "m"}
+	if err := (Plan{}).ApplySettings(r); err != nil {
+		t.Fatal(err)
+	}
+	off := resolved(t, dir)
+	if err := (Plan{}).ApplySettings(off); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(path)
+	if !strings.Contains(string(got), "reasoning_effort") {
+		t.Errorf("central deleted an adapter block it did not write:\n%s", got)
+	}
+	if strings.Contains(string(got), modelRef) {
+		t.Errorf("the reference survived:\n%s", got)
+	}
+	if !strings.Contains(string(got), modelUnset) {
+		t.Errorf("the reference was not reverted to %s:\n%s", modelUnset, got)
+	}
+}
+
+// A per-workflow model gets a suffixed variable, and that one has to be
+// pruned too.
+func TestASuffixedModelReferenceIsAlsoPruned(t *testing.T) {
+	dir := t.TempDir()
+	workflows(t, dir, "plan")
+	path := filepath.Join(dir, ".sortie", "workflows", "WORKFLOW.plan.md")
+	r := resolved(t, dir)
+	r.Agent.Kind = "codex"
+	r.Overrides = map[string]config.Settings{"plan": {"kind": "codex", "model": "m"}}
+	if err := (Plan{}).ApplySettings(r); err != nil {
+		t.Fatal(err)
+	}
+	mid, _ := os.ReadFile(path)
+	if !strings.Contains(string(mid), "_MODEL_PLAN") {
+		t.Fatalf("the suffixed variable was not written:\n%s", mid)
+	}
+	if err := (Plan{}).ApplySettings(resolved(t, dir)); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(path)
+	if strings.Contains(string(after), "_MODEL") {
+		t.Errorf("a suffixed reference survived:\n%s", after)
+	}
+}
+
+func TestTrackerKindReadsTheWorkflowFrontMatter(t *testing.T) {
+	dir := t.TempDir()
+	w := filepath.Join(dir, ".sortie", "workflows")
+	if err := os.MkdirAll(w, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"build":   "---\ntracker:\n  kind: github\n  api_key: $K\n---\nkind: github-pr\n",
+		"review":  "---\npolling:\n  interval_ms: 1\ntracker:\n  kind: github-pr\n---\nbody\n",
+		"nokind":  "---\ntracker:\n  project: x\n---\nbody\n",
+		"nofront": "tracker:\n  kind: github\n",
+		"broken":  "---\ntracker: [\n---\n",
+	} {
+		if err := os.WriteFile(filepath.Join(w, "WORKFLOW."+name+".md"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := resolved(t, dir)
+	for name, want := range map[string]string{
+		"build": "github", "review": "github-pr", "nokind": "", "nofront": "", "broken": "", "missing": "",
+	} {
+		if got := TrackerKind(r, name); got != want {
+			t.Errorf("TrackerKind(%s) = %q, want %q", name, got, want)
+		}
+	}
+}
+
+func TestValidateFileReportsTheEnginesCheckPaths(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "sortie")
+	script := "#!/bin/sh\necho '{\"valid\":false,\"errors\":[{\"check\":\"config.dispatch.rules[0].agent\",\"message\":\"unknown agent kind\"}],\"warnings\":[]}'\nexit 1\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Plan{SortieBin: bin}.ValidateFile(resolved(t, dir), filepath.Join(dir, "x.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Valid || len(res.Errors) != 1 || res.Errors[0].Check != "config.dispatch.rules[0].agent" || res.Errors[0].Message != "unknown agent kind" {
+		t.Errorf("result = %+v", res)
+	}
+}
+
+// fakeSetup is a sortie-loop that records the environment it was given.
+func fakeSetup(t *testing.T) (bin, record string) {
+	t.Helper()
+	d := t.TempDir()
+	record = filepath.Join(d, "env")
+	bin = filepath.Join(d, "sortie-loop")
+	script := "#!/bin/sh\nenv > '" + record + "'\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin, record
+}
+
+func TestSetupPassesTheProjectsOwnToken(t *testing.T) {
+	t.Setenv("TOK_A", "token-of-a")
+	t.Setenv("TOK_B", "token-of-b")
+	t.Setenv("GITHUB_TOKEN", "fallback-token")
+	bin, record := fakeSetup(t)
+	r := resolved(t, t.TempDir(), func(r *config.Resolved) { r.TokenEnv = "TOK_A" })
+	if err := (Plan{LoopBin: bin}).Setup(r); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(record)
+	env := string(raw)
+	if !strings.Contains(env, "\nSORTIE_LOOP_TOKEN=token-of-a\n") && !strings.HasPrefix(env, "SORTIE_LOOP_TOKEN=token-of-a\n") {
+		t.Error("SORTIE_LOOP_TOKEN is not the project's token")
+	}
+	if strings.Contains(env, "SORTIE_LOOP_TOKEN=token-of-b") {
+		t.Error("another project's token was passed as the loop token")
+	}
+	if !strings.Contains(env, "SORTIE_LOOP_REPO=owner/alpha") {
+		t.Error("SORTIE_LOOP_REPO is missing")
+	}
+}
+
+func TestSetupWithoutTokenEnvKeepsTheFallback(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "fallback-token")
+	bin, record := fakeSetup(t)
+	if _, err := (Plan{LoopBin: bin}).RunSetup(resolved(t, t.TempDir())); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(record)
+	if strings.Contains(string(raw), "SORTIE_LOOP_TOKEN=") {
+		t.Error("SORTIE_LOOP_TOKEN is set without a token_env")
+	}
+	if !strings.Contains(string(raw), "GITHUB_TOKEN=fallback-token") {
+		t.Error("the GITHUB_TOKEN fallback is gone")
+	}
+}
+
+func TestSetupFailsWhenTheTokenVariableIsUnset(t *testing.T) {
+	bin, record := fakeSetup(t)
+	r := resolved(t, t.TempDir(), func(r *config.Resolved) { r.TokenEnv = "TOK_UNSET_XYZ" })
+	err := (Plan{LoopBin: bin}).Setup(r)
+	if err == nil || !strings.Contains(err.Error(), "TOK_UNSET_XYZ") {
+		t.Errorf("err = %v, want a message naming the variable", err)
+	}
+	if _, serr := os.Stat(record); serr == nil {
+		t.Error("setup ran without a token")
+	}
+}

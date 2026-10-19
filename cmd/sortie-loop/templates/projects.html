@@ -1,0 +1,118 @@
+{{define "projects"}}{{template "shell-top" .}}
+<div class="pagehead">
+  <div>
+    <h1>Projects</h1>
+    <p class="sub">{{len .Projects}} project{{if ne (len .Projects) 1}}s{{end}} in the config. Tokens are the measured tokens of runs started in the last 14 days.</p>
+  </div>
+  {{if .Auth.Authenticated}}<a class="btn primary" href="/projects/new">Add project</a>{{else}}<button type="button" class="primary" {{ctl false ""}}>Add project</button>{{end}}
+</div>
+{{if .Projects}}
+<div class="tw"><table>
+<thead><tr>
+  <th>Project</th><th>State</th><th>Enabled</th><th>Workflows</th><th class="num" title="Loops that answered on their own port just now">Loops live</th>
+  <th class="num">Agents</th><th class="num" title="Measured tokens of runs started in the last 14 days">Tokens (14d)</th><th class="num" title="Space the project directory occupies, measured every 10 minutes">Disk</th><th>Last validation</th>{{if .GitHub}}<th title="Last pass of the optional GitHub enrichment">GitHub enrichment</th>{{end}}
+</tr></thead>
+<tbody>
+{{range .Projects}}<tr>
+  <td><a href="/projects/{{.Project}}" title="{{.Path}}"><b>{{.Project}}</b></a></td>
+  <td><span class="chip s-{{.State}}">{{.State}}</span></td>
+  <td>{{if .Enabled}}yes{{else}}<span class="muted">no</span>{{end}}</td>
+  <td>{{range .Workflows}}<code>{{.}}</code> {{else}}<span class="empty">none installed</span>{{end}}</td>
+  <td class="num">{{.LoopsLive}}</td>
+  <td class="num">{{.Running}}</td>
+  <td class="num">{{commas .Tokens}}</td>
+  <td class="num">{{.DiskText}}</td>
+  <td><span class="chip {{if eq .Validation "valid"}}v-valid{{else if or (eq .Validation "invalid") (eq .Validation "failed")}}v-invalid{{end}}" {{if .ValidationDetail}}title="{{.ValidationDetail}}"{{end}}>{{.Validation}}</span></td>
+  {{if $.GitHub}}<td>{{.GitHub}}</td>{{end}}
+</tr>{{end}}
+</tbody></table></div>
+{{else}}<p class="empty">No projects are configured.</p>{{end}}
+{{template "statuspoll"}}
+{{template "shell-bottom" .}}{{end}}
+
+{{define "project"}}{{template "shell-top" .}}
+<p class="sub"><a href="/projects">Projects</a> / {{.Slug}}</p>
+<div class="pagehead" style="margin-bottom:1rem">
+  <div>
+    <h1>{{.Slug}} <span class="chip s-{{.State}}">{{.State}}</span></h1>
+    <p class="sub">Effective configuration, workflows, loops, disk use and history.</p>
+  </div>
+  <div class="row">
+    {{if .Enabled}}
+    <form class="inline row" method="post" action="/action">
+      {{if .Auth.Authenticated}}<input type="hidden" name="csrf" value="{{.Auth.CSRF}}"><input type="hidden" name="repo" value="{{.Slug}}"><input type="hidden" name="next" value="/projects/{{.Slug}}">{{end}}
+      {{if .IsRunning}}
+        <button name="op" value="stop" {{ctl .Auth.Authenticated ""}}>Stop</button>
+        <button name="op" value="drain" {{ctl .Auth.Authenticated "Each loop stops as soon as it has no work in flight"}}>Stop when idle</button>
+      {{else}}
+        <button name="op" value="start" {{ctl .Auth.Authenticated ""}}>Start</button>
+      {{end}}
+      <button name="op" value="restart" {{ctl .Auth.Authenticated "Stop now and start again, interrupting whatever is running"}}>Restart</button>
+    </form>
+    {{end}}
+    {{if .Auth.Authenticated}}<a class="btn" href="/edit/project/{{.Slug}}">Edit project</a>
+    <a class="btn" href="/edit/agent/{{.Slug}}">Agent settings</a>
+    {{else}}<button type="button" {{ctl false ""}}>Edit project</button>
+    <button type="button" {{ctl false ""}}>Agent settings</button>{{end}}
+  </div>
+</div>
+{{if not .Enabled}}<div class="banner">This project is disabled, so it is never started. {{if .Auth.Authenticated}}Turn it on in <a href="/edit/project/{{.Slug}}">the project editor</a>.{{end}}</div>{{end}}
+{{if eq .Validation "invalid"}}<div class="banner err">{{.ValidationDetail}}</div>{{end}}
+{{if eq .Validation "failed"}}<div class="banner err">{{.ValidationDetail}}</div>{{end}}
+<div class="grid2">
+  <div class="card"><h3>Effective config</h3>
+    <div class="tw"><table class="cfg"><thead><tr><th>Key</th><th>Value</th><th>Set by</th></tr></thead><tbody>
+    {{range .Config}}<tr><td>{{.Key}}</td><td>{{if .Value}}<code>{{.Value}}</code>{{else}}<span class="muted">&mdash;</span>{{end}}</td><td>{{if .Origin}}<span class="org o-{{.Origin}}">{{.Origin}}</span>{{end}}</td></tr>{{end}}
+    </tbody></table></div>
+    <p class="legend"><span><span class="org o-default">default</span> central defaults</span><span><span class="org o-repo">repo</span> this project</span><span><span class="org o-workflow">workflow</span> workflow file</span></p>
+  </div>
+  <div class="card"><h3>Disk use</h3>
+    <p style="margin:0 0 .5rem"><b>{{.DiskText}}</b> <span class="muted">in <code>{{.Path}}</code>, measured every 10 minutes</span></p>
+    {{with .Disk}}
+    <div class="stack" role="img" aria-label="Disk use split"><i style="flex:{{.Workspaces}};background:var(--info)" title="workspaces"></i><i style="flex:{{.Databases}};background:var(--ok)" title="databases"></i><i style="flex:{{.Backups}};background:var(--warn)" title="backups"></i></div>
+    <div class="legend"><span><i style="background:var(--info)"></i>workspaces {{size .Workspaces}}</span><span><i style="background:var(--ok)"></i>databases {{size .Databases}}</span><span><i style="background:var(--warn)"></i>backups {{size .Backups}}</span></div>
+    {{end}}
+    {{with .Ops}}
+      {{if .Sleep}}<p class="muted" style="margin:.6rem 0 0"><span class="chip s-{{.Sleep}}">{{.Sleep}}</span> {{.SleepNote}}</p>{{end}}
+      {{if .CanCleanup}}<p class="muted" style="margin:.6rem 0 0">Last cleanup:
+        {{with .Cleanup}}<span class="chip s-{{if .Ok}}succeeded{{else}}failed{{end}}">{{if .Ok}}ok{{else}}failed{{end}}</span>{{if .DryRun}} dry run{{end}} {{.Ago}}, exit code {{.ExitCode}}, {{.Paths}} path{{if ne .Paths 1}}s{{end}}{{else}}no run yet{{end}}</p>{{end}}
+    {{end}}
+  </div>
+</div>
+<div class="card"><h3>Loops</h3>
+  {{if .Rows}}<div class="tw"><table><thead><tr><th>Loop</th><th>State</th><th class="num">Running</th><th class="num">Retrying</th><th class="num">Runs</th><th class="num">Failed</th><th class="num">Tokens</th><th>Last run</th><th>Last failure</th>{{if .Status}}<th class="num">Restarts</th><th class="num">Last exit</th>{{end}}{{if .ShowHash}}<th>Config</th>{{end}}</tr></thead><tbody>
+  {{range .Rows}}<tr><td>{{.L.Loop}}</td><td>{{if .L.Live}}<span class="chip s-running">live</span>{{else}}<span class="chip s-stopped">not answering</span>{{end}}</td><td class="num">{{len .L.Running}}</td><td class="num">{{.L.Retrying}}</td><td class="num">{{commas .L.Runs}}</td><td class="num">{{commas .L.Failed}}</td><td class="num">{{commas .L.Tokens}}</td>
+    <td>{{if .LastRun}}{{.LastRun}}{{else}}<span class="muted">&mdash;</span>{{end}}</td><td>{{if .LastFailure}}{{.LastFailure}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+    {{if $.Status}}<td class="num">{{with .Process}}{{.RestartCount}}{{else}}&mdash;{{end}}</td><td class="num">{{with .Process}}{{if .LastExitCode}}{{.LastExitCode}}{{else}}&mdash;{{end}}{{else}}&mdash;{{end}}</td>{{end}}
+    {{if $.ShowHash}}<td>{{with .Process}}{{if .ConfigHash}}<code title="{{.ConfigHash}}">{{printf "%.8s" .ConfigHash}}</code>{{end}}{{end}}</td>{{end}}</tr>{{end}}
+  </tbody></table></div>
+  {{else}}<p class="muted" style="margin:0">No loops are registered. They appear once the project is running.</p>{{end}}
+</div>
+<h2>Workflows</h2>
+{{if .Files}}<div class="tw"><table><thead><tr><th>File</th><th>Validation</th><th>Detail</th><th></th></tr></thead><tbody>
+{{range .Files}}<tr><td><code>WORKFLOW.{{.Name}}.md</code></td>
+  <td><span class="chip v-{{.Status}}">{{if eq .Status "valid"}}valid{{else if eq .Status "invalid"}}invalid{{else}}not checked{{end}}</span>{{if .Warnings}} <span class="tag">{{.Warnings}} warning{{if gt .Warnings 1}}s{{end}}</span>{{end}}</td>
+  <td>{{.Detail}}</td><td>{{if $.Auth.Authenticated}}<a class="btn" href="{{.EditURL}}">Edit</a>{{else}}<button type="button" {{ctl false ""}}>Edit</button>{{end}}</td></tr>{{end}}
+</tbody></table></div>
+<p class="muted">Validation runs <code>sortie validate</code> on each file when the page loads. Dispatch rules are on <a href="/workflows">Workflows</a>.</p>
+{{else}}<p class="empty">No workflow files are installed yet.</p>{{end}}
+{{if .Auth.Authenticated}}
+<h2>Backups</h2>
+{{if .Backups}}<div class="tw"><table><thead><tr><th>#</th><th>Time (UTC)</th><th>File</th><th>Saved by</th><th></th></tr></thead><tbody>
+{{range .Backups}}<tr><td>{{.ID}}</td><td>{{utc .TS}}</td><td><code>{{.File}}</code></td><td>{{.Actor}}</td>
+<td><form class="inline" method="post" action="/backups/restore"><input type="hidden" name="csrf" value="{{$.Auth.CSRF}}"><input type="hidden" name="id" value="{{.ID}}"><button>Restore</button></form></td></tr>{{end}}
+</tbody></table></div>
+<p class="muted">The project's own files, and the newest backups of the central config that holds its entry. The last 20 per file are kept.</p>
+{{else}}<p class="empty">No backups yet. One is created before every applied edit.</p>{{end}}
+<h2>Audit</h2>
+{{if .Audit}}<div class="tw"><table><thead><tr><th>Time (UTC)</th><th>By</th><th>Action</th><th>Result</th></tr></thead><tbody>
+{{range .Audit}}<tr><td>{{utc .TS}}</td><td>{{.Actor}}</td><td>{{.Action}}</td><td>{{.Result}}</td></tr>{{end}}
+</tbody></table></div>
+{{else}}<p class="empty">No audit entries for this project yet.</p>{{end}}
+{{end}}
+<h2>Remove project</h2>
+<p class="muted">Removing disables the project, stops its loops, then takes its entry out of the config. Deleting its directory and workspaces is a separate choice on the next page and is off by default.</p>
+{{if .Auth.Authenticated}}<form method="post" action="/projects/{{.Slug}}/remove"><input type="hidden" name="csrf" value="{{.Auth.CSRF}}"><button>Remove project</button></form>
+{{else}}<button type="button" {{ctl false ""}}>Remove project</button>{{end}}
+{{template "statuspoll"}}
+{{template "shell-bottom" .}}{{end}}

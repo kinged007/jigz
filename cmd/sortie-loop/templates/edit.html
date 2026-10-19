@@ -1,0 +1,123 @@
+{{define "field"}}<div class="field">
+  <label for="f-{{.Name}}"><b>{{.Label}}</b>{{if .Hint}}<small>{{.Hint}}</small>{{end}}</label>
+  <div>
+  {{if or (eq .Kind "select") (eq .Kind "bool")}}{{$v := .Value}}<select name="{{.Name}}" id="f-{{.Name}}" {{if .Error}}aria-invalid="true"{{end}}><option value="">{{if .Inherit}}inherit ({{.Inherit}}){{else}}not set{{end}}</option>{{range .Options}}<option {{if eq . $v}}selected{{end}}>{{.}}</option>{{end}}</select>
+  {{else if eq .Kind "lines"}}<textarea rows="3" name="{{.Name}}" id="f-{{.Name}}" spellcheck="false" {{if .Error}}aria-invalid="true"{{end}}>{{.Value}}</textarea>
+  {{else}}<input name="{{.Name}}" id="f-{{.Name}}" value="{{.Value}}" {{if .Inherit}}placeholder="inherit ({{.Inherit}})"{{end}} {{if eq .Kind "int"}}inputmode="numeric"{{end}} {{if .Error}}aria-invalid="true"{{end}}>{{end}}
+  {{if .Error}}<div class="ferr" role="alert">{{.Error}}</div>{{end}}
+  </div>
+</div>{{end}}
+
+{{define "hidden"}}<input type="hidden" name="csrf" value="{{.Auth.CSRF}}"><input type="hidden" name="hash" value="{{.Hash}}"><input type="hidden" name="kind" value="{{.Spec.Kind}}"><input type="hidden" name="id" value="{{.Spec.ID}}">{{range .Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}{{end}}
+
+{{define "edit"}}{{template "shell-top" .}}
+<p class="sub"><a href="{{.Spec.Back}}">{{.Spec.BackLabel}}</a> / edit</p>
+<h1>{{.Spec.Title}}</h1>
+<p class="sub">File <code>{{.Spec.Target.Path}}</code></p>
+<ol class="steps" aria-label="Edit pipeline">{{range .Steps}}<li class="{{.Class}}" {{if eq .Class "cur"}}aria-current="step"{{end}}>{{.Name}}{{.Note}}</li>{{end}}</ol>
+<div class="editgrid">
+<div>
+{{if eq .Stage "edit"}}
+  {{if .Probs}}<div class="banner err" role="alert"><b>{{len .Probs}} problem{{if gt (len .Probs) 1}}s{{end}} found. Nothing was written.</b>
+    <ul>{{range .Probs}}<li>{{if .Path}}<a href="#f-{{.Path}}">{{.Path}}</a>: {{end}}{{.Msg}}</li>{{end}}</ul></div>{{end}}
+  <div class="seg tabs" role="group" aria-label="Editor mode">
+    <a href="{{.Spec.URL}}" {{if not .Raw}}aria-current="true"{{end}}>Form</a>
+    {{if .Spec.RawURL}}<a href="{{.Spec.RawURL}}" {{if .Raw}}aria-current="true"{{end}}>Advanced: {{if .Spec.FrontOnly}}raw front matter{{else}}raw YAML{{end}}</a>
+    {{else}}<a href="/edit">Advanced: whole config file</a>{{end}}
+  </div>
+  <form method="post" action="/edit/validate">
+    <input type="hidden" name="csrf" value="{{.Auth.CSRF}}"><input type="hidden" name="hash" value="{{.Hash}}">
+    <input type="hidden" name="kind" value="{{.Spec.Kind}}"><input type="hidden" name="id" value="{{.Spec.ID}}">
+    {{if .Raw}}
+    <input type="hidden" name="mode" value="raw">
+    <p class="muted">The same file as text. Comments and order are kept.{{if .Spec.FrontOnly}} Only the front matter is shown; the markdown below it cannot be changed here.{{end}}</p>
+    <textarea name="raw" class="raw" spellcheck="false" aria-label="Raw file">{{.RawTxt}}</textarea>
+    {{else}}
+    {{range .Groups}}<div class="card"><h3>{{.Title}}</h3>{{range .Fields}}{{template "field" .}}{{end}}</div>{{end}}
+    {{range .Tables}}<div class="card"><h3>{{.Title}}</h3>
+      <p class="muted">Clear the first field of a row to remove it. Fill the empty last row to add one.</p>
+      <div class="tw"><table class="rules"><thead><tr>{{range .Head}}<th title="{{.Hint}}">{{.Label}}</th>{{end}}</tr></thead><tbody>
+      {{range .Rows}}<tr>{{range .}}<td><input name="{{.Name}}" value="{{.Value}}" aria-label="{{.Label}}" {{if .Error}}aria-invalid="true"{{end}} id="f-{{.Name}}">{{if .Error}}<div class="ferr" role="alert">{{.Error}}</div>{{end}}</td>{{end}}</tr>{{end}}
+      </tbody></table></div></div>{{end}}
+    {{if .AddRules}}<div class="card"><h3>Dispatch rules</h3><p class="muted" style="margin-top:0">This file has no dispatch rules. <a href="{{.Spec.URL}}?rules=1">Add a dispatch rule</a></p></div>{{end}}
+    {{if .Notes}}<div class="muted">{{range .Notes}}<p>{{.}}</p>{{end}}</div>{{end}}
+    {{if .Spec.FrontOnly}}
+    <div class="card"><h3>Sleep, cleanup and budget</h3>
+      <p class="muted">sortie-loop does not support these yet, so they cannot be set here.</p>
+      <div class="field"><label><b>Sleep</b></label><div><input value="not available yet" disabled aria-label="Sleep"></div></div>
+      <div class="field"><label><b>Cleanup</b></label><div><input value="not available yet" disabled aria-label="Cleanup"></div></div>
+      <div class="field"><label><b>Budget</b></label><div><input value="not available yet" disabled aria-label="Budget"></div></div>
+    </div>
+    <div class="card"><h3>Other keys</h3><p class="muted" style="margin-top:0">The form changes only the fields above. Everything else in the front matter is kept as it is. Top-level keys in this file: {{range $i, $k := .Kept}}{{if $i}}, {{end}}<code>{{$k}}</code>{{end}}.</p></div>
+    {{end}}
+    {{end}}
+    <p class="row"><button type="submit" class="primary" {{ctl .Auth.Authenticated ""}}>Validate and preview diff</button><a class="btn" href="{{.Spec.Back}}">Cancel</a></p>
+  </form>
+
+{{else if eq .Stage "preview"}}
+  {{if .NoDiff}}<div class="banner">No changes: the file already says this.</div>
+  <p class="row"><a class="btn" href="{{.Spec.URL}}">Back</a></p>
+  {{else}}
+  <div class="banner ok">Validation passed.</div>
+  {{if .Warns}}<details class="warns"><summary>{{len .Warns}} warning{{if gt (len .Warns) 1}}s{{end}} from the engine</summary><ul>{{range .Warns}}<li>{{.}}</li>{{end}}</ul></details>{{end}}
+  <h3>Diff preview</h3>
+  <pre class="diff" tabindex="0" aria-label="Unified diff">{{range .Diff}}<span class="{{.Class}}">{{.Text}}</span>{{end}}</pre>
+  <p class="muted">The file was loaded with hash <code>{{.Hash}}</code>. If it changes before you confirm, the edit stops as a conflict.</p>
+  <div class="row">
+    <form class="inline" method="post" action="/edit/apply">{{template "hidden" .}}<button type="submit" class="primary" {{ctl .Auth.Authenticated ""}}>Confirm and apply</button></form>
+    <form class="inline" method="post" action="/edit/validate">{{template "hidden" .}}<button type="submit" name="back" value="1">Back to edit</button></form>
+  </div>
+  {{end}}
+
+{{else if eq .Stage "conflict"}}
+  <div class="banner err" role="alert"><b>Conflict: the file changed while you were editing.</b><br>
+  Nothing was written and no backup was made. The file on disk now has hash <code>{{.Hash}}</code>.</div>
+  <div class="row">
+    <form class="inline" method="post" action="/edit/validate">{{template "hidden" .}}<button type="submit" class="primary">Re-apply my edits to the latest file</button></form>
+    <a class="btn" href="{{.Spec.URL}}">Discard my edits and reload</a>
+  </div>
+
+{{else if eq .Stage "result"}}
+  {{template "outcome" .Result}}
+  <p class="row"><a class="btn" href="{{.Spec.Back}}">Back</a><a class="btn" href="{{.Spec.URL}}">Edit again</a></p>
+{{end}}
+</div>
+<aside><div class="card"><h3>Backups of this file</h3>
+  {{range .Backups}}<form class="row bk" method="post" action="/backups/restore"><input type="hidden" name="csrf" value="{{$.Auth.CSRF}}"><input type="hidden" name="id" value="{{.ID}}"><code>#{{.ID}}</code><span class="muted">{{utc .TS}}</span><button {{ctl $.Auth.Authenticated ""}}>Restore</button></form>
+  {{else}}<span class="muted">None yet. A backup is written before every apply.</span>{{end}}
+  <p class="muted"><a href="/backups">All backups</a>. The last 20 per file are kept.</p></div></aside>
+</div>
+{{template "statuspoll"}}
+{{template "shell-bottom" .}}{{end}}
+
+{{define "outcome"}}
+{{if .Applied}}<div class="banner ok" role="status"><b>Applied.</b> Backup #{{.BackupID}} holds the previous file.</div>
+{{else if .RolledBack}}<div class="banner err" role="alert"><b>Apply failed. The previous file was restored and is live again.</b> Both outcomes are below.</div>
+{{else if .Restored}}<div class="banner err" role="alert"><b>Apply failed. The previous file is back on disk, but applying it again also failed.</b> Both outcomes are below.</div>
+{{else}}<div class="banner err" role="alert"><b>Not applied.</b> See the steps below.</div>{{end}}
+<ol class="out">{{range .Steps}}<li class="{{if .OK}}ok{{else}}bad{{end}}"><b>{{.Name}}</b>: {{.Msg}}</li>{{end}}</ol>
+{{end}}
+
+{{define "restore"}}{{template "shell-top" .}}
+<p class="sub"><a href="/backups">Backups</a> / restore</p>
+<h1>Restore a backup</h1>
+{{if .Result.Report.Errors}}<div class="banner err" role="alert"><b>The backup no longer validates, so it was not restored.</b>
+  <ul>{{range .Result.Report.Errors}}<li>{{.Msg}}</li>{{end}}</ul></div>
+{{else if .Result.Steps}}{{template "outcome" .Result}}{{end}}
+<p class="row"><a class="btn" href="/backups">Back to backups</a></p>
+{{template "statuspoll"}}
+{{template "shell-bottom" .}}{{end}}
+
+{{define "backups"}}{{template "shell-top" .}}
+<p class="sub"><a href="/settings">Settings</a> / backups</p>
+<h1>Backups</h1>
+<p class="sub">A copy of a file is taken before every applied edit and restore. The last 20 per file are kept. Restoring replaces the file with the copy, after backing up the current one.</p>
+{{if .Backups}}
+<div class="tw"><table>
+<thead><tr><th>#</th><th>Time (UTC)</th><th>File</th><th>Scope</th><th>Saved by</th><th></th></tr></thead><tbody>
+{{range .Backups}}<tr><td>{{.ID}}</td><td>{{utc .TS}}</td><td><code>{{.Path}}</code></td><td>{{.Scope}}</td><td>{{.Actor}}</td>
+<td><form class="inline" method="post" action="/backups/restore"><input type="hidden" name="csrf" value="{{$.Auth.CSRF}}"><input type="hidden" name="id" value="{{.ID}}"><button {{ctl $.Auth.Authenticated ""}}>Restore</button></form></td></tr>{{end}}
+</tbody></table></div>
+{{else}}<p class="empty">No backups yet. One is created before every applied edit.</p>{{end}}
+{{template "statuspoll"}}
+{{template "shell-bottom" .}}{{end}}
