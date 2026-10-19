@@ -81,7 +81,7 @@ agent:
   max_retry_backoff_ms: 120000
 
 pi:
-  model: "sonnet"
+  model: "claude-sonnet-5-5"
 
 # Alternative agent: Claude Code. To switch, comment out the active
 # `agent:`/`pi:` blocks above and uncomment the blocks below.
@@ -96,7 +96,7 @@ pi:
 #  stop_grace_ms: 5000
 #  max_retry_backoff_ms: 120000
 #claude-code:
-#  model: "sonnet"
+#  model: "claude-sonnet-5-5"
 
 # The first matching rule wins, so an issue carrying both agent:plan and
 # agent:build is planned first. agent:plan-build runs build.md, which posts
