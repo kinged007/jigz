@@ -299,7 +299,9 @@ cd your-repo
 sortie-loop setup    # writes .sortie/config.yaml, updates .gitignore, creates the labels,
                      # installs the engine, and installs .sortie/pm-agent.md
                      # (a project-manager prompt)
-sortie-loop          # run every WORKFLOW.*.md loop (Ctrl-C stops all)
+sortie-loop          # run every WORKFLOW.*.md loop in the foreground (Ctrl-C stops all)
+sortie-loop start    # same run detached in the background; stop ends it
+sortie-loop stop     # stop the detached run (also stops a foreground run)
 ```
 
 `setup` detects `owner/name` from the git `origin` remote
@@ -359,6 +361,13 @@ old `.3` is deleted. A file that is already over 10 MiB when a child starts
 is rotated first. The limit and the 3 rotated files are fixed in the code.
 If the log file cannot be opened or written, one warning is printed and the
 child keeps running. The per-run agent transcript is not part of these logs.
+
+`sortie-loop start [--no-server] [--no-dashboard] [--dashboard-port=N] [--unite] [repo-root]`
+runs the same loops detached in the background. `SORTIE_LOOP_ONLY` is read from the caller's environment when `start` is run (the child inherits it; it is not part of argv). Stdout and stderr go to
+`<repo-root>/.sortie/logs/supervisor.log` (appended, same file the
+foreground run would print to the terminal). `sortie-loop stop` ends the
+detached run. A second `start` for the same repo-root is refused while a
+live run is registered; use `restart` or `status` instead.
 
 `sortie-loop cleanup [--dry-run] [--json] [repo-root]` runs the configured
 cleanup command once (see [Workspace cleanup](#workspace-cleanup)).
