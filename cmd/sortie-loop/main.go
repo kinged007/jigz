@@ -81,12 +81,24 @@ func parseArgs(argv []string) (cmdline, error) {
 			c.remoteArgs = argv[i+1:]
 			i = len(argv)
 		case "--dump-version":
+			if c.start {
+				return c, fmt.Errorf("unknown flag %q", arg)
+			}
 			c.dumpVersion = true
 		case "--version", "-V":
+			if c.start {
+				return c, fmt.Errorf("unknown flag %q", arg)
+			}
 			c.showVersion = true
 		case "help", "-h", "--help":
+			if c.start {
+				return c, fmt.Errorf("unknown flag %q", arg)
+			}
 			return c, errHelp
 		case "--repo":
+			if c.start {
+				return c, fmt.Errorf("unknown flag %q", arg)
+			}
 			v, err := value()
 			if err != nil {
 				return c, err

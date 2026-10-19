@@ -363,7 +363,7 @@ If the log file cannot be opened or written, one warning is printed and the
 child keeps running. The per-run agent transcript is not part of these logs.
 
 `sortie-loop start [--no-server] [--no-dashboard] [--dashboard-port=N] [--unite] [repo-root]`
-runs the same loops detached in the background. Stdout and stderr go to
+runs the same loops detached in the background. `SORTIE_LOOP_ONLY` is read from the caller's environment when `start` is run (the child inherits it; it is not part of argv). Stdout and stderr go to
 `<repo-root>/.sortie/logs/supervisor.log` (appended, same file the
 foreground run would print to the terminal). `sortie-loop stop` ends the
 detached run. A second `start` for the same repo-root is refused while a

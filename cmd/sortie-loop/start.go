@@ -33,6 +33,11 @@ func runStart(c cmdline) {
 	if err != nil {
 		fatal(err)
 	}
+	lk, err := lockFile(".start.lock")
+	if err != nil {
+		fatal(err)
+	}
+	defer lk.release()
 	if e, err := runningEntry(abs); err == nil {
 		fatal(fmt.Errorf("sortie-loop is already running for %s (pid %d); use `sortie-loop restart` or `sortie-loop status`", abs, e.PID))
 	}
@@ -44,7 +49,7 @@ func runStart(c cmdline) {
 	logPath := supervisorLogPath(abs)
 	pid, err := startLauncher(self, argv, logPath)
 	if err != nil {
-		fatal(fmt.Errorf("start %s: %w", abs, err))
+		fatal(fmt.Errorf("start %s (%s): %w", abs, self, err))
 	}
 	if err := waitForStartReady(abs, pid, startReadyBudget); err != nil {
 		fatal(fmt.Errorf("sortie-loop %s (pid %d) did not become ready: %w; see %s", abs, pid, err, logPath))
@@ -79,8 +84,7 @@ func waitForStartReady(root string, pid int, budget time.Duration) error {
 		if err == nil && doc.PID == pid && statusLiveness(doc) == "running" {
 			return nil
 		}
-		if err == nil && statusLiveness(doc) != "running" && !pidAlive(pid) {
-			// Child died before publishing running; surface quickly.
+		if !pidAlive(pid) {
 			return fmt.Errorf("process exited")
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -99,18 +103,35 @@ func launchDetached(self string, argv []string, logPath string) (int, error) {
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return 0, err
 	}
+	// Rotate an existing oversized supervisor log at start, like the
+	// child logs (10 MiB ×3). The supervisor itself appends without
+	// live rotation; this bounds growth across restarts.
+	// ponytail: switch to rotatingLog for live rotation when a
+	// single run can exceed 10 MiB without restart.
+	if fi, err := os.Stat(logPath); err == nil && fi.Size() > childLogMaxBytes {
+		_ = os.Remove(fmt.Sprintf("%s.%d", logPath, childLogKeep))
+		for i := childLogKeep - 1; i >= 1; i-- {
+			_ = os.Rename(fmt.Sprintf("%s.%d", logPath, i), fmt.Sprintf("%s.%d", logPath, i+1))
+		}
+		_ = os.Rename(logPath, logPath+".1")
+	}
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return 0, err
 	}
-	defer f.Close()
+	defer f.Close() // parent closes after Start; child keeps dup
 	null, err := os.OpenFile(os.DevNull, os.O_RDONLY, 0)
 	if err != nil {
 		return 0, err
 	}
-	defer null.Close()
+	defer null.Close() // child keeps dup, parent drops
 	cmd := exec.Command(self, argv...)
+	// new session so SIGHUP on terminal close does not reach the
+	// supervisor (foreground run relies on SIGHUP == reload).
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	// launchDetached does not set cmd.Dir; buildStartArgv passes c.dir
+	// verbatim and the child resolves it with filepath.Abs relative to
+	// its inherited cwd, so the resolution stays stable.
 	cmd.Stdin = null
 	cmd.Stdout = f
 	cmd.Stderr = f
