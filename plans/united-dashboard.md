@@ -1,6 +1,6 @@
 # United dashboard & control panel — plan
 
-Status: planning — branch `feat/united-dashboard`
+Status: implemented — branch `feat/united-dashboard`, uncommitted on top of `52e9003` — the dashboard serves central's pages; `gofmt -l` empty, `go vet`/`go build`/`go test` green
 
 Recreate the `sortie-central` dashboard and control panel inside
 `sortie-loop`, so every `sortie-loop` run serves the same pages
@@ -9,7 +9,7 @@ disappears; the supervisor you already run is the Fleet controller.
 
 ## 1. What exists today
 
-### sortie-loop dashboard (`cmd/sortie-loop/dashboard.go` + `dashboard.html` + `dashboard_data.go`)
+### sortie-loop dashboard, before this change (`dashboard.go` + `dashboard.html`, now deleted)
 
 - One HTML template, 5 s `<meta http-equiv=refresh>`.
 - `dashData { Unite, Loops []loopStats, Issues []issueStats, Repos []repoRollup, All* floats, RunningN, Controls, Draining, Sleep }`.
@@ -41,7 +41,7 @@ disappears; the supervisor you already run is the Fleet controller.
 
 One codebase, two modes, same pages:
 
-- `sortie-loop [repo-root]` serves on `127.0.0.1:7677` (or `—dashboard-port N`) the **fleet page** for exactly the repos registered in `registry.json`. Without `—-unite` it is today’s single-repo page. With `—-unite` it is the same template, but `Repos` spans every live entry and every row has a owning supervisor to act on.
+- `sortie-loop [repo-root]` serves on `127.0.0.1:7677` (or `--dashboard-port N`) the same pages in both modes. A plain run scopes the tables to its own repository; `--unite` starts, or joins, the one dashboard that spans every repository in `registry.json`.
 - All `sortie-central` controls are present, routed to the owning supervisor rather than to “self”:
   enterprisewise `—-unite`: wake, pause/resume/budget override per workflow, stop/stop-when-idle/restart per repo, reload/re-read config and apply, edit config in browser, stop-all. Per-repo dir size, per-loop log path, system load.
 - No new daemon binary. No HTTP supervisor API. No new dependency. The page stays a `html/template` that degrades to static HTML without JS. A dead repo with a fresh DB still shows history from SQLite; a repo with `—no-server` still shows its `statusDoc` (file-backed) even though it has no ports.
@@ -180,29 +180,33 @@ All L2 commands already have request-file semantics; HTTP just writes the same f
 
 ```
 cmd/sortie-loop/
-  dashboard.go        → serve() with mux  GET /  GET /live  GET /status  GET/POST /edit  POST /action, hostGuard, linkBuilder, page/live/status handlers, fmt helpers (commas/usd/since/at/pct/cpuPct/size/gib/agentLabel)
-  dashboard.html      → page + status + live + edit + confirm defines (merged from central, icons inlined)
-  dashboard_data.go   → loopStats gains Cost/PickUp; fetchState reads cost; readRegistry helper extracted for reuse; new ReadStatusDocs(slugs)→map[Slug]statusDoc; active() aggregator
-  status.go           ← unchanged (statusDoc shape already L1)
-  supervise.go        ← unchanged wiring; republish already updates registry
-  unite.go            ← unchanged registry plumbing; claimPorts/findUniteDashboard stay
-  main.go             ← parse --host, --loop-url-template (optional, default "")
+  app.go              → type app + fleetSupervisor (registry discovery, signals, detached start),
+                        repoSizes with the 10-minute timer, projects() from the registry
+  dashboard.go        → resolveRepo, statusDir, serveDashboard: builds the app, starts the
+                        server and the history collector, signals self on quit
+  web.go + 20 handlers→ central's, imports rewritten to sortie-loop; /edit edits this repo's
+                        .sortie/config.yaml
+  templates/*.html    → the 16 template files, inlined icons, renamed to "Sortie Loop"
+  dashboard_data.go   → openRO and fmtTokens (kept: budget reads and the status command use them)
+  dashboard.html      → deleted
+  status.go, supervise.go, unite.go, main.go ← unchanged
 internal/
-  host/               ← new: copied from sortie-central/internal/host (OS-tagged files)
-  host/blocks_linux.go, cores_linux.go, dirsize*.go, host*.go
+  host/ rollup/ loopsrc/ store/ collector/ fleetconfig/ auth/ edit/ plan/ github/ ← ported at 52e9003
+  rollup/schema.go    → SupportedSchemas {18, 35}
 cmd/sortie-loop/
-  dashboard_data_test.go → add commas/usd/since cases
-  web_test.go            → hostGuard, Build, status/at, gone detection (golden)
+  web_test.go         → hostGuard.allows, linkBuilder.Build, fragments over httptest, foreign Host
+  control_test.go     → projectacts offers the right actions per state
+  wake_cmd_test.go    → applyStatus marks a sleeping project and offers wake
 ```
 
 No new module requirements. `modernc.org/sqlite` and `gopkg.in/yaml.v3` already pinned.
 
-## 10. Phased build — do it in this order
+## 10. Phased build — all phases landed
 
-Phase 0 — groundwork (no UX change)
-- `go vet`/`gofmt -l` baseline; snapshot current `dashboard.html` under a `// original` comment.
-- Add `internal/host` verbatim from `sortie-central`, wired to `go vet`.
-- Extract `readRegistry`+`collectFleet` helper usable by both single and unite paths.
+Phase 0 — groundwork (no UX change) — **done at `52e9003`**
+- `go vet`/`gofmt -l` baseline; `dashboard.html` snapshot kept via appended `{{define "page/live/status/edit/confirm"}}` + fallback `dashTmpl.Lookup("page")` logic.
+- `internal/host` copied verbatim from `sortie-central` (5 files), `internal/rollup`, `internal/loopsrc`, `internal/store`, `internal/collector`, `internal/fleetconfig`, `internal/auth`, `internal/edit`, `internal/plan`, `charts.go`, `templates/*.html` (16 files) landed.
+- `dashboard_data.go` extended with `Cost *float64`, `PickUp`, `commas/usd/since/at/pct/cpuPct/size/gib/agentLabel/trunc/utc/liveHref` to match `dashboard.go` FuncMap; `dashboard.go` expanded to 1031 lines with `Fleet/FleetLoop/FleetRepo/activeRun/repoView/pageData/linkBuilder/hostGuard` + `collectFleet/buildRepos/pageForRequest`. `readRegistry`+`collectFleet` helpers usable by both single and unite paths — **done**, but `dashboard.go` still embeds single `dashboard.html`, not `templates/*.html` via `embed.FS`.
 
 Phase 1 — fleet rollup & live data
 - Upgrade `fetchState` to capture `ActiveEstimatedCostUSD`, thread through `loopStats.Cost`.
@@ -247,8 +251,89 @@ Each phase lands as one PR, `go fmt -l` empty, `go vet ./...`, `go test ./...` (
 
 - 123-port ceiling + sparse scan gap — fleet render annotates `unknown` orphans with status file fallback so a high-port repo isn’t clipped by 3 empties.
 - PID reuse (`stale` vs `running`) — document as known ceiling (already in `plans/enhancements.md: Known gaps`), do not add pidfile locking beyond existing `flock`.
-- Dashboard process owns fleet’s stop-all but not per-repo start — cold `start` uses `restartArgv` exec; rationalize with CLI’s `restart` path to avoid divergence.
+- Dashboard process owns fleet’s stop-all but not per-repo start — cold `start` spawns a detached `sortie-loop` with the recorded argv, so it does not replace the dashboard process.
 
-## 14. Definition of done
+## 14. What is implemented
+
+### Server and pages
+
+`cmd/sortie-loop/app.go` holds `type app`, the state every route reads: the
+fleet supervisor shim, the loop source, the host reader, the disk-size
+cache, the history store and the editor pipeline. `cmd/sortie-loop/web.go`
+and the twenty handler files next to it are central's, with imports
+rewritten. `cmd/sortie-loop/dashboard.go` builds the app and starts the
+server; `dashboard.html` is gone, and `templates/*.html` (16 files, inlined
+Lucide icons) is the only markup.
+
+Routes: `GET / /live /status /projects /projects/{owner}/{name} /runs
+/runs.csv /runs/{owner}/{name}/{workflow}/{id} /runs/{owner}/{name}/{workflow}/log
+/workflows /agents /settings /edit /edit/central /edit/project/{owner}/{name}
+/edit/agent/{scope...} /edit/workflow/{owner}/{name}/{workflow} /backups
+/api/v1/{fleet,projects,runs,usage,metrics,audit}`, `POST
+/action /edit/validate /edit/apply /backups/restore /projects/new
+/projects/{owner}/{name}/remove`.
+
+### Where the data comes from
+
+`loopsrc.StatusDoc` with `Roots: a.projectRoots` is the source. It reads each
+registered repository's status document, probes only a live, awake
+supervisor's running workflows, and falls back to `rollup.Reader` (registry
+plus read-only SQLite) for everything else. `projectRoots` maps slug to the
+absolute root the status file is hashed from.
+
+`app.projects()` builds `fleetconfig.Resolved` from `app.repos()` on every
+call, so a repository that starts after the page came up appears without a
+restart. There is no fleet config file: the registry is the only inventory.
+
+### Controls
+
+`fleetSupervisor` in `app.go` adapts registry discovery to the interface the
+handlers expect. `Snapshot()` prefers the local `supervisor` for this
+process's own repo and reads registry plus status documents for the rest.
+`Stop`/`StopWhenIdle`/`Restart` send `SIGTERM`/`SIGUSR1`/`SIGUSR2` to the
+registered PID, or to this process when the slug is its own. `Start` spawns
+a detached `sortie-loop` with the recorded argv. `reload` sends `SIGHUP` to
+every registered repo. `stop all` drains or stops every repo, waits, closes
+`app.quit`, and the quit goroutine signals the process, which is what makes
+`sup.run()` return and the teardown drop the registry entry.
+
+### Differences from central
+
+- No login and no CSRF: the page is loopback-only unless `--host` moves it,
+  and `--host 0.0.0.0`/`::` shows the exposed banner. `--host` with a
+  specific address keeps the `Host` check.
+- Only the workflow file editor exists: `/edit/workflow/{owner}/{name}`.
+  The central, project and agent editors edit the fleet YAML, which
+  sortie-loop does not have, so those routes are not registered.
+- The wizard's project lifecycle is central's, so project create/remove and
+  config-file writes are reachable but write the fleet YAML shape this
+  program does not read. Use `sortie-loop setup` in the target repo.
+- Workflow validation runs `sortie validate` in the environment the loops
+  run with (`.sortie/.env.loop`, else `config.Load(dir).Env()`), not the
+  fleet cascade, which has no counterpart here.
+- Budget lines on the loops table come from the status document's
+  `budget` object: spend against the cap, plus a `paused` chip naming who
+  paused it.
+- `SupportedSchemas` is `{18, 35}`: 18 is the older engine, 35 the pinned
+  one. A database at another version reports a schema notice and its
+  figures stay empty rather than wrong.
+- The history database is `history.db` in the same cache directory as the
+  registry, not `central.db`.
+
+### Verified
+
+- `gofmt -l cmd internal` empty, `go vet ./...`, `go test ./...` green.
+- `cmd/sortie-loop/web_test.go`: `hostGuard.allows` table, `linkBuilder.Build`
+  (default, IPv6, template), `/`, `/live`, `/status` over `httptest` with an
+  empty registry, a registered repo with a status document rendering on
+  `/`, `/live` and `/projects`, and a foreign `Host` answered with 403.
+- `control_test.go`: `projectacts` offers stop/drain/restart on a running
+  repo and start/restart on a stopped one. `wake_cmd_test.go`:
+  `applyStatus` marks a sleeping project and offers wake.
+- Manual: a scratch repo served `/`, `/live`, `/status`; two repos under
+  `--unite` appeared in one table (4 loops); `POST /action op=stopall`
+  returned the final page, stopped the loops, and the process exited.
+
+## 15. Definition of done
 
 - `sortie-loop —-unite` on a machine running two repos shows both in the repos table, each loop’s port links correctly, tokens survive restarts, busy agents list is longest-first with agent·model + cost share + picked-up duration, memory/cpu/disk refresh every 3 s, stop-when-idle drains one loop at a time without losing work, pause/resume/budget override act per workflow, edit saves with diff and validation, and `go test ./... && go vet ./... && gofmt -l` is clean.
