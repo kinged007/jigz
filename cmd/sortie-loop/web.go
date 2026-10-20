@@ -517,6 +517,9 @@ type pageData struct {
 	Ops opsView
 	// Sorts are the orderings the Operations page offers.
 	Sorts []string
+	// Unite marks a page that spans every registered repository, which is
+	// how a later --unite run recognises this one before joining it.
+	Unite bool
 }
 
 // link builds the URL for a loop's own dashboard.
@@ -614,6 +617,7 @@ func (a *app) data(msg, errMsg, host, urlTemplate string) pageData {
 		Sys:        a.readSys(),
 		Host:       host,
 		Link:       linkBuilder{Host: host, Template: urlTemplate},
+		Unite:      a.unite,
 	}
 }
 

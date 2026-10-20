@@ -186,6 +186,7 @@ table.agents td { white-space: nowrap; }
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="sortie-loop-dashboard" content="{{if .Unite}}unite{{else}}repo{{end}}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{if .Title}}{{.Title}} - {{end}}Sortie Loop</title>
 <meta name="csrf-token" content="{{.Auth.CSRF}}">

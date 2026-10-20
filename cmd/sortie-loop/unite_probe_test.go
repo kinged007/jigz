@@ -5,47 +5,39 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 )
 
 func TestFindUniteDashboard(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	serve := func(unite bool) (*httptest.Server, int) {
+		a := &app{sizes: newRepoSizes(), stateDir: t.TempDir(), unite: unite}
+		srv := httptest.NewServer(a.routes(newHostGuard("127.0.0.1")))
+		t.Cleanup(srv.Close)
+		u, err := url.Parse(srv.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		port, err := strconv.Atoi(u.Port())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return srv, port
 	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "<title>Sortie Loop \u2014 Unite</title>")
-	})
-	srv := &http.Server{Handler: mux}
-	go srv.Serve(ln)
-	defer srv.Close()
-
-	// Temporarily narrow the scan range to our ephemeral port by
-	// checking the marker logic directly: a unite page is found,
-	// a loop page is not.
-	if got := findUniteDashboardOn(port); got != port {
-		t.Errorf("unite page: got %d, want %d", got, port)
+	_, unitePort := serve(true)
+	if got := findUniteDashboardOn(unitePort); got != unitePort {
+		t.Errorf("unite page: got %d, want %d", got, unitePort)
 	}
-	ln2, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port2 := ln2.Addr().(*net.TCPAddr).Port
-	mux2 := http.NewServeMux()
-	mux2.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "<title>Sortie Dashboard</title>")
-	})
-	srv2 := &http.Server{Handler: mux2}
-	go srv2.Serve(ln2)
-	defer srv2.Close()
-	if got := findUniteDashboardOn(port2); got != 0 {
-		t.Errorf("non-unite page: got %d, want 0", got)
+	_, repoPort := serve(false)
+	if got := findUniteDashboardOn(repoPort); got != 0 {
+		t.Errorf("single-repo page: got %d, want 0", got)
 	}
 }
 
@@ -185,12 +177,17 @@ func TestConcurrentRegistryWritesKeepEveryEntry(t *testing.T) {
 	if err := json.Unmarshal(data, &reg); err != nil {
 		t.Fatal(err)
 	}
-	if len(reg.Entries) != n/2 {
-		t.Errorf("got %d entries, want %d", len(reg.Entries), n/2)
+	// A stopped run keeps its entry and loses its pid; nothing is lost.
+	if len(reg.Entries) != n {
+		t.Errorf("got %d entries, want %d", len(reg.Entries), n)
 	}
-	for i := 1; i < n; i += 2 {
-		if _, ok := reg.Entries[fmt.Sprintf("/repo/%d", i)]; !ok {
-			t.Errorf("entry %d was lost", i)
+	for i := 0; i < n; i++ {
+		e, ok := reg.Entries[fmt.Sprintf("/repo/%d", i)]
+		if !ok {
+			t.Fatalf("entry %d was lost", i)
+		}
+		if stopped := e.PID == 0; stopped != (i%2 == 0) {
+			t.Errorf("entry %d pid = %d", i, e.PID)
 		}
 	}
 }

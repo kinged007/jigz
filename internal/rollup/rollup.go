@@ -110,6 +110,10 @@ type endpoint struct {
 	Loop     string `json:"loop"`
 	Port     int    `json:"port"`
 	DBPath   string `json:"db_path"`
+	// Probe says whether a live process owns the port. A repository whose
+	// run exited keeps its entry so the page can offer start again, and
+	// probing its dead ports would cost the page a timeout per loop.
+	Probe bool `json:"-"`
 }
 
 type registry struct {
@@ -247,13 +251,14 @@ func (r Reader) endpoints() []endpoint {
 		// A stale heartbeat from a dead process is skipped, never
 		// deleted here: the file is shared and its owner may still be
 		// rewriting it.
-		if time.Since(e.UpdatedAt) > staleAfter && !pidAlive(e.PID) {
+		if e.PID != 0 && time.Since(e.UpdatedAt) > staleAfter && !pidAlive(e.PID) {
 			continue
 		}
 		for _, ep := range e.Loops {
 			if ep.Port <= 0 {
 				continue
 			}
+			ep.Probe = e.PID != 0
 			if ep.RepoName == "" {
 				ep.RepoName = e.RepoName
 			}
@@ -267,8 +272,10 @@ func (r Reader) endpoints() []endpoint {
 func (r Reader) one(ep endpoint) Loop {
 	l := Loop{Repo: ep.RepoName, Loop: ep.Loop, Port: ep.Port, DBPath: ep.DBPath}
 	// The state read comes first: the pickup times are keyed by the
-	// identifiers it reports.
-	l.readState(r.client())
+	// identifiers it reports. A port nobody stands behind is not probed.
+	if ep.Probe {
+		l.readState(r.client())
+	}
 	l.readDB()
 	return l
 }

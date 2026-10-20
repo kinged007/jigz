@@ -115,6 +115,9 @@ type app struct {
 	alertCache      dbAlertCache
 	pipeOnce        sync.Once
 	pipe            *edit.Pipeline
+	// unite is set when this page spans every registered repository,
+	// which the page states in its head so a later run can find it.
+	unite bool
 }
 
 // src returns the live fleet source. When the app is built with a
@@ -239,14 +242,21 @@ func (fs *fleetSupervisor) snapshot(root string, ent registryEntry) supervise.Re
 	}
 	doc, _ := readStatusDoc(root)
 	state := supervise.StateRunning
-	switch statusLiveness(doc) {
-	case "stale":
-		state = supervise.StateFailed
-	case "exited":
+	switch {
+	case ent.PID == 0:
+		// A run that exited cleanly left its entry behind so this page
+		// can offer start again.
 		state = supervise.StateStopped
-	}
-	if ent.PID > 0 && !pidAlive(ent.PID) {
-		state = supervise.StateStopped
+	default:
+		switch statusLiveness(doc) {
+		case "stale":
+			state = supervise.StateFailed
+		case "exited":
+			state = supervise.StateStopped
+		}
+		if !pidAlive(ent.PID) {
+			state = supervise.StateStopped
+		}
 	}
 	var loops []string
 	for _, l := range ent.Loops {
@@ -385,7 +395,9 @@ func (fs *fleetSupervisor) Snapshot() []supervise.Repo {
 		if seen[root] {
 			continue
 		}
-		if time.Since(e.UpdatedAt) > 5*time.Minute && !pidAlive(e.PID) {
+		// A stopped entry carries no pid and is kept on purpose; only an
+		// entry whose process died without saying so goes stale.
+		if e.PID != 0 && time.Since(e.UpdatedAt) > 5*time.Minute && !pidAlive(e.PID) {
 			continue
 		}
 		repos = append(repos, fs.snapshot(root, e))

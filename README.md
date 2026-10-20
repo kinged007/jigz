@@ -223,7 +223,9 @@ with whatever process is supervising it.
 
 Controls act on the running process, not on a copy: they signal it, or
 write the same request files the CLI writes, so the page and the
-commands cannot disagree.
+commands cannot disagree. A repository that stopped keeps its row, so it
+can be started again from the page; a state-changing request from another
+origin is refused.
 
 `--host ADDR` moves the page off loopback. Naming one interface keeps the
 `Host` header check; `0.0.0.0` or `::` turns it off and prints a warning

@@ -78,6 +78,7 @@ func serveDashboard(port int, unite bool, sup *supervisor, hostFlag, loopURLTemp
 		applyWait:       30 * time.Second,
 		pollEvery:       500 * time.Millisecond,
 		exposed:         g.wildcard || !isLoopbackHost(host),
+		unite:           unite,
 	}
 	a.sup.app = a
 	a.source = loopsrc.StatusDoc{

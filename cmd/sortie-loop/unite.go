@@ -166,7 +166,7 @@ func findUniteDashboardOn(p int) int {
 	if rerr != nil || resp.StatusCode != http.StatusOK {
 		return 0
 	}
-	if strings.Contains(string(body), "\u2014 Unite") {
+	if strings.Contains(string(body), `name="sortie-loop-dashboard" content="unite"`) {
 		return p
 	}
 	return 0
@@ -213,7 +213,10 @@ func writeRegistry(root string, endpoints []loopEndpoint, startedAt time.Time) e
 	return writeFileAtomic(path, data)
 }
 
-// dropRegistry removes this repo's entry on clean shutdown.
+// dropRegistry marks this repo's entry stopped on clean shutdown. The
+// entry stays so a dashboard that outlives this run can offer start
+// again with the arguments this run was started with; a removal would
+// take the repo off the page with no way back from the browser.
 func dropRegistry(root string) {
 	path, err := registryPath()
 	if err != nil {
@@ -232,7 +235,16 @@ func dropRegistry(root string) {
 	if err := json.Unmarshal(data, &reg); err != nil || reg.Entries == nil {
 		return
 	}
-	delete(reg.Entries, root)
+	e, ok := reg.Entries[root]
+	if !ok {
+		return
+	}
+	// The loops stay so the page can still read their databases: a
+	// stopped repository keeps its history. The zero pid is what stops
+	// the reader from probing their dead ports.
+	e.PID = 0
+	e.UpdatedAt = time.Now().UTC()
+	reg.Entries[root] = e
 	data, err = json.MarshalIndent(reg, "", "  ")
 	if err != nil {
 		return
@@ -259,60 +271,8 @@ func dbPathFor(root, file string) string {
 			}
 			return filepath.Join(root, ".sortie", "workflows", v)
 		}
-		if strings.TrimSpace(line) == "---" && !strings.HasPrefix(strings.TrimSpace(line), "db_path") {
-			continue
-		}
 	}
 	return filepath.Join(root, ".sortie", "workflows", ".sortie.db")
-}
-
-// readRegistry returns live endpoints across all repos: entries whose
-// loop API ports still answer, probed upward from 7678. After 3
-// consecutive empty ports the scan stops, tolerating gaps left by
-// stopped loops in between. Stale registry entries (dead owner, old
-// heartbeat) are skipped, never deleted here.
-func readRegistry() []loopEndpoint {
-	path, err := registryPath()
-	if err != nil {
-		return nil
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	var reg registry
-	if err := json.Unmarshal(data, &reg); err != nil {
-		return nil
-	}
-	known := map[int]loopEndpoint{}
-	for _, e := range reg.Entries {
-		if time.Since(e.UpdatedAt) > 5*time.Minute && !pidAlive(e.PID) {
-			continue
-		}
-		for _, l := range e.Loops {
-			if l.Port > 0 {
-				known[l.Port] = l
-			}
-		}
-	}
-	var out []loopEndpoint
-	empty := 0
-	for p := loopBasePort; p <= probeCeilPort && empty < probeStopEmpty; p++ {
-		if probeFreePort(p) {
-			empty++
-			continue
-		}
-		empty = 0
-		if l, ok := known[p]; ok {
-			out = append(out, l)
-			continue
-		}
-		// ponytail: answering port with no registry entry is a
-		// loop whose owner died without cleanup; include it
-		// under an unknown repo so its activity stays visible.
-		out = append(out, loopEndpoint{Repo: "unknown", RepoName: "unknown", Loop: "unknown", Port: p})
-	}
-	return out
 }
 
 // pidAlive reports whether pid names a running process.
