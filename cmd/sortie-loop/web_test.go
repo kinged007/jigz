@@ -229,3 +229,17 @@ func TestLoopRowShowsBudget(t *testing.T) {
 		t.Errorf("paused = %v by %q", row.Paused, row.PausedBy)
 	}
 }
+
+// A loop started with no server has no state API, so its status document
+// is the only word on it: it is running, not "not answering".
+func TestLoopRowWithoutServerUsesStatusDoc(t *testing.T) {
+	p := &opsProject{Status: &loopsrc.StatusInfo{
+		Liveness:  loopsrc.Live,
+		Workflows: []loopsrc.WorkflowInfo{{Name: "build", State: "running"}},
+	}}
+	p.Repo.State = supervise.StateRunning
+	row := loopRow(&rollup.Loop{Loop: "build", Port: 0}, p)
+	if row.State != "running" {
+		t.Errorf("state = %q, want running", row.State)
+	}
+}

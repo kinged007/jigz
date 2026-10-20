@@ -1,0 +1,22 @@
+{{define "logs"}}{{template "shell-top" .}}
+<style>
+pre.tail { margin: 0; padding: .75rem; background: var(--bg2); border: 1px solid var(--line); border-radius: 4px;
+           overflow: auto; max-height: 70vh; font-size: 12px; line-height: 1.45; }
+pre.tail .l { white-space: pre-wrap; overflow-wrap: anywhere; }
+pre.tail .l::before { content: attr(data-n); display: inline-block; width: 3.5rem; color: var(--mut); user-select: none; }
+</style>
+<div class="pagehead">
+  <div>
+    <h1>Log: {{.Workflow}}</h1>
+    <p class="sub">{{.Project}} &middot; the tail of this workflow's child log</p>
+  </div>
+  <div class="row">
+    <a class="btn" href="/logs/{{.Project}}/{{.Workflow}}">Reload</a>
+    <a class="btn" href="/workflows">Workflows</a>
+  </div>
+</div>
+{{if .Why}}<p class="empty">{{.Why}}</p>{{else if not .Lines}}<p class="empty">the log is empty</p>{{else}}
+<pre class="tail">{{range $i, $l := .Lines}}<div class="l" data-n="{{$i}}">{{$l}}</div>
+{{end}}</pre>
+{{end}}
+{{template "shell-bottom" .}}{{end}}

@@ -385,6 +385,7 @@ func (a *app) routes(g hostGuard) http.Handler {
 	mux.HandleFunc("GET /runs.csv", a.runsCSV)
 	mux.HandleFunc("GET /runs/{owner}/{name}/{workflow}/{id}", a.runDetail)
 	mux.HandleFunc("GET /runs/{owner}/{name}/{workflow}/log", a.runLog)
+	mux.HandleFunc("GET /logs/{owner}/{name}/{workflow}", a.loopLog)
 	mux.HandleFunc("GET /workflows", a.workflows)
 	mux.HandleFunc("GET /projects", a.projectsPage)
 	mux.HandleFunc("GET /projects/{owner}/{name}", a.projectPage)
@@ -675,6 +676,29 @@ func (a *app) action(w http.ResponseWriter, r *http.Request) {
 		note = "drain all: each project stops as its loops go idle"
 	case "wake":
 		note, err = a.wake(r.Context(), slug)
+	case "pause", "resume", "override":
+		// Per workflow, not per repository: the request is the same file
+		// the pause, resume and budget commands write.
+		workflow := r.FormValue("workflow")
+		root, _, ok := resolveRepo(slug, true, nil)
+		switch {
+		case !ok:
+			err = fmt.Errorf("unknown project %q", slug)
+		case workflow == "":
+			err = fmt.Errorf("%s needs a workflow", op)
+		default:
+			var res budgetCmdResult
+			if res, err = controlWorkflow(root, op, workflow); err == nil {
+				switch {
+				case res.Paused:
+					note = op + " " + workflow + " on " + slug + ": paused"
+				case res.Override:
+					note = op + " " + workflow + " on " + slug + ": budget overridden for this period"
+				default:
+					note = op + " " + workflow + " on " + slug
+				}
+			}
+		}
 	case "cleanup":
 		dry := r.FormValue("dry_run") != "0"
 		target = "run"

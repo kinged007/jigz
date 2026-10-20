@@ -120,7 +120,8 @@ tr.lp td:first-child { padding-left: 1.6rem; }
 </tr>
 {{range .Loops}}
 <tr class="lp">
-  <td>{{if gt .L.Port 0}}<a href="{{$.Link.Build .L}}" title="This loop's own dashboard, port {{.L.Port}}">{{.L.Loop}}</a>{{else}}{{.L.Loop}}{{end}} <span class="muted">loop</span></td>
+  <td>{{if gt .L.Port 0}}<a href="{{$.Link.Build .L}}" title="This loop's own dashboard, port {{.L.Port}}">{{.L.Loop}}</a>{{else}}{{.L.Loop}}{{end}} <span class="muted">loop</span>
+    <a class="btn" href="/logs/{{.L.Repo}}/{{.L.Loop}}" title="The last lines of this workflow's child log">log</a></td>
   <td>
     <span class="chip s-{{.Class}}">{{.State}}</span>
     {{if .Paused}}<span class="chip s-paused" title="The budget holds this workflow">{{if .PausedBy}}{{.PausedBy}}{{else}}paused{{end}}</span>{{end}}
@@ -134,7 +135,15 @@ tr.lp td:first-child { padding-left: 1.6rem; }
   <td class="num" title="Cost of the agents running now, as the engine estimates it">{{usd .L.Cost}}</td>
   <td>{{template "share" .Figures.Share}}</td>
   {{if $.Ops.AnyCleanup}}<td></td>{{end}}
-  <td></td>
+  <td><form class="inline" method="post" action="/action">
+    <input type="hidden" name="repo" value="{{.L.Repo}}">
+    <input type="hidden" name="workflow" value="{{.L.Loop}}">
+    <div class="acts">
+      {{if .Paused}}<button class="sm" name="op" value="resume" {{ctl $.Auth.Authenticated "Let this workflow run again"}}>resume</button>
+      {{else}}<button class="sm" name="op" value="pause" {{ctl $.Auth.Authenticated "Stop this workflow from picking up new work; a running agent finishes its turn"}}>pause</button>{{end}}
+      <button class="sm" name="op" value="override" {{ctl $.Auth.Authenticated "Clear this period's budget hold so the workflow runs again"}}>budget override</button>
+    </div>
+  </form></td>
 </tr>
 {{end}}
 {{end}}

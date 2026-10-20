@@ -258,17 +258,13 @@ func (fs *fleetSupervisor) snapshot(root string, ent registryEntry) supervise.Re
 		}
 	}
 	sort.Strings(loops)
-	agents := map[string]string{}
-	for _, w := range doc.Workflows {
-		agents[w.Name] = w.LoopType
-	}
 	slug := ent.RepoName
 	if slug == "" {
 		slug = repoName(root)
 	}
 	return supervise.Repo{
 		Slug: slug, Dir: root, Loops: loops, State: state,
-		Agents: agents, PID: ent.PID, Since: ent.UpdatedAt,
+		Agents: workflowAgents(doc), PID: ent.PID, Since: ent.UpdatedAt,
 	}
 }
 
@@ -282,17 +278,13 @@ func (fs *fleetSupervisor) localView() supervise.Repo {
 			names = append(names, w.Name)
 		}
 	}
-	agents := map[string]string{}
-	for _, w := range doc.Workflows {
-		agents[w.Name] = w.LoopType
-	}
 	state := supervise.StateRunning
 	if len(names) == 0 {
 		state = supervise.StateStopped
 	}
 	return supervise.Repo{
 		Slug: doc.RepoName, Dir: s.root, Loops: names, State: state,
-		Agents: agents, PID: doc.PID, Since: doc.StartedAt,
+		Agents: workflowAgents(doc), PID: doc.PID, Since: doc.StartedAt,
 	}
 }
 
@@ -459,6 +451,27 @@ func (fs *fleetSupervisor) Prepare(all []fleetconfig.Resolved) {}
 
 // SetRecycleIdle controls whether recycling waits for idle.
 func (fs *fleetSupervisor) SetRecycleIdle(idle bool) {}
+
+// workflowAgents maps each loop to the agent adapter its workflow file
+// names. The status document reports the loop type, which is not the
+// adapter, so the file is the only source.
+func workflowAgents(doc statusDoc) map[string]string {
+	out := map[string]string{}
+	for _, w := range doc.Workflows {
+		path := w.WorkflowFile
+		if path == "" {
+			continue
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		if wf, err := plan.ParseWorkflow(string(raw)); err == nil && wf.AgentKind != "" {
+			out[w.Name] = wf.AgentKind
+		}
+	}
+	return out
+}
 
 // readRegistryEntries reads the raw registry entries map. This is
 // extracted so both fleetSupervisor and other code can use it.

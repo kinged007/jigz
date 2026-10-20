@@ -123,21 +123,24 @@ func loopRow(l *rollup.Loop, p *opsProject) opsLoop {
 		row.State, row.Class = "sleeping", "sleeping"
 	case l.Live:
 		row.State, row.Class = "running", "running"
-	case hasDoc && p.Status.Liveness != loopsrc.Stale && w.State != "" && w.State != "running":
+	case hasDoc && p.Status.Liveness != loopsrc.Stale && w.State != "" && (w.State != "running" || l.Port == 0):
+		// A running loop with no server has no state API to answer on, so
+		// the status document is the only word on it.
 		row.State, row.Class = workflowChip(w)
 	case p.IsRunning() && l.Port > 0:
-		// A loop started with no server has no state API to answer on.
 		row.State, row.Class = stateNotAnswering, "warn"
 	}
 	if hasDoc {
 		row.Hint = loopHint(w)
-		if b := w.Budget; b != nil && b.Cap > 0 {
-			row.Budget = commas(b.TokensUsed) + " / " + commas(b.Cap) + " tokens"
-			row.BudgetPct = int(float64(b.TokensUsed) / float64(b.Cap) * 100)
-			if row.BudgetPct > 100 {
-				row.BudgetPct = 100
-			}
+		if b := w.Budget; b != nil {
 			row.Paused, row.PausedBy = b.Paused, b.PausedBy
+			if b.Cap > 0 {
+				row.Budget = commas(b.TokensUsed) + " / " + commas(b.Cap) + " tokens"
+				row.BudgetPct = int(float64(b.TokensUsed) / float64(b.Cap) * 100)
+				if row.BudgetPct > 100 {
+					row.BudgetPct = 100
+				}
+			}
 		}
 	}
 	return row

@@ -190,13 +190,25 @@ repo. Unset (the default) runs every installed loop. A name that
 matches no installed workflow is fatal rather than silently dropped, so
 a typo cannot leave that loop's work unwatched.
 
-## Unified dashboard
+## Dashboard
 
-Every run serves a small status page (default
-`http://127.0.0.1:7677`, auto-refreshes every 5s). Each loop also gets
-its own debug port starting at 7678. The page shows what is running
-right now (issue, loop, turns, tokens, model) alongside all-time totals
-read from each loop's SQLite DB, so numbers survive restarts.
+Every run serves a control page (default `http://127.0.0.1:7677`, bound to
+loopback) and its own debug port per loop, starting at 7678. The page is
+also the control panel: it starts, stops, drains and restarts each
+repository, wakes a sleeping run, runs the cleanup command, pauses or
+resumes one workflow, overrides a budget hold, and stops everything.
+
+It reads the shared registry and each repository's status document plus
+its loops' SQLite databases, so the numbers survive restarts and a
+repository that is not running still shows its last known state. Every
+3 seconds the changing parts are re-fetched as fragments, so the page
+needs no build step and works as static HTML without scripting.
+
+Pages: Operations (fleet, alerts, token charts, per-repository and
+per-loop rows), Runs and Usage from the history database, Workflows (the
+pipeline each repository's files describe, plus validation), Projects,
+Agents (the settings each workflow file declares), Settings, the workflow
+editor, and each loop's child log.
 
 Running loops in several repos at once? Pass `--unite`:
 
@@ -205,10 +217,20 @@ sortie-loop --unite          # in each repo
 ```
 
 The first `--unite` run starts the dashboard; later ones detect it and
-join instead of starting a second page. Every run registers its loops
-in a shared registry file, so the one page rolls up all repos: a
-per-repo summary plus the same running-now and token tables with a Repo
-column. Without `--unite` the dashboard shows only its own repo.
+join instead of starting a second page. Without `--unite` the page shows
+only its own repository; with it, every registered repository appears
+with whatever process is supervising it.
+
+Controls act on the running process, not on a copy: they signal it, or
+write the same request files the CLI writes, so the page and the
+commands cannot disagree.
+
+`--host ADDR` moves the page off loopback. Naming one interface keeps the
+`Host` header check; `0.0.0.0` or `::` turns it off and prints a warning
+on every page, because there is no login: whoever can reach the port can
+start and stop agents. `--loop-url-template` rewrites the per-loop links
+for a proxy or wildcard DNS, with `{host}`, `{port}`, `{loop}` and
+`{repo}` placeholders.
 
 ## Install
 
