@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kinged007/sortie-loop/internal/loopsrc"
 )
 
 func TestWakeCommandWithoutSupervisor(t *testing.T) {
@@ -86,12 +88,17 @@ func TestParseArgsWakeIsASubcommand(t *testing.T) {
 
 func TestDashboardShowsSleep(t *testing.T) {
 	now := time.Now()
-	var b strings.Builder
-	d := dashData{Controls: true, Sleep: sleepStatus{Enabled: true, SleepingSince: &now, NextWake: &now}}
-	if err := dashTmpl.Execute(&b, d); err != nil {
-		t.Fatal(err)
+	p := opsProject{}
+	p.Status = &loopsrc.StatusInfo{
+		Liveness: loopsrc.Live,
+		Sleeping: true,
+		Sleep:    loopsrc.SleepInfo{Enabled: true, SleepingSince: &now, NextWake: &now},
 	}
-	if !strings.Contains(b.String(), "sleeping since") {
-		t.Error("the dashboard does not show the sleep state")
+	p.applyStatus(loopsrc.Capabilities{Sleep: true, Wake: true})
+	if p.Sleep != "sleeping" || !strings.Contains(p.SleepNote, "since") {
+		t.Errorf("sleep state = %q note %q", p.Sleep, p.SleepNote)
+	}
+	if !p.CanWake {
+		t.Error("a sleeping project does not offer wake")
 	}
 }

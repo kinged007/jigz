@@ -22,8 +22,7 @@
     <ul>{{range .Probs}}<li>{{if .Path}}<a href="#f-{{.Path}}">{{.Path}}</a>: {{end}}{{.Msg}}</li>{{end}}</ul></div>{{end}}
   <div class="seg tabs" role="group" aria-label="Editor mode">
     <a href="{{.Spec.URL}}" {{if not .Raw}}aria-current="true"{{end}}>Form</a>
-    {{if .Spec.RawURL}}<a href="{{.Spec.RawURL}}" {{if .Raw}}aria-current="true"{{end}}>Advanced: {{if .Spec.FrontOnly}}raw front matter{{else}}raw YAML{{end}}</a>
-    {{else}}<a href="/edit">Advanced: whole config file</a>{{end}}
+    {{if .Spec.RawURL}}<a href="{{.Spec.RawURL}}" {{if .Raw}}aria-current="true"{{end}}>Advanced: {{if .Spec.FrontOnly}}raw front matter{{else}}raw YAML{{end}}</a>{{end}}
   </div>
   <form method="post" action="/edit/validate">
     <input type="hidden" name="csrf" value="{{.Auth.CSRF}}"><input type="hidden" name="hash" value="{{.Hash}}">

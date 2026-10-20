@@ -187,14 +187,14 @@ table.agents td { white-space: nowrap; }
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{if .Title}}{{.Title}} - {{end}}Sortie Central</title>
+<title>{{if .Title}}{{.Title}} - {{end}}Sortie Loop</title>
 <meta name="csrf-token" content="{{.Auth.CSRF}}">
 <style>{{template "styles"}}</style>
 </head>
 <body>
 <div class="app">
 <header class="top">
-  <div class="brand">{{template "icon-hex"}} Sortie Central</div>
+  <div class="brand">{{template "icon-hex"}} Sortie Loop</div>
   {{template "status" .}}
   <div class="who">
     {{if not .Auth.PasswordSet}}<span class="chip s-warn" title="No password is set, so anyone who can reach this page can change things.">{{template "icon-unlock"}} open, no login</span>

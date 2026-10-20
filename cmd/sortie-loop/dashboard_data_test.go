@@ -26,19 +26,20 @@ func TestOpenRORepositoryPathWithQueryCharacters(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
 			path := filepath.Join(root, name)
-			// A database with the tables readLoopDB expects, so the open
-			// and a real query both run.
+			// A database with run_history, so the open and a real query
+			// both run.
 			writeTestDB(t, path)
-			st := loopStats{Endpoint: loopEndpoint{DBPath: path}}
-			readLoopDB(&st)
-			if st.DBError != "" {
-				t.Fatalf("readLoopDB: %s", st.DBError)
+			db, err := openRO(path)
+			if err != nil {
+				t.Fatalf("open: %v", err)
 			}
-			if !st.DBLive {
-				t.Fatal("database not opened")
+			defer db.Close()
+			var n int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM run_history`).Scan(&n); err != nil {
+				t.Fatalf("query: %v", err)
 			}
-			if st.Runs != 2 {
-				t.Errorf("runs = %d, want 2", st.Runs)
+			if n != 2 {
+				t.Errorf("runs = %d, want 2", n)
 			}
 		})
 	}

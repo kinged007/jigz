@@ -2,25 +2,19 @@
 <div class="pagehead">
   <div>
     <h1>Settings</h1>
-    <p class="sub">Central's own configuration, access, versions and paths.</p>
+    <p class="sub">This dashboard's access, versions and paths.</p>
   </div>
   <div class="row">
-    {{if .Auth.Authenticated}}<a class="btn" href="/edit/central">Edit central config</a><a class="btn" href="/backups">Backups</a>
-    {{else}}<button type="button" {{ctl false ""}}>Edit central config</button><button type="button" {{ctl false ""}}>Backups</button>{{end}}
+    <a class="btn" href="/backups">Backups</a>
     {{template "fleetactions" .}}
   </div>
 </div>
 <div class="grid2">
   <div class="card"><h2>Access</h2>
-    <table class="kv"><tbody>
-      <tr><td>Password</td><td>{{if .Auth.PasswordSet}}<span class="chip s-succeeded">set</span>{{else}}<span class="chip s-warn">not set</span>{{end}}</td></tr>
-      <tr><td>Public read</td><td>{{if .Access.PublicRead}}on{{else}}off{{end}}</td></tr>
-      <tr><td>Trusted proxy</td><td>{{if .Access.TrustedProxy}}on{{else}}off{{end}}</td></tr>
-    </tbody></table>
     <ul class="muted">
-      <li>The password is read from <code>SORTIE_CENTRAL_PASSWORD</code> in the <code>.env</code> file beside the config. Central never stores or shows it. To change it, edit that file and restart central.</li>
-      {{if not .Auth.PasswordSet}}<li>No password is set, so the app is open to anyone who can reach it.</li>{{end}}
-      <li>Public read on: anyone can view pages, and every change still needs the password. Off: pages need a login too.</li>
+      <li>No login. The page starts and stops agents, so it binds 127.0.0.1 unless <code>--host</code> moves it.</li>
+      <li><code>--host</code> naming one interface keeps the <code>Host</code> header check; <code>0.0.0.0</code> or <code>::</code> turns it off and shows a warning on every page.</li>
+      <li>The tracker token reaches the loops through <code>.sortie/.env.loop</code>, written by the run that started them. This page never reads or shows it.</li>
     </ul>
   </div>
   <div class="card"><h2>GitHub enrichment</h2>

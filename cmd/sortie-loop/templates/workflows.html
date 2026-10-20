@@ -33,7 +33,7 @@
   </div>
 </div>
 {{range .Projects}}
-<h2><span class="chip s-{{.State}}">{{.State}}</span> {{.Slug}}{{if $.Auth.Authenticated}} <a class="btn" href="/edit/project/{{.Slug}}">Edit project</a> <a class="btn" href="/edit/agent/{{.Slug}}">Agent settings</a>{{else}} <button type="button" {{ctl false ""}}>Edit project</button> <button type="button" {{ctl false ""}}>Agent settings</button>{{end}}</h2>
+<h2><span class="chip s-{{.State}}">{{.State}}</span> {{.Slug}} <a class="btn" href="/projects/{{.Slug}}">Project</a> <a class="btn" href="/agents">Agent settings</a></h2>
 {{if .Pipeline}}<div class="card"><div class="pipe">{{.Pipeline}}</div></div>{{end}}
 {{if .Files}}{{template "wftable" .Files}}{{end}}
 {{if .Idle}}<details><summary>{{len .Idle}} not started</summary>{{template "wftable" .Idle}}</details>{{end}}

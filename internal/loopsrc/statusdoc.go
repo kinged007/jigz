@@ -74,6 +74,22 @@ type WorkflowInfo struct {
 	LastExitCode *int      `json:"last_exit_code"`
 	ConfigHash   string    `json:"config_hash"`
 	LogPath      string    `json:"log_path"`
+	// Budget is the loop's spend for the current period, absent when the
+	// workflow configures none.
+	Budget *BudgetInfo `json:"budget,omitempty"`
+}
+
+// BudgetInfo is one workflow's token budget as the status document reports
+// it.
+type BudgetInfo struct {
+	Period         string `json:"period"`
+	TokensUsed     int64  `json:"tokens_used"`
+	Cap            int64  `json:"cap"`
+	WarnPercent    int    `json:"warn_percent"`
+	UnmeasuredRuns int    `json:"unmeasured_runs"`
+	Paused         bool   `json:"paused"`
+	PausedBy       string `json:"paused_by"`
+	Override       bool   `json:"override"`
 }
 
 // Failed reports whether the child exited with a non-zero code, which

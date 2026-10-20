@@ -123,7 +123,9 @@ tr.lp td:first-child { padding-left: 1.6rem; }
   <td>{{if gt .L.Port 0}}<a href="{{$.Link.Build .L}}" title="This loop's own dashboard, port {{.L.Port}}">{{.L.Loop}}</a>{{else}}{{.L.Loop}}{{end}} <span class="muted">loop</span></td>
   <td>
     <span class="chip s-{{.Class}}">{{.State}}</span>
+    {{if .Paused}}<span class="chip s-paused" title="The budget holds this workflow">{{if .PausedBy}}{{.PausedBy}}{{else}}paused{{end}}</span>{{end}}
     {{if .Hint}}<div class="muted">{{.Hint}}</div>{{end}}
+    {{if .Budget}}<div class="muted" title="Tokens used this period against the workflow's cap">{{.Budget}} <span style="opacity:.7">({{.BudgetPct}}%)</span></div>{{end}}
     {{if .L.DBError}}<div class="errtext">{{.L.DBError}}</div>{{end}}
   </td>
   <td class="num">{{len .L.Running}} / {{.L.Retrying}}</td>
@@ -138,7 +140,7 @@ tr.lp td:first-child { padding-left: 1.6rem; }
 {{end}}
 </tbody>
 </table></div>
-<p class="sub">Weekly token caps and pause are planned. They need budget and pause reporting from sortie-loop.</p>
+<p class="sub">Budget lines show this period's spend against each workflow's cap. Pause, resume and overrides are the <code>sortie-loop pause</code>, <code>resume</code> and <code>budget</code> commands.</p>
 {{end}}
 
 <div class="card">
@@ -221,10 +223,10 @@ function gone() {
   if (reported) { return; }
   reported = true;
   clearInterval(timer);
-  document.title = 'sortie-central is not running';
+  document.title = 'sortie-loop is not running';
   var note = document.createElement('p');
   note.className = 'msg exposed';
-  note.textContent = 'sortie-central has exited, so nothing is supervising these ' +
+  note.textContent = 'sortie-loop has exited, so nothing is supervising these ' +
     'loops. What is below is its last report.';
   document.body.insertBefore(note, document.body.firstChild);
 }

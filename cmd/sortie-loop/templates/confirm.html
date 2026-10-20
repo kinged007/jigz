@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>sortie-central &middot; stop everything</title>
+<title>sortie-loop &middot; stop everything</title>
 <style>
 body { font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0; padding: 1.5rem; }
 h1 { font-size: 1.1rem; margin: 0 0 .25rem; }
@@ -15,14 +15,14 @@ a { color: inherit; }
 </style>
 </head>
 <body>
-<h1>Stop every loop, then sortie-central</h1>
+<h1>Stop every loop, then sortie-loop</h1>
 <p class="sub"><a href="/">&larr; back to the fleet</a></p>
 {{if .WhenIdle}}
 <p>Every loop stops as soon as it has nothing in flight, one loop at a time, and
-sortie-central exits once the last one has finished. An agent mid-turn is
+sortie-loop exits once the last one has finished. An agent mid-turn is
 finished, not cut off.</p>
 {{else}}
-<p><strong class="warn">Every loop is terminated now, and sortie-central
+<p><strong class="warn">Every loop is terminated now, and sortie-loop
 exits.</strong> An agent mid-turn is cancelled rather than finished: the engine
 records the run, so the next start of that loop retries it.</p>
 {{end}}

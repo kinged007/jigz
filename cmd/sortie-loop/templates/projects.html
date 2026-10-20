@@ -4,7 +4,6 @@
     <h1>Projects</h1>
     <p class="sub">{{len .Projects}} project{{if ne (len .Projects) 1}}s{{end}} in the config. Tokens are the measured tokens of runs started in the last 14 days.</p>
   </div>
-  {{if .Auth.Authenticated}}<a class="btn primary" href="/projects/new">Add project</a>{{else}}<button type="button" class="primary" {{ctl false ""}}>Add project</button>{{end}}
 </div>
 {{if .Projects}}
 <div class="tw"><table>
@@ -50,13 +49,10 @@
       <button name="op" value="restart" {{ctl .Auth.Authenticated "Stop now and start again, interrupting whatever is running"}}>Restart</button>
     </form>
     {{end}}
-    {{if .Auth.Authenticated}}<a class="btn" href="/edit/project/{{.Slug}}">Edit project</a>
-    <a class="btn" href="/edit/agent/{{.Slug}}">Agent settings</a>
-    {{else}}<button type="button" {{ctl false ""}}>Edit project</button>
-    <button type="button" {{ctl false ""}}>Agent settings</button>{{end}}
+    <a class="btn" href="/agents">Agent settings</a>
   </div>
 </div>
-{{if not .Enabled}}<div class="banner">This project is disabled, so it is never started. {{if .Auth.Authenticated}}Turn it on in <a href="/edit/project/{{.Slug}}">the project editor</a>.{{end}}</div>{{end}}
+{{if not .Enabled}}<div class="banner">This project is disabled, so it is never started.</div>{{end}}
 {{if eq .Validation "invalid"}}<div class="banner err">{{.ValidationDetail}}</div>{{end}}
 {{if eq .Validation "failed"}}<div class="banner err">{{.ValidationDetail}}</div>{{end}}
 <div class="grid2">
@@ -110,9 +106,5 @@
 </tbody></table></div>
 {{else}}<p class="empty">No audit entries for this project yet.</p>{{end}}
 {{end}}
-<h2>Remove project</h2>
-<p class="muted">Removing disables the project, stops its loops, then takes its entry out of the config. Deleting its directory and workspaces is a separate choice on the next page and is off by default.</p>
-{{if .Auth.Authenticated}}<form method="post" action="/projects/{{.Slug}}/remove"><input type="hidden" name="csrf" value="{{.Auth.CSRF}}"><button>Remove project</button></form>
-{{else}}<button type="button" {{ctl false ""}}>Remove project</button>{{end}}
 {{template "statuspoll"}}
 {{template "shell-bottom" .}}{{end}}
