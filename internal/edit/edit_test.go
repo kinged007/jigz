@@ -514,7 +514,7 @@ func TestRawFrontMatterKeepsTheBodyAndChecksYAML(t *testing.T) {
 }
 
 func TestTheShippedExampleConfigRoundTripsUnchanged(t *testing.T) {
-	raw, err := os.ReadFile("../../sortie-central.example.yaml")
+	raw, err := os.ReadFile("../fleetconfig/testdata/example.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}

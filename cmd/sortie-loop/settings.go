@@ -54,12 +54,12 @@ func (a *app) settings(w http.ResponseWriter, r *http.Request) {
 	execPage(w, "settings", v)
 }
 
-// toolVersions asks the binaries central drives for their versions, once.
+// toolVersions asks the binaries this dashboard drives for their
+// versions, once.
 func (a *app) toolVersions() []pair {
 	a.verOnce.Do(func() {
 		p := a.sup.Plan()
-		a.versions = []pair{{"sortie-central", centralVersion()},
-			{"sortie-loop", firstLine(p.LoopBinary(), "--dump-version")}}
+		a.versions = []pair{{"sortie-loop", buildVersion()}}
 		engine := "not found"
 		if bin, err := p.SortieBinPath(); err == nil {
 			engine = firstLine(bin, "--version")
@@ -69,8 +69,9 @@ func (a *app) toolVersions() []pair {
 	return a.versions
 }
 
-// centralVersion is the build ref with the short commit the binary was built from, when known.
-func centralVersion() string {
+// buildVersion is the build ref with the short commit the binary was
+// built from, when known.
+func buildVersion() string {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
 		return version

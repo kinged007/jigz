@@ -8,7 +8,7 @@ import (
 // The example config is documentation, so it has to keep loading and
 // keep behaving the way its comments claim.
 func TestExampleConfigLoadsAndDocumentsPerWorkflow(t *testing.T) {
-	c, err := Load(filepath.Join("..", "..", "sortie-central.example.yaml"))
+	c, err := Load(filepath.Join("testdata", "example.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}

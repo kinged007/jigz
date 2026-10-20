@@ -311,7 +311,7 @@ func mustEnv(t *testing.T, r Resolved) []string {
 // The shipped example is documentation, and documentation that does not
 // load is worse than none: a copy of it would fail on the first run.
 func TestExampleConfigLoadsAndResolves(t *testing.T) {
-	c, err := Load(filepath.Join("..", "..", "sortie-central.example.yaml"))
+	c, err := Load(filepath.Join("testdata", "example.yaml"))
 	if err != nil {
 		t.Fatalf("the shipped example does not load: %v", err)
 	}

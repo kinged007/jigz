@@ -10,7 +10,7 @@ import (
 
 func fixture(t *testing.T, name string) Workflow {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "cmd", "sortie-central", "testdata", "WORKFLOW."+name+".md"))
+	raw, err := os.ReadFile(filepath.Join("testdata", "WORKFLOW."+name+".md"))
 	if err != nil {
 		t.Fatal(err)
 	}
