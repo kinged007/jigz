@@ -410,7 +410,31 @@ func (a *app) routes(g hostGuard) http.Handler {
 	if a.auth != nil {
 		h = a.auth.Protect(mux)
 	}
-	return g.guard(h.ServeHTTP)
+	return g.guard(func(w http.ResponseWriter, r *http.Request) {
+		if !sameOrigin(r) {
+			http.Error(w, "this page does not answer a request from another origin", http.StatusForbidden)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
+// sameOrigin refuses a state-changing request a browser sent from another
+// site. The page has no login, so binding loopback is what keeps it local,
+// and that alone does not stop a page on the internet posting a form to
+// 127.0.0.1: the Origin header is what tells the two apart. A request
+// without one is not a cross-site form post.
+func sameOrigin(r *http.Request) bool {
+	switch r.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return true
+	}
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	return err == nil && u.Host == r.Host
 }
 
 // bindAddr is the address the listener uses. A wildcard host binds the

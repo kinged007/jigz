@@ -243,3 +243,28 @@ func TestLoopRowWithoutServerUsesStatusDoc(t *testing.T) {
 		t.Errorf("state = %q, want running", row.State)
 	}
 }
+
+// A page on another site can post a form to 127.0.0.1. The Origin header
+// is what tells that apart from a form the dashboard served itself.
+func TestCrossOriginPostRefused(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	a := &app{sizes: newRepoSizes(), stateDir: t.TempDir(), quit: make(chan struct{})}
+	h := a.routes(newHostGuard("127.0.0.1"))
+	post := func(origin string) int {
+		req := httptest.NewRequest("POST", "/action", strings.NewReader("op=bogus"))
+		req.Host = "127.0.0.1"
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if got := post("http://evil.example"); got != http.StatusForbidden {
+		t.Errorf("cross-site post = %d, want 403", got)
+	}
+	if got := post("http://127.0.0.1"); got == http.StatusForbidden {
+		t.Error("a same-origin post was refused")
+	}
+}
