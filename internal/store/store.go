@@ -1,4 +1,4 @@
-// Package store is central's own history database, <state_dir>/central.db.
+// Package store is the dashboard history database, <state_dir>/history.db.
 // Workflow databases hold runs but no time series, and their rows go away
 // when a workflow is cleaned up, so central keeps its own copy.
 package store
@@ -14,12 +14,12 @@ import (
 )
 
 // FileName is the database file inside the state directory.
-const FileName = "central.db"
+const FileName = "history.db"
 
 // SampleRetention is how long samples are kept.
 const SampleRetention = 14 * 24 * time.Hour
 
-// Store is an open central.db.
+// Store is an open history database.
 type Store struct {
 	db *sql.DB
 }
@@ -139,7 +139,7 @@ var migrations = []string{
 	ALTER TABLE github_cache ADD COLUMN checks_etag TEXT NOT NULL DEFAULT '';`,
 }
 
-// Open opens dir/central.db, creating the directory and the database, and
+// Open opens dir/history.db, creating the directory and the database, and
 // brings the schema up to date.
 func Open(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {

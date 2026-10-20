@@ -8,11 +8,12 @@ import (
 )
 
 // SupportedSchemas lists the schema_migrations versions whose layout
-// central has been checked against. A workflow database at any other
+// this reader has been checked against: 18 for the older engine, 35 for
+// the engine pinned in go.mod. A workflow database at any other
 // version is reported with a SchemaNotice and read for nothing, because
 // a column that moved would turn into a wrong number rather than an
 // error.
-var SupportedSchemas = []int{18}
+var SupportedSchemas = []int{18, 35}
 
 // requiredColumns is every table and column central reads. A supported
 // version that lacks one hides only what depends on that table.
