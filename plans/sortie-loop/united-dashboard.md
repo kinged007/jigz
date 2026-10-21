@@ -250,7 +250,7 @@ Each phase lands as one PR, `go fmt -l` empty, `go vet ./...`, `go test ./...` (
 ## 13. Risks & mitigations
 
 - 123-port ceiling + sparse scan gap — fleet render annotates `unknown` orphans with status file fallback so a high-port repo isn’t clipped by 3 empties.
-- PID reuse (`stale` vs `running`) — document as known ceiling (already in `plans/enhancements.md: Known gaps`), do not add pidfile locking beyond existing `flock`.
+- PID reuse (`stale` vs `running`) — document as known ceiling (already in `plans/sortie-loop/enhancements.md: Known gaps`), do not add pidfile locking beyond existing `flock`.
 - Dashboard process owns fleet’s stop-all but not per-repo start — cold `start` spawns a detached `sortie-loop` with the recorded argv, so it does not replace the dashboard process.
 
 ## 14. What is implemented

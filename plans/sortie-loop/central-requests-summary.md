@@ -1,6 +1,6 @@
 # sortie-loop: what sortie-central can rely on
 
-Details and request IDs (L1-L12) are in `plans/enhancements.md`, section 7.
+Details and request IDs (L1-L12) are in `plans/sortie-loop/enhancements.md`, section 7.
 
 ## What sortie-loop is
 
