@@ -65,7 +65,7 @@ Open decisions (do not decide them; ask):
 
 ## 4. State of the work
 
-Branch `feat/united-dashboard`, 13 commits ahead of `main`, not pushed, no
+Branch `feat/united-dashboard`, 14 commits ahead of `main`, not pushed, no
 PR open. Commits from this session:
 
 | Commit | Change |
@@ -75,6 +75,7 @@ PR open. Commits from this session:
 | `bbfa5b1` | authentication removed; per-loop engine servers not linked; `--loop-url-template` and `loop_bind_host` removed; wildcard bind label; unknown paths return 404; add-project wizard and project removal routed |
 | `79825f4` | plans name the fake GitHub API |
 | `7d1e0be` | acceptance harness and `make verify` |
+| `9313e3e` | engine resolution: SORTIE_BIN, installed pin, download of the pin; a `sortie` beside the binary or on PATH only when the download fails, with a warning; one download attempt per process; unit tests disable the download in TestMain |
 
 Outside this repository:
 
@@ -109,18 +110,15 @@ In order of the roadmap:
 
 1. Merge `feat/united-dashboard` into `main` through a PR (the user does
    this, or asks for it).
-2. Engine pin enforcement (Phase 2 item, small): when the pinned engine is
-   not installed, `resolveSortieBin` (`cmd/sortie-loop/bin.go`) uses a
-   `sortie` on `PATH` before downloading the pin. This machine therefore
-   runs 1.27.0 from `~/.local/bin/sortie`. Proposed fix: download the pin
-   first; fall back to `PATH` with a warning only if the download fails.
-3. Phase 1: working hours and agent account pool (roadmap section 6).
+2. Phase 1: working hours and agent account pool (roadmap section 6).
    Usage-limit scenarios need a fake agent command behind
    `agent.command`, because the engine's `mock` agent cannot produce
    usage-limit errors.
 
 Known gaps, not scheduled:
 
+- A dashboard started while offline keeps the PATH fallback engine until
+  restart, because the download is attempted once per process.
 - No acceptance scenario for the PR workflow (`github-pr`); the fake
   serves its routes and has unit tests.
 - GitHub enrichment in the collector (PR timeline, commits, check runs)
@@ -138,8 +136,9 @@ Known gaps, not scheduled:
 ## 7. Processes on this machine
 
 A real `sortie-loop` instance with its `sortie` children runs on ports
-7677 to 7679, using the registry in `~/.cache/sortie-loop/`. Do not stop
-it or write to its registry. Tests isolate `HOME` and `XDG_*` to temporary
+7677 to 7679, using the registry in `~/.cache/sortie-loop/`. It started
+before the engine resolution fix (`9313e3e`) and still runs engine 1.27.0
+until restarted. Do not stop it or write to its registry. Tests isolate `HOME` and `XDG_*` to temporary
 directories; keep doing that.
 
 ## 8. Lessons for routing work
@@ -155,8 +154,6 @@ directories; keep doing that.
 
 ## 9. Next action
 
-Ask the user which of these to start, in this order of recommendation:
-
-1. Engine pin enforcement (section 6, item 2).
-2. Phase 1: working hours and account pool.
-3. Adding the acceptance test to CI (needs approval).
+Phase 1 (working hours and account pool, section 6, item 2) is in progress
+in the session that wrote this handoff. After it, the recommended next step
+is adding the acceptance test to CI, which needs the user's approval.
