@@ -15,10 +15,6 @@ import (
 const centralYAML = `# fleet config
 state_dir: ""
 
-access:
-  # who may read
-  public_read: false
-
 defaults:
   token_env: GH_TOKEN
   assignee: "@me"   # the token owner
@@ -90,14 +86,11 @@ func TestEditKeepsCommentsAndOrder(t *testing.T) {
 	d := rootOf(t, centralYAML)
 	var c Central
 	Read(d.Root(), &c)
-	yes := true
-	c.PublicRead = &yes
 	c.Assignee = "someone"
 	c.Milestone = "v2"
 	Write(d.Root(), &c)
 	got, _ := d.String()
 	want := strings.NewReplacer(
-		"public_read: false", "public_read: true",
 		`assignee: "@me"   # the token owner`, `assignee: "someone" # the token owner`,
 		"    max_turns: 10\n", "    max_turns: 10\n  milestone: v2\n").Replace(centralYAML)
 	if got != want {

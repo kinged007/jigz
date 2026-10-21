@@ -661,23 +661,9 @@ func noAmbientToken(t *testing.T) {
 	t.Setenv("GH_TOKEN", "")
 }
 
-func TestAccessKeys(t *testing.T) {
-	c, err := Load(write(t, "access:\n  public_read: true\n  trusted_proxy: true\nrepos:\n  - repo: o/a\n"))
-	if err != nil {
+func TestLegacyAccessBlockStillLoads(t *testing.T) {
+	if _, err := Load(write(t, "access:\n  public_read: true\n  trusted_proxy: true\nrepos:\n  - repo: o/a\n")); err != nil {
 		t.Fatal(err)
-	}
-	if !c.Access.PublicRead || !c.Access.TrustedProxy {
-		t.Errorf("Access = %+v, want both true", c.Access)
-	}
-	c, err = Load(write(t, "repos:\n  - repo: o/a\n"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.Access.PublicRead || c.Access.TrustedProxy {
-		t.Errorf("default Access = %+v, want both false", c.Access)
-	}
-	if _, err := Load(write(t, "access:\n  password: x\nrepos:\n  - repo: o/a\n")); err == nil {
-		t.Error("a password key under access loaded; the password must come from the environment")
 	}
 }
 

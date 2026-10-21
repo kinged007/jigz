@@ -20,7 +20,7 @@ type pair struct{ Name, Value string }
 
 type settingsView struct {
 	pageData
-	Access      fleetconfig.Access
+	BindAddr    string
 	Versions    []pair
 	Paths       []pair
 	SampleDays  int
@@ -37,7 +37,7 @@ type settingsView struct {
 func (a *app) settings(w http.ResponseWriter, r *http.Request) {
 	v := settingsView{pageData: a.pageView(r, "settings", "Settings"), SampleDays: int(store.SampleRetention.Hours() / 24), BackupsKept: edit.KeepBackups}
 	a.mu.Lock()
-	v.Access, v.Paths = a.access, nil
+	v.BindAddr = a.bindAddr
 	dir := a.stateDir
 	a.mu.Unlock()
 	v.GitHub = a.githubSettings()
@@ -49,8 +49,7 @@ func (a *app) settings(w http.ResponseWriter, r *http.Request) {
 	}
 	v.Versions = a.toolVersions()
 	v.Paths = []pair{{"config", a.configPath}, {"state directory", dir},
-		{"history database", filepath.Join(dir, store.FileName)}, {"backups", filepath.Join(dir, "backups")},
-		{"session key", filepath.Join(dir, "session.key")}}
+		{"history database", filepath.Join(dir, store.FileName)}, {"backups", filepath.Join(dir, "backups")}}
 	execPage(w, "settings", v)
 }
 

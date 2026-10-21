@@ -227,12 +227,25 @@ commands cannot disagree. A repository that stopped keeps its row, so it
 can be started again from the page; a state-changing request from another
 origin is refused.
 
-`--host ADDR` moves the page off loopback. Naming one interface keeps the
-`Host` header check; `0.0.0.0` or `::` turns it off and prints a warning
-on every page, because there is no login: whoever can reach the port can
-start and stop agents. `--loop-url-template` rewrites the per-loop links
-for a proxy or wildcard DNS, with `{host}`, `{port}`, `{loop}` and
-`{repo}` placeholders.
+### Access
+
+The dashboard has no authentication. It binds `127.0.0.1` by default, so
+only processes on the same machine can reach it. `--host 0.0.0.0` (or
+`--host ::`) listens on all interfaces, and `--host ADDR` binds one
+address. A non-loopback bind prints a notice on stderr at startup.
+
+Anyone who can reach the dashboard can start and stop agents and edit the
+configuration. Use it locally, on a private network, or behind your own
+secure proxy, for example an SSH tunnel, Tailscale, or a reverse proxy
+that requires authentication.
+
+The dashboard refuses a request whose `Host` header is not one it serves
+and a state-changing request from another origin. Naming one interface
+with `--host` limits the accepted `Host` values to that address and the
+loopback names; a wildcard bind accepts any `Host`.
+
+Each loop runs its own sortie server. These bind `127.0.0.1` and are used
+internally by sortie-loop; the dashboard does not link to them.
 
 ## Install
 

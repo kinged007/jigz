@@ -7,7 +7,7 @@
   <td>{{if .Handoff}}<code>{{.Handoff}}</code>{{else}}<span class="muted">-</span>{{end}}</td>
   <td>{{if .Polling}}{{.Polling}}{{else}}<span class="muted">-</span>{{end}}</td>
   <td><span class="chip v-{{.Status}}">{{if eq .Status "valid"}}valid{{else if eq .Status "invalid"}}invalid{{else}}not checked{{end}}</span>{{if .Warnings}} <span class="tag">{{.Warnings}} warning{{if gt .Warnings 1}}s{{end}}</span>{{end}}</td>
-  <td>{{if .CanEdit}}<a class="btn" href="{{.EditURL}}">Edit</a>{{else}}<button type="button" {{ctl false ""}}>Edit</button>{{end}}</td>
+  <td><a class="btn" href="{{.EditURL}}">Edit</a></td>
 </tr>{{if .Detail}}<tr><td colspan="8"><div class="banner {{if eq .Status "invalid"}}err{{end}}" style="margin:0">{{.Detail}}</div></td></tr>{{end}}
 {{end}}</tbody></table></div>
 {{range .}}{{if .Chain}}{{$f := .}}

@@ -8,7 +8,7 @@
   </div>
 </div>{{end}}
 
-{{define "hidden"}}<input type="hidden" name="csrf" value="{{.Auth.CSRF}}"><input type="hidden" name="hash" value="{{.Hash}}"><input type="hidden" name="kind" value="{{.Spec.Kind}}"><input type="hidden" name="id" value="{{.Spec.ID}}">{{range .Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}{{end}}
+{{define "hidden"}}<input type="hidden" name="hash" value="{{.Hash}}"><input type="hidden" name="kind" value="{{.Spec.Kind}}"><input type="hidden" name="id" value="{{.Spec.ID}}">{{range .Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}{{end}}
 
 {{define "edit"}}{{template "shell-top" .}}
 <p class="sub"><a href="{{.Spec.Back}}">{{.Spec.BackLabel}}</a> / edit</p>
@@ -25,7 +25,7 @@
     {{if .Spec.RawURL}}<a href="{{.Spec.RawURL}}" {{if .Raw}}aria-current="true"{{end}}>Advanced: {{if .Spec.FrontOnly}}raw front matter{{else}}raw YAML{{end}}</a>{{end}}
   </div>
   <form method="post" action="/edit/validate">
-    <input type="hidden" name="csrf" value="{{.Auth.CSRF}}"><input type="hidden" name="hash" value="{{.Hash}}">
+    <input type="hidden" name="hash" value="{{.Hash}}">
     <input type="hidden" name="kind" value="{{.Spec.Kind}}"><input type="hidden" name="id" value="{{.Spec.ID}}">
     {{if .Raw}}
     <input type="hidden" name="mode" value="raw">
@@ -50,7 +50,7 @@
     <div class="card"><h3>Other keys</h3><p class="muted" style="margin-top:0">The form changes only the fields above. Everything else in the front matter is kept as it is. Top-level keys in this file: {{range $i, $k := .Kept}}{{if $i}}, {{end}}<code>{{$k}}</code>{{end}}.</p></div>
     {{end}}
     {{end}}
-    <p class="row"><button type="submit" class="primary" {{ctl .Auth.Authenticated ""}}>Validate and preview diff</button><a class="btn" href="{{.Spec.Back}}">Cancel</a></p>
+    <p class="row"><button type="submit" class="primary" {{ctl ""}}>Validate and preview diff</button><a class="btn" href="{{.Spec.Back}}">Cancel</a></p>
   </form>
 
 {{else if eq .Stage "preview"}}
@@ -63,7 +63,7 @@
   <pre class="diff" tabindex="0" aria-label="Unified diff">{{range .Diff}}<span class="{{.Class}}">{{.Text}}</span>{{end}}</pre>
   <p class="muted">The file was loaded with hash <code>{{.Hash}}</code>. If it changes before you confirm, the edit stops as a conflict.</p>
   <div class="row">
-    <form class="inline" method="post" action="/edit/apply">{{template "hidden" .}}<button type="submit" class="primary" {{ctl .Auth.Authenticated ""}}>Confirm and apply</button></form>
+    <form class="inline" method="post" action="/edit/apply">{{template "hidden" .}}<button type="submit" class="primary" {{ctl ""}}>Confirm and apply</button></form>
     <form class="inline" method="post" action="/edit/validate">{{template "hidden" .}}<button type="submit" name="back" value="1">Back to edit</button></form>
   </div>
   {{end}}
@@ -82,7 +82,7 @@
 {{end}}
 </div>
 <aside><div class="card"><h3>Backups of this file</h3>
-  {{range .Backups}}<form class="row bk" method="post" action="/backups/restore"><input type="hidden" name="csrf" value="{{$.Auth.CSRF}}"><input type="hidden" name="id" value="{{.ID}}"><code>#{{.ID}}</code><span class="muted">{{utc .TS}}</span><button {{ctl $.Auth.Authenticated ""}}>Restore</button></form>
+  {{range .Backups}}<form class="row bk" method="post" action="/backups/restore"><input type="hidden" name="id" value="{{.ID}}"><code>#{{.ID}}</code><span class="muted">{{utc .TS}}</span><button {{ctl ""}}>Restore</button></form>
   {{else}}<span class="muted">None yet. A backup is written before every apply.</span>{{end}}
   <p class="muted"><a href="/backups">All backups</a>. The last 20 per file are kept.</p></div></aside>
 </div>
@@ -115,7 +115,7 @@
 <div class="tw"><table>
 <thead><tr><th>#</th><th>Time (UTC)</th><th>File</th><th>Scope</th><th>Saved by</th><th></th></tr></thead><tbody>
 {{range .Backups}}<tr><td>{{.ID}}</td><td>{{utc .TS}}</td><td><code>{{.Path}}</code></td><td>{{.Scope}}</td><td>{{.Actor}}</td>
-<td><form class="inline" method="post" action="/backups/restore"><input type="hidden" name="csrf" value="{{$.Auth.CSRF}}"><input type="hidden" name="id" value="{{.ID}}"><button {{ctl $.Auth.Authenticated ""}}>Restore</button></form></td></tr>{{end}}
+<td><form class="inline" method="post" action="/backups/restore"><input type="hidden" name="id" value="{{.ID}}"><button {{ctl ""}}>Restore</button></form></td></tr>{{end}}
 </tbody></table></div>
 {{else}}<p class="empty">No backups yet. One is created before every applied edit.</p>{{end}}
 {{template "statuspoll"}}

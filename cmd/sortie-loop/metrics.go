@@ -413,10 +413,8 @@ func (a *app) opsFor(r *http.Request, msg, errMsg string) pageData {
 	d.Ops.Alerts = a.opsAlerts(d, d.Ops.Projects)
 	if a.store != nil {
 		d.Ops.Week = a.tokensBy(now.UTC().AddDate(0, 0, -7).Format(tsLayout))[""]
-		if d.Auth.Authenticated {
-			if rows, err := a.store.Audit(auditRows); err == nil {
-				d.Ops.Audit = rows
-			}
+		if rows, err := a.store.Audit(auditRows); err == nil {
+			d.Ops.Audit = rows
 		}
 	}
 	return d

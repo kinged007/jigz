@@ -196,11 +196,8 @@ func TestPatchBlockInsertsAnAbsentKey(t *testing.T) {
 	}
 }
 
-// No agent or workflow settings at all means the only edit is the
-// deployment key central owns, so every other knob keeps the shipped
-// workflow exactly as sortie-loop installed it. loop_bind_host is the
-// exception and is always written, so that clearing -loop-host reverts
-// an address an earlier run left in the file.
+// No agent or workflow settings at all means no edit, so the workflow
+// stays exactly as sortie-loop installed it.
 func TestApplySettingsSkipsWhenUnset(t *testing.T) {
 	dir := t.TempDir()
 	workflows(t, dir, "build")
@@ -210,13 +207,8 @@ func TestApplySettingsSkipsWhenUnset(t *testing.T) {
 		t.Fatal(err)
 	}
 	after, _ := os.ReadFile(path)
-	got := string(after)
-	if !strings.Contains(got, "server:\n  host: 127.0.0.1") {
-		t.Errorf("the loop bind address was not written:\n%s", got)
-	}
-	// Everything else must be byte-identical apart from that block.
-	if strings.Replace(got, "server:\n  host: 127.0.0.1\n", "", 1) != string(before) {
-		t.Errorf("ApplySettings wrote more than the loop bind address:\n%s", got)
+	if string(after) != string(before) {
+		t.Errorf("ApplySettings changed a workflow with no settings:\n%s", after)
 	}
 }
 
@@ -374,72 +366,6 @@ func TestLoadbearingBlockIsNeverInvented(t *testing.T) {
 		if _, _, err := patchBlock([]byte(body), block, "x", "1", false); err == nil {
 			t.Errorf("%s: nil error, want an error rather than an invented block", block)
 		}
-	}
-}
-
-// The engine binds its dashboard to server.host from the workflow file,
-// and central never runs the engine -- sortie-loop does -- so the
-// workflow file is the only channel. The shipped workflows carry no
-// server: block, so it has to be created rather than reported missing.
-func TestLoopBindHostIsWrittenIntoEveryWorkflow(t *testing.T) {
-	dir := t.TempDir()
-	workflows(t, dir, "plan", "build")
-	r := resolved(t, dir)
-	f := filepath.Join(dir, ".sortie", "workflows", "WORKFLOW.plan.md")
-
-	// An unset flag still writes the engine's own loopback default, so a
-	// value from an earlier run is reverted rather than left in place.
-	if err := (Plan{}).ApplySettings(r); err != nil {
-		t.Fatalf("ApplySettings: %v", err)
-	}
-	raw, err := os.ReadFile(f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(raw), "server:\n  host: 127.0.0.1") {
-		t.Errorf("an unset loop host must write the engine default:\n%s", raw)
-	}
-
-	p := Plan{LoopBindHost: "0.0.0.0"}
-	if err := p.ApplySettings(r); err != nil {
-		t.Fatalf("ApplySettings: %v", err)
-	}
-	raw, err = os.ReadFile(f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := string(raw)
-	if !strings.Contains(got, "server:\n  host: 0.0.0.0") {
-		t.Errorf("server.host was not written into the workflow:\n%s", got)
-	}
-	// The edit is line-level like every other one: the blocks around it
-	// have to survive intact.
-	for _, keep := range []string{"polling:", "interval_ms: 60000", "agent:", "max_concurrent_agents: 1"} {
-		if !strings.Contains(got, keep) {
-			t.Errorf("patching server.host damaged the rest of the front matter, lost %q:\n%s", keep, got)
-		}
-	}
-	// Re-applying must not churn the file.
-	before := string(raw)
-	if err := p.ApplySettings(r); err != nil {
-		t.Fatal(err)
-	}
-	raw, _ = os.ReadFile(f)
-	if string(raw) != before {
-		t.Error("re-applying the same loop host rewrote the file")
-	}
-
-	// Turning the flag back off has to revert the file, not leave the
-	// dashboard exposed with nothing in the command line to say so.
-	if err := (Plan{}).ApplySettings(r); err != nil {
-		t.Fatal(err)
-	}
-	raw, _ = os.ReadFile(f)
-	if strings.Contains(string(raw), "0.0.0.0") {
-		t.Errorf("clearing the loop host left the exposed address in place:\n%s", raw)
-	}
-	if !strings.Contains(string(raw), "host: 127.0.0.1") {
-		t.Errorf("clearing the loop host did not restore the default:\n%s", raw)
 	}
 }
 

@@ -6,8 +6,6 @@ type Central struct {
 	Assignee     string `f:"defaults.assignee" label:"Default assignee" hint:"@me picks issues assigned to the token owner. Empty leaves sortie-loop's own handling." group:"Defaults for every project"`
 	Milestone    string `f:"defaults.milestone" label:"Default milestone" group:"Defaults for every project"`
 	TokenEnv     string `f:"defaults.token_env" label:"Token variable" hint:"The name of the environment variable holding the GitHub token, never the token itself." group:"Defaults for every project"`
-	PublicRead   *bool  `f:"access.public_read" label:"Public read" hint:"True lets signed-out visitors view pages. Every change still needs the password. Applied at once." group:"Access"`
-	TrustedProxy *bool  `f:"access.trusted_proxy" label:"Trust the reverse proxy" hint:"True trusts X-Forwarded-Proto and X-Forwarded-For. Only set it behind a proxy. Needs a restart of central." group:"Access"`
 	GitHubEnrich *bool  `f:"github.enrich" label:"Enrich from GitHub" hint:"True reads pull requests from GitHub with each project's token to show branch, PR link and PRs opened and merged. Read only. Applied at once." group:"GitHub enrichment"`
 	GitHubEvery  string `f:"github.interval" label:"Pass interval" hint:"How often GitHub is read, such as 10m. At least 1m. Empty uses 10m." group:"GitHub enrichment"`
 	GitHubDetail *bool  `f:"github.details" label:"Read commits and checks" hint:"True also reads the commits, changed files and check runs of each pull request, with up to two more requests per pull request. Only used when enrichment is on. Applied at once." group:"GitHub enrichment"`

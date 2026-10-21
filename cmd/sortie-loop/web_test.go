@@ -40,21 +40,6 @@ func TestHostGuardAllows(t *testing.T) {
 	}
 }
 
-func TestLinkBuilderBuild(t *testing.T) {
-	l := linkBuilder{Host: "127.0.0.1"}
-	if got := l.Build(&rollup.Loop{Port: 7678}); got != "http://127.0.0.1:7678/" {
-		t.Errorf("default link = %q", got)
-	}
-	v6 := linkBuilder{Host: "::1"}
-	if got := v6.Build(&rollup.Loop{Port: 7678}); got != "http://[::1]:7678/" {
-		t.Errorf("v6 link = %q", got)
-	}
-	l = linkBuilder{Host: "h", Template: "https://{repo}.loops.example.com/{loop}/{port}/{host}"}
-	if got := l.Build(&rollup.Loop{Repo: "owner/repo", Loop: "build", Port: 9}); got != "https://owner/repo.loops.example.com/build/9/h" {
-		t.Errorf("template link = %q", got)
-	}
-}
-
 // The page and its two fragments render with no registry at all: a fresh
 // machine is a valid empty fleet, not an error.
 func TestFragmentsRenderEmptyFleet(t *testing.T) {
@@ -266,5 +251,93 @@ func TestCrossOriginPostRefused(t *testing.T) {
 	}
 	if got := post("http://127.0.0.1"); got == http.StatusForbidden {
 		t.Error("a same-origin post was refused")
+	}
+}
+
+func TestBindLabel(t *testing.T) {
+	for host, want := range map[string]string{
+		"127.0.0.1": "127.0.0.1:7691",
+		"10.0.0.5":  "10.0.0.5:7691",
+		"0.0.0.0":   "0.0.0.0:7691 (all interfaces)",
+		"::":        "[::]:7691 (all interfaces)",
+	} {
+		if got := bindLabel(newHostGuard(host), 7691); got != want {
+			t.Errorf("bindLabel(%q) = %q, want %q", host, got, want)
+		}
+	}
+}
+
+func TestUnknownPathIs404(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	a := &app{sizes: newRepoSizes(), stateDir: t.TempDir()}
+	h := a.routes(newHostGuard("127.0.0.1"))
+	for path, want := range map[string]int{"/": http.StatusOK, "/nope": http.StatusNotFound, "/login": http.StatusNotFound} {
+		req := httptest.NewRequest("GET", path, nil)
+		req.Host = "127.0.0.1"
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Errorf("GET %s = %d, want %d", path, rec.Code, want)
+		}
+	}
+}
+
+func wizardTestServer(t *testing.T) http.Handler {
+	t.Helper()
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	a := &app{sizes: newRepoSizes(), stateDir: t.TempDir(), configPath: filepath.Join(t.TempDir(), "sortie-loop.yaml"), quit: make(chan struct{})}
+	return a.routes(newHostGuard("127.0.0.1"))
+}
+
+func serveForm(h http.Handler, method, path, body, origin string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Host = "127.0.0.1"
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if origin != "" {
+		req.Header.Set("Origin", origin)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestWizardPageRenders(t *testing.T) {
+	rec := serveForm(wizardTestServer(t), "GET", "/projects/new", "", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /projects/new = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"<h1>Add project</h1>", `action="/projects/new"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("wizard page lacks %q", want)
+		}
+	}
+}
+
+func TestWizardPostEmptyInputShowsWizard(t *testing.T) {
+	rec := serveForm(wizardTestServer(t), "POST", "/projects/new", "step=1", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /projects/new = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `action="/projects/new"`) {
+		t.Error("response is not the wizard form")
+	}
+	if !strings.Contains(body, "<h1>Add project</h1>") {
+		t.Error("response lacks the wizard heading")
+	}
+	if !strings.Contains(body, "Nothing was written.") {
+		t.Error("response lacks the validation banner")
+	}
+}
+
+func TestProjectRemoveUnknownAndCrossOrigin(t *testing.T) {
+	h := wizardTestServer(t)
+	if rec := serveForm(h, "POST", "/projects/no/such/remove", "confirm=1", ""); rec.Code != http.StatusNotFound {
+		t.Errorf("remove of unknown project = %d, want 404", rec.Code)
+	}
+	if rec := serveForm(h, "POST", "/projects/no/such/remove", "confirm=1", "http://evil.example"); rec.Code != http.StatusForbidden {
+		t.Errorf("cross-origin remove = %d, want 403", rec.Code)
 	}
 }

@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kinged007/sortie-loop/internal/auth"
 	"github.com/kinged007/sortie-loop/internal/loopsrc"
 	"github.com/kinged007/sortie-loop/internal/rollup"
 )
@@ -45,8 +44,6 @@ type cleanupView struct {
 // document says the loop supports them.
 type opsProject struct {
 	repoView
-	// Auth is the viewer's access state, for the action buttons.
-	Auth     auth.Info
 	Loops    []opsLoop
 	Retrying int
 	Status   *loopsrc.StatusInfo
@@ -153,7 +150,7 @@ func (a *app) opsProjects(d pageData) []opsProject {
 	op, _ := a.src().(loopsrc.Operator)
 	var out []opsProject
 	for _, r := range d.Repos {
-		p := opsProject{repoView: r, Auth: d.Auth}
+		p := opsProject{repoView: r}
 		if op != nil {
 			if st, err := op.Status(r.Slug); err == nil {
 				p.Status = &st

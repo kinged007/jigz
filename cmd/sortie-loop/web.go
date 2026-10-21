@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kinged007/sortie-loop/internal/auth"
 	machine "github.com/kinged007/sortie-loop/internal/host"
 	"github.com/kinged007/sortie-loop/internal/loopsrc"
 	"github.com/kinged007/sortie-loop/internal/rollup"
@@ -47,17 +46,12 @@ var funcs = template.FuncMap{
 	"ctl":      ctl,
 }
 
-// ctl returns the attributes of a control that changes something: its title
-// when the viewer is signed in, otherwise disabled with the read-only
-// reason, so the control stays visible.
-func ctl(authenticated bool, title string) template.HTMLAttr {
-	if authenticated {
-		if title == "" {
-			return ""
-		}
-		return template.HTMLAttr(`title="` + template.HTMLEscapeString(title) + `"`)
+// ctl returns the title attribute of a control that changes something.
+func ctl(title string) template.HTMLAttr {
+	if title == "" {
+		return ""
 	}
-	return `disabled title="Read-only: sign in to use this action."`
+	return template.HTMLAttr(`title="` + template.HTMLEscapeString(title) + `"`)
 }
 
 // size renders a directory size in whichever unit keeps it readable.
@@ -294,9 +288,6 @@ func active(f rollup.Fleet, agents map[string]string) []activeRun {
 	return out
 }
 
-// serve runs the control page on the loopback interface only. It binds
-// the literal address rather than a wildcard because the page starts
-// agents and rewrites the fleetconfig.
 // hostGuard decides which Host header values are served.
 //
 // The page can start and stop agents holding a GitHub write token, and a
@@ -316,6 +307,8 @@ type hostGuard struct {
 	// The default is loopback, and startServer says so loudly, so this
 	// is only reached by asking for it explicitly.
 	wildcard bool
+	// v6 is set when the wildcard was written as ::.
+	v6 bool
 }
 
 // allows reports whether a Host header value is served.
@@ -345,7 +338,7 @@ func (g hostGuard) guard(next http.HandlerFunc) http.HandlerFunc {
 func newHostGuard(host string) hostGuard {
 	switch host {
 	case "0.0.0.0", "::", "":
-		return hostGuard{wildcard: true, addrs: map[string]bool{}}
+		return hostGuard{wildcard: true, v6: host == "::", addrs: map[string]bool{}}
 	}
 	// A bare address and a bracketed IPv6 literal name the same host.
 	return hostGuard{addrs: map[string]bool{
@@ -378,7 +371,7 @@ func serve(a *app, g hostGuard, port int) error {
 
 func (a *app) routes(g hostGuard) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /", a.page)
+	mux.HandleFunc("GET /{$}", a.page)
 	mux.HandleFunc("GET /live", a.live)
 	mux.HandleFunc("GET /usage", a.usage)
 	mux.HandleFunc("GET /runs", a.runs)
@@ -389,6 +382,9 @@ func (a *app) routes(g hostGuard) http.Handler {
 	mux.HandleFunc("GET /workflows", a.workflows)
 	mux.HandleFunc("GET /projects", a.projectsPage)
 	mux.HandleFunc("GET /projects/{owner}/{name}", a.projectPage)
+	mux.HandleFunc("GET /projects/new", a.wizardGet)
+	mux.HandleFunc("POST /projects/new", a.wizardPost)
+	mux.HandleFunc("POST /projects/{owner}/{name}/remove", a.projectRemove)
 	mux.HandleFunc("GET /agents", a.agents)
 	mux.HandleFunc("GET /settings", a.settings)
 	mux.HandleFunc("GET /edit/workflow/{owner}/{name}/{workflow}", a.editGet("workflow", false))
@@ -406,24 +402,20 @@ func (a *app) routes(g hostGuard) http.Handler {
 	mux.HandleFunc("GET /api/v1/usage", a.apiUsage)
 	mux.HandleFunc("GET /api/v1/metrics", a.apiMetrics)
 	mux.HandleFunc("GET /api/v1/audit", a.apiAudit)
-	var h http.Handler = mux
-	if a.auth != nil {
-		h = a.auth.Protect(mux)
-	}
 	return g.guard(func(w http.ResponseWriter, r *http.Request) {
 		if !sameOrigin(r) {
 			http.Error(w, "this page does not answer a request from another origin", http.StatusForbidden)
 			return
 		}
-		h.ServeHTTP(w, r)
+		mux.ServeHTTP(w, r)
 	})
 }
 
 // sameOrigin refuses a state-changing request a browser sent from another
-// site. The page has no login, so binding loopback is what keeps it local,
-// and that alone does not stop a page on the internet posting a form to
-// 127.0.0.1: the Origin header is what tells the two apart. A request
-// without one is not a cross-site form post.
+// site. The page has no authentication, so binding loopback is what keeps
+// it local, and that alone does not stop a page on the internet posting a
+// form to 127.0.0.1: the Origin header is what tells the two apart. A
+// request without one is not a cross-site form post.
 func sameOrigin(r *http.Request) bool {
 	switch r.Method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
@@ -488,10 +480,7 @@ type pageData struct {
 	Sys machine.Metrics
 	Msg string
 	Err string
-	// Exposed is set when the page is bound beyond loopback. The page
-	// shows the warning itself: whoever opens it over a network is
-	// looking at a page that can start and stop agents holding a write
-	// token, with no login, and should see that stated where they are.
+	// Exposed is set when the page is bound beyond loopback.
 	Exposed bool
 	// Active is every busy agent in the fleet, flattened.
 	Active []activeRun
@@ -499,17 +488,6 @@ type pageData struct {
 	// whole fleet, and say which of the two stops is about to happen.
 	Confirm  bool
 	WhenIdle bool
-	// Host is the hostname the request arrived on, so the per-loop
-	// dashboard links point back at the machine the browser is already
-	// talking to rather than at a loopback address that would only work
-	// on this host.
-	Host string
-	// Link renders the per-loop dashboard links, honouring an operator's
-	// URL template when one is configured.
-	Link linkBuilder
-	// Auth is the request's access state: who is signed in, the CSRF token
-	// for forms, and whether a password is set at all.
-	Auth auth.Info
 	// Nav is the sidebar entry of the page being rendered, and Title the
 	// page's name in the browser tab.
 	Nav, Title string
@@ -522,60 +500,7 @@ type pageData struct {
 	Unite bool
 }
 
-// link builds the URL for a loop's own dashboard.
-//
-// The default points at the host the browser already reached us on, which
-// is right for a loopback or LAN install and needs no configuration. A
-// template exists for the case that is actually common in practice: the
-// per-loop dashboards sit behind a reverse proxy or a wildcard DNS zone,
-// and their real address is neither 127.0.0.1 nor a port. This is the
-// same shape as the base-URL setting every other tool with a dashboard
-// exposes -- Grafana's root_url, Prometheus's external_url, Jupyter's
-// base_url -- because the address a user is given has to be the one that
-// works from their browser, not the one the process happens to bind.
-//
-// Placeholders: {host} the request hostname, {port}, {loop}, {repo}. A
-// path template is more robust than a port-as-subdomain one: HTTP/2 is
-// 443-only, so a URL carrying a port needs a proxy that will route it
-// and a certificate that covers it.
-func (l linkBuilder) Build(r *rollup.Loop) string {
-	if l.Template == "" {
-		// Trim the brackets: JoinHostPort adds its own around an IPv6
-		// literal, and a Host header of "[::1]" arrives bracketed, which
-		// would otherwise come out as "[[::1]]".
-		return "http://" + net.JoinHostPort(strings.Trim(l.Host, "[]"), strconv.Itoa(r.Port)) + "/"
-	}
-	rep := strings.NewReplacer(
-		"{host}", l.Host,
-		"{port}", strconv.Itoa(r.Port),
-		"{loop}", r.Loop,
-		"{repo}", r.Repo,
-	)
-	return rep.Replace(l.Template)
-}
-
-// requestHost is the hostname to build links with, or 127.0.0.1 when the
-// Host header names none.
-func requestHost(r *http.Request) string {
-	host := r.Host
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
-	}
-	if host == "" {
-		return "127.0.0.1"
-	}
-	return host
-}
-
-// linkBuilder renders the per-loop dashboard links.
-type linkBuilder struct {
-	// Host is the request hostname, used by the default template.
-	Host string
-	// Template overrides it when set.
-	Template string
-}
-
-func (a *app) data(msg, errMsg, host, urlTemplate string) pageData {
+func (a *app) data(msg, errMsg string) pageData {
 	f := a.src().Fleet()
 	totals := map[string]*repoView{}
 	agents := map[string]string{}
@@ -615,8 +540,6 @@ func (a *app) data(msg, errMsg, host, urlTemplate string) pageData {
 		Exposed:    a.exposed,
 		Active:     active(f, agents),
 		Sys:        a.readSys(),
-		Host:       host,
-		Link:       linkBuilder{Host: host, Template: urlTemplate},
 		Unite:      a.unite,
 	}
 }
@@ -630,10 +553,9 @@ func (a *app) readSys() machine.Metrics {
 	return a.sys.Read()
 }
 
-// dataFor is data for one request, with its access state.
+// dataFor is data for one request.
 func (a *app) dataFor(r *http.Request, msg, errMsg string) pageData {
-	d := a.data(msg, errMsg, requestHost(r), a.loopURLTemplate)
-	d.Auth = auth.Session(r)
+	d := a.data(msg, errMsg)
 	d.Nav = "ops"
 	return d
 }
@@ -787,7 +709,7 @@ func (a *app) action(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	back := "/"
-	if next := auth.SafeNext(r.FormValue("next")); strings.HasPrefix(next, "/projects/") {
+	if next := safeNext(r.FormValue("next")); strings.HasPrefix(next, "/projects/") {
 		back = next
 	}
 	key := "msg"
@@ -886,3 +808,39 @@ func (a *app) stopAll(whenIdle bool) {
 // it again on the way out, so the round trip is safe in both
 // directions.
 func query(s string) string { return url.QueryEscape(s) }
+
+// clientAddr is the host part of the client's address, recorded as the
+// actor of an audit entry.
+func clientAddr(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+// safeNext returns next when it is a same-origin relative path, else "/".
+func safeNext(next string) string {
+	if !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") || strings.ContainsAny(next, "\\\r\n\t") {
+		return "/"
+	}
+	u, err := url.Parse(next)
+	if err != nil || u.Scheme != "" || u.Host != "" {
+		return "/"
+	}
+	return next
+}
+
+// audit records a change made by the client of r.
+func (a *app) audit(r *http.Request, action, project, target, result string) {
+	a.auditAs(clientAddr(r), action, project, target, result)
+}
+
+func (a *app) auditAs(actor, action, project, target, result string) {
+	if a.store == nil {
+		return
+	}
+	if err := a.store.AddAudit(time.Now(), actor, action, project, target, result); err != nil {
+		log.Printf("audit: %v", err)
+	}
+}

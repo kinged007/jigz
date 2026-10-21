@@ -39,10 +39,9 @@ tr.lp td:first-child { padding-left: 1.6rem; }
 {{template "livebody" .}}{{template "chartjs"}}{{template "livescript"}}{{template "shell-bottom" .}}{{end}}
 
 {{define "fleetbulk"}}<form class="row" method="post" action="/action">
-  {{if .Auth.Authenticated}}<input type="hidden" name="csrf" value="{{.Auth.CSRF}}">{{end}}
   <div class="acts">
-    <button name="op" value="startall" {{ctl .Auth.Authenticated "Start every project that is stopped and ready"}}>{{template "icon-play"}} start all</button>
-    <button name="op" value="drainall" {{ctl .Auth.Authenticated "Each loop stops as soon as it has no work in flight. This page keeps running."}}>{{template "icon-drain"}} drain all</button>
+    <button name="op" value="startall" {{ctl "Start every project that is stopped and ready"}}>{{template "icon-play"}} start all</button>
+    <button name="op" value="drainall" {{ctl "Each loop stops as soon as it has no work in flight. This page keeps running."}}>{{template "icon-drain"}} drain all</button>
   </div>
 </form>{{end}}
 
@@ -61,20 +60,19 @@ tr.lp td:first-child { padding-left: 1.6rem; }
 </div>{{end}}
 
 {{define "projectacts"}}<form class="inline" method="post" action="/action">
-  {{if .Auth.Authenticated}}<input type="hidden" name="csrf" value="{{.Auth.CSRF}}">{{end}}
   <input type="hidden" name="repo" value="{{.Slug}}">
   <div class="acts">
     {{if .IsRunning}}
-      <button class="sm" name="op" value="stop" {{ctl .Auth.Authenticated ""}}>{{template "icon-stop"}} stop</button>
-      <button class="sm" name="op" value="drain" {{ctl .Auth.Authenticated "Each loop stops as soon as it has no work in flight, one loop at a time. The sortie-loop run decides when; central only asks."}}>{{template "icon-drain"}} stop when idle</button>
+      <button class="sm" name="op" value="stop" {{ctl ""}}>{{template "icon-stop"}} stop</button>
+      <button class="sm" name="op" value="drain" {{ctl "Each loop stops as soon as it has no work in flight, one loop at a time. The sortie-loop run decides when; central only asks."}}>{{template "icon-drain"}} stop when idle</button>
     {{else}}
-      <button class="sm" name="op" value="start" {{ctl .Auth.Authenticated ""}}>{{template "icon-play"}} start</button>
+      <button class="sm" name="op" value="start" {{ctl ""}}>{{template "icon-play"}} start</button>
     {{end}}
-    <button class="sm" name="op" value="restart" {{ctl .Auth.Authenticated "Stop now and start again, interrupting whatever is running"}}>{{template "icon-restart"}} restart</button>
-    {{if .CanWake}}<button class="sm" name="op" value="wake" {{ctl .Auth.Authenticated "Wake this project's sleeping loops now"}}>{{template "icon-play"}} wake</button>{{end}}
+    <button class="sm" name="op" value="restart" {{ctl "Stop now and start again, interrupting whatever is running"}}>{{template "icon-restart"}} restart</button>
+    {{if .CanWake}}<button class="sm" name="op" value="wake" {{ctl "Wake this project's sleeping loops now"}}>{{template "icon-play"}} wake</button>{{end}}
     {{if .CanCleanup}}
-      <button class="sm" name="op" value="cleanup" {{ctl .Auth.Authenticated "List what the cleanup command would remove. Nothing is deleted."}}>Run cleanup (dry run)</button>
-      <button class="sm danger" name="op" value="cleanup" formaction="/action?dry_run=0" {{ctl .Auth.Authenticated "Run the cleanup command for real"}} onclick="return confirm('Run cleanup for {{.Slug}} now? This deletes what the cleanup command removes.')">Run cleanup</button>
+      <button class="sm" name="op" value="cleanup" {{ctl "List what the cleanup command would remove. Nothing is deleted."}}>Run cleanup (dry run)</button>
+      <button class="sm danger" name="op" value="cleanup" formaction="/action?dry_run=0" {{ctl "Run the cleanup command for real"}} onclick="return confirm('Run cleanup for {{.Slug}} now? This deletes what the cleanup command removes.')">Run cleanup</button>
     {{end}}
   </div>
 </form>{{end}}
@@ -120,7 +118,7 @@ tr.lp td:first-child { padding-left: 1.6rem; }
 </tr>
 {{range .Loops}}
 <tr class="lp">
-  <td>{{if gt .L.Port 0}}<a href="{{$.Link.Build .L}}" title="This loop's own dashboard, port {{.L.Port}}">{{.L.Loop}}</a>{{else}}{{.L.Loop}}{{end}} <span class="muted">loop</span>
+  <td>{{.L.Loop}} <span class="muted">loop</span>
     <a class="btn" href="/logs/{{.L.Repo}}/{{.L.Loop}}" title="The last lines of this workflow's child log">log</a></td>
   <td>
     <span class="chip s-{{.Class}}">{{.State}}</span>
@@ -139,9 +137,9 @@ tr.lp td:first-child { padding-left: 1.6rem; }
     <input type="hidden" name="repo" value="{{.L.Repo}}">
     <input type="hidden" name="workflow" value="{{.L.Loop}}">
     <div class="acts">
-      {{if .Paused}}<button class="sm" name="op" value="resume" {{ctl $.Auth.Authenticated "Let this workflow run again"}}>resume</button>
-      {{else}}<button class="sm" name="op" value="pause" {{ctl $.Auth.Authenticated "Stop this workflow from picking up new work; a running agent finishes its turn"}}>pause</button>{{end}}
-      <button class="sm" name="op" value="override" {{ctl $.Auth.Authenticated "Clear this period's budget hold so the workflow runs again"}}>budget override</button>
+      {{if .Paused}}<button class="sm" name="op" value="resume" {{ctl "Let this workflow run again"}}>resume</button>
+      {{else}}<button class="sm" name="op" value="pause" {{ctl "Stop this workflow from picking up new work; a running agent finishes its turn"}}>pause</button>{{end}}
+      <button class="sm" name="op" value="override" {{ctl "Clear this period's budget hold so the workflow runs again"}}>budget override</button>
     </div>
   </form></td>
 </tr>
@@ -189,8 +187,7 @@ tr.lp td:first-child { padding-left: 1.6rem; }
 </div>
 
 <h2>Audit log</h2>
-{{if not .Auth.Authenticated}}<p class="empty">Sign in to see the audit log.</p>
-{{else if not .Ops.Audit}}<p class="empty">No audit entries yet.</p>
+{{if not .Ops.Audit}}<p class="empty">No audit entries yet.</p>
 {{else}}<div class="tw audit"><table>
 <thead><tr><th>When (UTC)</th><th>Who</th><th>Action</th><th>Target</th><th>Result</th></tr></thead>
 <tbody>

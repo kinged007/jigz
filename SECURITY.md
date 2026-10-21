@@ -66,11 +66,17 @@ you track in git.
 
 ## The dashboard
 
-The dashboard binds to `127.0.0.1` only and has no authentication, so it
-is reachable by any process running as you and by nothing else. It
-renders issue titles and agent output from GitHub. Do not port-forward or
-proxy it to a network you do not control without putting authentication
-in front of it.
+The dashboard has no authentication. It binds `127.0.0.1` by default, so
+only processes on the same machine can reach it. `--host 0.0.0.0` listens
+on all interfaces; anyone who can reach the port can then start and stop
+agents and edit the configuration, and read issue titles and agent output
+from GitHub. Use it locally, on a private network, or behind your own
+secure proxy (an SSH tunnel, Tailscale, or a reverse proxy with
+authentication).
+
+The dashboard checks the `Host` header and refuses a state-changing
+request from another origin. The sortie server of each loop binds
+`127.0.0.1` and is used internally by sortie-loop.
 
 ## Running the loops
 

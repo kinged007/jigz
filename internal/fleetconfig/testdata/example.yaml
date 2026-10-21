@@ -10,17 +10,6 @@
 # repository itself into the workspaces where it works.
 state_dir: ""
 
-# Access to the control page. The password is not set here: put
-# SORTIE_CENTRAL_PASSWORD in the environment or in a .env file beside this
-# config (see .env.example). Without a password the page is open.
-access:
-  # With a password set, true lets anonymous visitors read the pages and
-  # GET /api/v1 while every change still needs a login. Applied on reload.
-  public_read: false
-  # true trusts X-Forwarded-Proto and X-Forwarded-For from a reverse proxy
-  # in front of central. Only set it when one is there. Needs a restart.
-  trusted_proxy: false
-
 # Optional enrichment of run history from the GitHub REST API: branch,
 # pull request link, the Journey card of an issue run, and PRs opened and
 # merged per day. Read only, and off

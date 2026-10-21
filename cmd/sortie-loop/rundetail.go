@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kinged007/sortie-loop/internal/auth"
 	"github.com/kinged007/sortie-loop/internal/loopsrc"
 	"github.com/kinged007/sortie-loop/internal/store"
 )
@@ -254,8 +253,6 @@ func (a *app) projectShare(run store.Run) (string, error) {
 func (a *app) logCard(r *http.Request, project, workflow string) logCard {
 	op, ok := a.src().(loopsrc.Operator)
 	switch {
-	case !auth.Session(r).Authenticated:
-		return logCard{Why: "log in to read the log"}
 	case !ok || !op.ProjectCapabilities(project).Logs:
 		return logCard{Why: "needs sortie-loop logs"}
 	}

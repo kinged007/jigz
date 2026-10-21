@@ -211,7 +211,7 @@ type AuditEntry struct {
 	Result  string `json:"result"`
 }
 
-// AddAudit records one change or login event.
+// AddAudit records one change event.
 func (s *Store) AddAudit(ts time.Time, actor, action, project, target, result string) error {
 	_, err := s.db.Exec(`INSERT INTO audit_log (ts, actor, action, project, target, result) VALUES (?,?,?,?,?,?)`,
 		ts.UTC().Format(time.RFC3339), actor, action, project, target, result)

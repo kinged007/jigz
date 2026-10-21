@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kinged007/sortie-loop/internal/auth"
 	"github.com/kinged007/sortie-loop/internal/config"
 	fleetconfig "github.com/kinged007/sortie-loop/internal/fleetconfig"
 	machine "github.com/kinged007/sortie-loop/internal/host"
@@ -117,7 +116,7 @@ func (a *app) projectsPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) apiProjects(w http.ResponseWriter, r *http.Request) {
-	d := a.data("", "", requestHost(r), a.loopURLTemplate)
+	d := a.data("", "")
 	writeJSON(w, http.StatusOK, struct {
 		Projects []projectSummary `json:"projects"`
 	}{a.projectSummaries(d)})
@@ -186,8 +185,7 @@ type projectView struct {
 // IsRunning decides between offering start and stop.
 func (v projectView) IsRunning() bool { return v.State == supervise.StateRunning }
 
-// detail gathers one project's page. Backups and audit rows are left out
-// for a client that is not signed in: they carry paths and client addresses.
+// detail gathers one project's page.
 func (a *app) detail(r *http.Request, d pageData, slug string) (projectView, bool) {
 	res, ok := a.project(slug)
 	if !ok {
@@ -219,7 +217,7 @@ func (a *app) detail(r *http.Request, d pageData, slug string) (projectView, boo
 		v.Rows = append(v.Rows, row)
 	}
 	v.Disk = diskSplitOf(res.Dir, a.backupBytes(slug))
-	if a.store != nil && auth.Session(r).Authenticated {
+	if a.store != nil {
 		v.Backups = a.projectBackups(slug)
 		if rows, err := a.store.Audit(500); err == nil {
 			for _, e := range rows {
@@ -405,7 +403,7 @@ func (a *app) projectPage(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) apiProject(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("owner") + "/" + r.PathValue("name")
-	v, ok := a.detail(r, a.data("", "", requestHost(r), a.loopURLTemplate), slug)
+	v, ok := a.detail(r, a.data("", ""), slug)
 	if !ok {
 		apiError(w, http.StatusNotFound, "no such project")
 		return

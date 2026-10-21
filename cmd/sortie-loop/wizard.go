@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kinged007/sortie-loop/internal/auth"
 	"github.com/kinged007/sortie-loop/internal/edit"
 	fleetconfig "github.com/kinged007/sortie-loop/internal/fleetconfig"
 	"github.com/kinged007/sortie-loop/internal/plan"
@@ -197,10 +196,6 @@ func wizardStepOf(field string) int {
 }
 
 func (a *app) wizardGet(w http.ResponseWriter, r *http.Request) {
-	if !auth.Session(r).Authenticated {
-		http.Redirect(w, r, "/login?next=/projects/new", http.StatusSeeOther)
-		return
-	}
 	a.showWizard(w, r, 1, url.Values{}, nil, false)
 }
 
@@ -569,7 +564,7 @@ func (a *app) startProject(slug, actor string) (string, string, error) {
 
 func (a *app) createResult(w http.ResponseWriter, r *http.Request, v url.Values) {
 	p, _, _ := a.parseWizard(v)
-	a.renderResult(w, r, "add", p.Repo, a.createProject(v, auth.Session(r).Actor))
+	a.renderResult(w, r, "add", p.Repo, a.createProject(v, clientAddr(r)))
 }
 
 // within reports whether path is dir or inside it, and where.
@@ -612,7 +607,7 @@ func (a *app) deletable(res fleetconfig.Resolved) error {
 		return fmt.Errorf("%s is the state directory itself", dir)
 	}
 	first, _, _ := strings.Cut(rel, string(filepath.Separator))
-	if strings.HasPrefix(first, store.FileName) || first == "backups" || first == "session.key" {
+	if strings.HasPrefix(first, store.FileName) || first == "backups" {
 		return fmt.Errorf("%s holds central's own files", dir)
 	}
 	for _, o := range a.projects() {
@@ -670,7 +665,7 @@ func (a *app) projectRemove(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	a.renderResult(w, r, "remove", slug, a.removeProject(res, del, auth.Session(r).Actor))
+	a.renderResult(w, r, "remove", slug, a.removeProject(res, del, clientAddr(r)))
 }
 
 // removeProject disables the project, which stops its loops, takes the

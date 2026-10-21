@@ -16,7 +16,6 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/kinged007/sortie-loop/internal/auth"
 	"github.com/kinged007/sortie-loop/internal/edit"
 	fleetconfig "github.com/kinged007/sortie-loop/internal/fleetconfig"
 	"github.com/kinged007/sortie-loop/internal/loopsrc"
@@ -652,13 +651,9 @@ func keptKeys(current string) []string {
 	return keys
 }
 
-// editGet shows an editor, for signed-in clients only.
+// editGet shows an editor.
 func (a *app) editGet(kind string, rawDefault bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !auth.Session(r).Authenticated {
-			http.Redirect(w, r, "/login?next="+url.QueryEscape(r.URL.RequestURI()), http.StatusSeeOther)
-			return
-		}
 		id := r.PathValue("owner") + "/" + r.PathValue("name")
 		switch {
 		case kind == "central":
@@ -732,7 +727,7 @@ func (a *app) editPost(w http.ResponseWriter, r *http.Request, apply bool) {
 	hidden := hiddenFor(vals)
 	switch {
 	case apply:
-		out, err := pipe.Apply(s.Target, hash, build, auth.Session(r).Actor)
+		out, err := pipe.Apply(s.Target, hash, build, clientAddr(r))
 		switch {
 		case err != nil:
 			v.Err = err.Error()
@@ -782,7 +777,7 @@ func hiddenFor(vals url.Values) []hiddenField {
 	var out []hiddenField
 	keys := make([]string, 0, len(vals))
 	for k := range vals {
-		if k != auth.CSRFField && k != "hash" && k != "back" && k != "kind" && k != "id" {
+		if k != "hash" && k != "back" && k != "kind" && k != "id" {
 			keys = append(keys, k)
 		}
 	}
@@ -805,10 +800,6 @@ func (a *app) mapProblems(s *editSpec, probs []edit.Problem) []edit.Problem {
 
 // backupsPage lists every saved backup, with a restore button each.
 func (a *app) backupsPage(w http.ResponseWriter, r *http.Request) {
-	if !auth.Session(r).Authenticated {
-		http.Redirect(w, r, "/login?next=/backups", http.StatusSeeOther)
-		return
-	}
 	d := backupsView{pageData: a.dataFor(r, r.URL.Query().Get("msg"), r.URL.Query().Get("err"))}
 	d.Nav, d.Title = "settings", "Backups"
 	if a.store != nil {
@@ -835,7 +826,7 @@ func (a *app) backupRestore(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad backup id", http.StatusBadRequest)
 		return
 	}
-	out, err := a.pipeline().Restore(id, auth.Session(r).Actor)
+	out, err := a.pipeline().Restore(id, clientAddr(r))
 	d := backupsView{pageData: a.dataFor(r, "", "")}
 	d.Nav, d.Title = "settings", "Restore"
 	var res restoreView
@@ -843,7 +834,7 @@ func (a *app) backupRestore(w http.ResponseWriter, r *http.Request) {
 	res.Result = &out
 	if err != nil {
 		res.Err = err.Error()
-		a.auditAs(auth.Session(r).Actor, "edit_restore", "", strconv.FormatInt(id, 10), err.Error())
+		a.auditAs(clientAddr(r), "edit_restore", "", strconv.FormatInt(id, 10), err.Error())
 	}
 	res.Steps = stepsFor("result", &out)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

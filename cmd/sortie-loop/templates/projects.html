@@ -39,14 +39,14 @@
   <div class="row">
     {{if .Enabled}}
     <form class="inline row" method="post" action="/action">
-      {{if .Auth.Authenticated}}<input type="hidden" name="csrf" value="{{.Auth.CSRF}}"><input type="hidden" name="repo" value="{{.Slug}}"><input type="hidden" name="next" value="/projects/{{.Slug}}">{{end}}
+      <input type="hidden" name="repo" value="{{.Slug}}"><input type="hidden" name="next" value="/projects/{{.Slug}}">
       {{if .IsRunning}}
-        <button name="op" value="stop" {{ctl .Auth.Authenticated ""}}>Stop</button>
-        <button name="op" value="drain" {{ctl .Auth.Authenticated "Each loop stops as soon as it has no work in flight"}}>Stop when idle</button>
+        <button name="op" value="stop" {{ctl ""}}>Stop</button>
+        <button name="op" value="drain" {{ctl "Each loop stops as soon as it has no work in flight"}}>Stop when idle</button>
       {{else}}
-        <button name="op" value="start" {{ctl .Auth.Authenticated ""}}>Start</button>
+        <button name="op" value="start" {{ctl ""}}>Start</button>
       {{end}}
-      <button name="op" value="restart" {{ctl .Auth.Authenticated "Stop now and start again, interrupting whatever is running"}}>Restart</button>
+      <button name="op" value="restart" {{ctl "Stop now and start again, interrupting whatever is running"}}>Restart</button>
     </form>
     {{end}}
     <a class="btn" href="/agents">Agent settings</a>
@@ -88,15 +88,14 @@
 {{if .Files}}<div class="tw"><table><thead><tr><th>File</th><th>Validation</th><th>Detail</th><th></th></tr></thead><tbody>
 {{range .Files}}<tr><td><code>WORKFLOW.{{.Name}}.md</code></td>
   <td><span class="chip v-{{.Status}}">{{if eq .Status "valid"}}valid{{else if eq .Status "invalid"}}invalid{{else}}not checked{{end}}</span>{{if .Warnings}} <span class="tag">{{.Warnings}} warning{{if gt .Warnings 1}}s{{end}}</span>{{end}}</td>
-  <td>{{.Detail}}</td><td>{{if $.Auth.Authenticated}}<a class="btn" href="{{.EditURL}}">Edit</a>{{else}}<button type="button" {{ctl false ""}}>Edit</button>{{end}}</td></tr>{{end}}
+  <td>{{.Detail}}</td><td><a class="btn" href="{{.EditURL}}">Edit</a></td></tr>{{end}}
 </tbody></table></div>
 <p class="muted">Validation runs <code>sortie validate</code> on each file when the page loads. Dispatch rules are on <a href="/workflows">Workflows</a>.</p>
 {{else}}<p class="empty">No workflow files are installed yet.</p>{{end}}
-{{if .Auth.Authenticated}}
 <h2>Backups</h2>
 {{if .Backups}}<div class="tw"><table><thead><tr><th>#</th><th>Time (UTC)</th><th>File</th><th>Saved by</th><th></th></tr></thead><tbody>
 {{range .Backups}}<tr><td>{{.ID}}</td><td>{{utc .TS}}</td><td><code>{{.File}}</code></td><td>{{.Actor}}</td>
-<td><form class="inline" method="post" action="/backups/restore"><input type="hidden" name="csrf" value="{{$.Auth.CSRF}}"><input type="hidden" name="id" value="{{.ID}}"><button>Restore</button></form></td></tr>{{end}}
+<td><form class="inline" method="post" action="/backups/restore"><input type="hidden" name="id" value="{{.ID}}"><button>Restore</button></form></td></tr>{{end}}
 </tbody></table></div>
 <p class="muted">The project's own files, and the newest backups of the central config that holds its entry. The last 20 per file are kept.</p>
 {{else}}<p class="empty">No backups yet. One is created before every applied edit.</p>{{end}}
@@ -105,6 +104,5 @@
 {{range .Audit}}<tr><td>{{utc .TS}}</td><td>{{.Actor}}</td><td>{{.Action}}</td><td>{{.Result}}</td></tr>{{end}}
 </tbody></table></div>
 {{else}}<p class="empty">No audit entries for this project yet.</p>{{end}}
-{{end}}
 {{template "statuspoll"}}
 {{template "shell-bottom" .}}{{end}}

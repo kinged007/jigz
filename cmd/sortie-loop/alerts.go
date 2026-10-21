@@ -112,9 +112,6 @@ func (a *app) opsAlerts(d pageData, projects []opsProject) []alert {
 	if d.Sys.DiskTotal > 0 && d.Sys.DiskUsed*100/d.Sys.DiskTotal > diskAlertPercent {
 		out = append(out, alert{"warn", "Disk", "Disk use is " + pct(d.Sys.DiskUsed, d.Sys.DiskTotal) + " of " + gib(d.Sys.DiskTotal), "/settings"})
 	}
-	if d.Exposed && !d.Auth.PasswordSet {
-		out = append(out, alert{"warn", "Exposed", "This page is reachable beyond this machine and has no password", "/settings"})
-	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Sev == "err" && out[j].Sev != "err" })
 	return out
 }

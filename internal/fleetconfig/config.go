@@ -204,12 +204,10 @@ func (r Resolved) OverriddenKnobs() map[string]bool {
 	return out
 }
 
-// Access is the control page's access setting. The password itself is
-// never in the file; it comes from SORTIE_CENTRAL_PASSWORD.
+// Access holds the keys of an access block from an older config. They are
+// accepted so that the file still loads, and have no effect.
 type Access struct {
-	// PublicRead lets anonymous visitors read when a password is set.
-	PublicRead bool `yaml:"public_read"`
-	// TrustedProxy trusts X-Forwarded-Proto and X-Forwarded-For.
+	PublicRead   bool `yaml:"public_read"`
 	TrustedProxy bool `yaml:"trusted_proxy"`
 }
 

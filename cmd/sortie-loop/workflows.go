@@ -23,7 +23,6 @@ type wfFile struct {
 	Status, Detail string
 	Warnings       int
 	NotStarted     bool
-	CanEdit        bool
 	Filter, Label  string
 	Agent, Model   string
 	Template       string
@@ -57,7 +56,6 @@ func (a *app) workflows(w http.ResponseWriter, r *http.Request) {
 		for _, n := range names {
 			f := a.workflowFile(p, n)
 			f.NotStarted = len(p.Workflows) > 0 && !slices.Contains(p.Workflows, n)
-			f.CanEdit = v.Auth.Authenticated
 			all = append(all, f)
 			if f.NotStarted {
 				wp.Idle = append(wp.Idle, f)

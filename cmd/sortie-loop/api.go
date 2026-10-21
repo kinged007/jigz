@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kinged007/sortie-loop/internal/auth"
 	"github.com/kinged007/sortie-loop/internal/loopsrc"
 	"github.com/kinged007/sortie-loop/internal/rollup"
 	"github.com/kinged007/sortie-loop/internal/store"
@@ -80,7 +79,7 @@ type apiFleetBody struct {
 
 // apiFleet serves the same data as the dashboard.
 func (a *app) apiFleet(w http.ResponseWriter, r *http.Request) {
-	d := a.data("", "", requestHost(r), a.loopURLTemplate)
+	d := a.data("", "")
 	src := a.src()
 	body := apiFleetBody{
 		At: d.Now.UTC(), Source: src.Name(), Capabilities: src.Capabilities(),
@@ -283,13 +282,8 @@ func apiAttempts(rows []attemptRow) []apiAttempt {
 	return out
 }
 
-// apiAudit lists the newest audit rows, newest first. Rows carry client
-// IPs, so it needs a login even when public_read is on.
+// apiAudit lists the newest audit rows, newest first.
 func (a *app) apiAudit(w http.ResponseWriter, r *http.Request) {
-	if !auth.Session(r).Authenticated {
-		apiError(w, http.StatusUnauthorized, "login required")
-		return
-	}
 	if a.store == nil {
 		apiError(w, http.StatusServiceUnavailable, "audit log is unavailable")
 		return

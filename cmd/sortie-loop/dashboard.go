@@ -60,7 +60,7 @@ func dashboardStateDir() string {
 //
 // The page is bound to loopback by default; --host moves it and keeps
 // the Host check unless the address is a wildcard.
-func serveDashboard(port int, unite bool, sup *supervisor, hostFlag, loopURLTemplate string) {
+func serveDashboard(port int, unite bool, sup *supervisor, hostFlag string) {
 	host := hostFlag
 	if host == "" {
 		host = "127.0.0.1"
@@ -69,16 +69,16 @@ func serveDashboard(port int, unite bool, sup *supervisor, hostFlag, loopURLTemp
 
 	stateDir := dashboardStateDir()
 	a := &app{
-		sup:             &fleetSupervisor{local: sup, localOnly: !unite},
-		quit:            make(chan struct{}),
-		loopURLTemplate: loopURLTemplate,
-		sys:             machine.New(stateDir),
-		sizes:           newRepoSizes(),
-		stateDir:        stateDir,
-		applyWait:       30 * time.Second,
-		pollEvery:       500 * time.Millisecond,
-		exposed:         g.wildcard || !isLoopbackHost(host),
-		unite:           unite,
+		sup:       &fleetSupervisor{local: sup, localOnly: !unite},
+		quit:      make(chan struct{}),
+		sys:       machine.New(stateDir),
+		sizes:     newRepoSizes(),
+		stateDir:  stateDir,
+		applyWait: 30 * time.Second,
+		pollEvery: 500 * time.Millisecond,
+		bindAddr:  bindLabel(g, port),
+		exposed:   g.wildcard || !isLoopbackHost(host),
+		unite:     unite,
 	}
 	a.sup.app = a
 	a.source = loopsrc.StatusDoc{
@@ -90,7 +90,7 @@ func serveDashboard(port int, unite bool, sup *supervisor, hostFlag, loopURLTemp
 	a.configPath = filepath.Join(sup.root, ".sortie", "config.yaml")
 
 	if a.exposed {
-		fmt.Fprintf(os.Stderr, "sortie-loop: dashboard exposed beyond loopback on %s (no login)\n", g.bindAddr())
+		fmt.Fprintf(os.Stderr, "sortie-loop: dashboard exposed beyond loopback on %s: it has no authentication, so keep it on a private network or behind a secure proxy\n", bindLabel(g, port))
 	}
 	go a.watchSizes(make(chan struct{}))
 	// The history database outlives the request that asks for a stop: the
@@ -104,7 +104,7 @@ func serveDashboard(port int, unite bool, sup *supervisor, hostFlag, loopURLTemp
 		<-a.quit
 		_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
 	}()
-	fmt.Printf("dashboard http://%s\n", bindLabel(g, port))
+	fmt.Printf("dashboard http://%s (bound to %s)\n", browseAddr(g, port), bindLabel(g, port))
 	// The server must not block the caller: main runs the supervisor
 	// loop, which is what answers the signals the page sends.
 	go func() {
@@ -114,8 +114,22 @@ func serveDashboard(port int, unite bool, sup *supervisor, hostFlag, loopURLTemp
 	}()
 }
 
-// bindLabel is the address to print at startup.
+// bindLabel names the address the listener binds.
 func bindLabel(g hostGuard, port int) string {
+	addr := g.bindAddr()
+	switch {
+	case g.wildcard && g.v6:
+		return fmt.Sprintf("[::]:%d (all interfaces)", port)
+	case g.wildcard:
+		return fmt.Sprintf("0.0.0.0:%d (all interfaces)", port)
+	case addr == "":
+		addr = "127.0.0.1"
+	}
+	return fmt.Sprintf("%s:%d", addr, port)
+}
+
+// browseAddr is an address a browser on this machine can open.
+func browseAddr(g hostGuard, port int) string {
 	addr := g.bindAddr()
 	if addr == "" {
 		addr = "127.0.0.1"

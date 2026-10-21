@@ -16,7 +16,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,18 +45,6 @@ var knobTargets = map[string]knobTarget{
 	"stop_grace_ms":         {"agent", "stop_grace_ms"},
 	"max_retry_backoff_ms":  {"agent", "max_retry_backoff_ms"},
 	"polling_interval_ms":   {"polling", "interval_ms"},
-	// server.host is not a knob an operator sets per repository: it is the
-	// address every engine's dashboard binds, which is a property of where
-	// the fleet is deployed, not of one repository's agent.
-	"loop_bind_host": {"server", "host"},
-}
-
-// bindHost is the address to write, defaulting to the engine's own.
-func (p Plan) bindHost() string {
-	if p.LoopBindHost == "" {
-		return "127.0.0.1"
-	}
-	return p.LoopBindHost
 }
 
 // ApplySettings writes the knob values that belong in the workflow files
@@ -80,14 +67,6 @@ func (p Plan) ApplySettings(r config.Resolved) error {
 	for _, f := range files {
 		stem := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(f), "WORKFLOW."), ".md")
 		knobs := r.FileSettings(stem)
-		knobs = maps.Clone(knobs)
-		// Written into the file rather than passed as a flag: central does
-		// not run the engine, sortie-loop does, and the only channel
-		// central has to the engine is its workflow file. The engine
-		// validates server.host as an IP and refuses to start otherwise,
-		// so a bad value surfaces as a startup failure attributed to this
-		// repository rather than as a silently unreachable dashboard.
-		knobs["loop_bind_host"] = p.bindHost()
 		raw, err := os.ReadFile(f)
 		if err != nil {
 			return err
@@ -121,10 +100,6 @@ func (p Plan) ApplySettings(r config.Resolved) error {
 				value = "$" + r.ModelVar(stem)
 			case !known:
 				return fmt.Errorf("%s: %s: no front matter target for %q", r.Repo.Repo, filepath.Base(f), key)
-			case key == "loop_bind_host":
-				// The shipped workflows carry no server: block, so it is
-				// created rather than reported missing.
-				create = true
 			}
 			patched, changed, err := patchBlock(out, block, fileKey, value, create)
 			if err != nil {
@@ -392,14 +367,6 @@ type Plan struct {
 	LoopBin string
 	// SortieBin is the sortie engine. Empty resolves it from PATH.
 	SortieBin string
-	// LoopBindHost is the address each engine's own dashboard binds.
-	// Empty means the engine's own loopback default, which is still
-	// written explicitly rather than left out: the workflow file is
-	// patched in place and never rewritten from the shipped copy, so a
-	// value written by an earlier run would otherwise survive turning the
-	// flag off and leave the dashboards exposed with nothing in the
-	// command line to say so.
-	LoopBindHost string
 }
 
 // LoopBinary returns the sortie-loop binary to drive: the explicit

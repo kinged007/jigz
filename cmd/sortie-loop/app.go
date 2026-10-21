@@ -13,7 +13,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kinged007/sortie-loop/internal/auth"
 	"github.com/kinged007/sortie-loop/internal/collector"
 	"github.com/kinged007/sortie-loop/internal/config"
 	"github.com/kinged007/sortie-loop/internal/edit"
@@ -92,29 +91,27 @@ const sizeInterval = 10 * time.Minute
 // app is the dashboard server's global state. It adapts sortie-loop's
 // registry-based discovery to the interface central's handlers expect.
 type app struct {
-	configPath      string
-	sup             *fleetSupervisor
-	mu              sync.Mutex
-	exposed         bool
-	sizes           *repoSizes
-	sys             *machine.Reader
-	loopURLTemplate string
-	quit            chan struct{}
-	quitOnce        sync.Once
-	source          loopsrc.Source
-	stateDir        string
-	access          fleetconfig.Access
-	github          fleetconfig.GitHub
-	enricher        *collector.Enricher
-	auth            *auth.Auth
-	store           *store.Store
-	applyWait       time.Duration
-	pollEvery       time.Duration
-	verOnce         sync.Once
-	versions        []pair
-	alertCache      dbAlertCache
-	pipeOnce        sync.Once
-	pipe            *edit.Pipeline
+	configPath string
+	sup        *fleetSupervisor
+	mu         sync.Mutex
+	exposed    bool
+	bindAddr   string
+	sizes      *repoSizes
+	sys        *machine.Reader
+	quit       chan struct{}
+	quitOnce   sync.Once
+	source     loopsrc.Source
+	stateDir   string
+	github     fleetconfig.GitHub
+	enricher   *collector.Enricher
+	store      *store.Store
+	applyWait  time.Duration
+	pollEvery  time.Duration
+	verOnce    sync.Once
+	versions   []pair
+	alertCache dbAlertCache
+	pipeOnce   sync.Once
+	pipe       *edit.Pipeline
 	// unite is set when this page spans every registered repository,
 	// which the page states in its head so a later run can find it.
 	unite bool

@@ -15,7 +15,6 @@ a:hover { text-decoration: underline; }
        padding: .5rem 1rem; border-bottom: 1px solid var(--line); background: var(--bg2);
        position: sticky; top: 0; z-index: 20; }
 .brand { font-weight: 700; margin-right: auto; display: flex; align-items: center; gap: .5rem; }
-.who { display: flex; align-items: center; gap: .4rem; }
 .side { border-right: 1px solid var(--line); padding: .75rem .5rem; display: flex; flex-direction: column; gap: 2px; }
 .side a { display: flex; align-items: center; gap: .5rem; padding: .35rem .6rem; border-radius: 4px; color: inherit; }
 .side a:hover { background: var(--hover); text-decoration: none; }
@@ -92,8 +91,7 @@ td .empty, .sub .empty { padding: 0; border: 0; text-align: inherit; font-style:
 .s-failed, .s-invalid, .s-error { --c: var(--err); }
 .s-retrying, .s-warn, .s-draining, .s-stopping { --c: var(--warn); }
 .s-stopped, .s-disabled, .s-paused, .s-cancelled { --c: var(--idle); }
-.s-info, .s-read { --c: var(--info); }
-.s-signed { --c: var(--ok); }
+.s-info { --c: var(--info); }
 .tag { font-size: .8em; padding: 0 .3rem; border-radius: 3px; margin-left: .3rem; border: 1px solid var(--line); color: var(--mut); }
 .filters { display: flex; flex-wrap: wrap; gap: .6rem; align-items: flex-end; margin-bottom: .75rem; }
 label.f { display: flex; flex-direction: column; gap: .15rem; font-size: .92em; color: var(--mut); }
@@ -176,10 +174,6 @@ details.warns { margin-bottom: 1rem; }
 .o-file { --c: var(--s3); }
 table.agents td { white-space: nowrap; }
 .stack { display: flex; height: 14px; border-radius: 3px; overflow: hidden; border: 1px solid var(--line); }
-.loginwrap { min-height: 100vh; display: grid; place-items: center; padding: 1rem; }
-.loginwrap .card { width: 22rem; max-width: 100%; margin: 0; }
-.loginwrap h1 { display: flex; align-items: center; gap: .5rem; }
-.loginwrap label.f { margin-bottom: .5rem; }
 {{end}}
 
 {{define "shell-top"}}<!doctype html>
@@ -189,7 +183,6 @@ table.agents td { white-space: nowrap; }
 <meta name="sortie-loop-dashboard" content="{{if .Unite}}unite{{else}}repo{{end}}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{if .Title}}{{.Title}} - {{end}}Sortie Loop</title>
-<meta name="csrf-token" content="{{.Auth.CSRF}}">
 <style>{{template "styles"}}</style>
 </head>
 <body>
@@ -197,14 +190,6 @@ table.agents td { white-space: nowrap; }
 <header class="top">
   <div class="brand">{{template "icon-hex"}} Sortie Loop</div>
   {{template "status" .}}
-  <div class="who">
-    {{if not .Auth.PasswordSet}}<span class="chip s-warn" title="No password is set, so anyone who can reach this page can change things.">{{template "icon-unlock"}} open, no login</span>
-    {{else if .Auth.Authenticated}}<form class="inline who" method="post" action="/logout">
-      <input type="hidden" name="csrf" value="{{.Auth.CSRF}}">
-      <span class="chip s-signed">{{template "icon-lock"}} signed in</span> <button class="sm">Sign out</button>
-    </form>
-    {{else}}<span class="chip s-read" title="Starting, stopping and editing need a login">{{template "icon-lock"}} read-only (public)</span> <a class="btn sm" href="/login">Sign in</a>{{end}}
-  </div>
 </header>
 <nav class="side" aria-label="Main">
   <a href="/" {{if eq .Nav "ops"}}aria-current="page"{{end}}>{{template "icon-ops"}}<span>Operations</span></a>
@@ -218,17 +203,12 @@ table.agents td { white-space: nowrap; }
 <main>
 {{if .Msg}}<div class="msg ok">{{.Msg}}</div>{{end}}
 {{if .Err}}<div class="msg err">{{.Err}}</div>{{end}}
-{{if and .Exposed (not .Auth.PasswordSet)}}<div class="banner warn"><b>This page is reachable beyond this machine and has no login.</b>
-Anyone who can reach it can start and stop agents holding a GitHub write token,
-and rewrite <code>{{.ConfigPath}}</code>.</div>{{end}}
-{{if and .Auth.PasswordSet (not .Auth.Authenticated)}}<div class="banner info"><b>Read-only mode.</b> A password is set and you are not signed in, so you can look but not change anything. <a href="/login">Sign in</a> to enable actions.</div>{{end}}
 {{end}}
 
 {{define "fleetactions"}}<form class="row" method="post" action="/action">
-  {{if .Auth.Authenticated}}<input type="hidden" name="csrf" value="{{.Auth.CSRF}}">{{end}}
-  <label class="check" title="Checked, work in flight is finished first: apply replaces each loop as it goes idle, and stop all drains before it goes down. Unchecked, apply restarts the loops now and stop all terminates them now."><input type="checkbox" name="when_idle" value="1" checked {{if not .Auth.Authenticated}}disabled{{end}}> when loops are idle</label>
-  <button name="op" value="apply" {{ctl .Auth.Authenticated ""}}>{{template "icon-restart"}} reread config and apply</button>
-  <button class="danger" name="op" value="stopall" {{ctl .Auth.Authenticated "Stop every loop and then this process. Confirmed on the page that follows."}}>{{template "icon-stop"}} stop all</button>
+  <label class="check" title="Checked, work in flight is finished first: apply replaces each loop as it goes idle, and stop all drains before it goes down. Unchecked, apply restarts the loops now and stop all terminates them now."><input type="checkbox" name="when_idle" value="1" checked> when loops are idle</label>
+  <button name="op" value="apply" {{ctl ""}}>{{template "icon-restart"}} reread config and apply</button>
+  <button class="danger" name="op" value="stopall" {{ctl "Stop every loop and then this process. Confirmed on the page that follows."}}>{{template "icon-stop"}} stop all</button>
 </form>{{end}}
 
 {{define "shell-bottom"}}</main>

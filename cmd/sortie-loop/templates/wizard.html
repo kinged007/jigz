@@ -1,4 +1,4 @@
-{{define "wizhidden"}}<input type="hidden" name="csrf" value="{{.Auth.CSRF}}"><input type="hidden" name="step" value="{{.Step}}">{{range .Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}{{end}}
+{{define "wizhidden"}}<input type="hidden" name="step" value="{{.Step}}">{{range .Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}{{end}}
 
 {{define "wizard"}}{{template "shell-top" .}}
 <p class="sub"><a href="/projects">Projects</a> / new</p>
@@ -76,7 +76,7 @@
 <h1>Remove {{.Slug}}</h1>
 <p>This disables the project, {{if .Running}}stops its running loops now (work in flight is cancelled and retried if the project is added again), {{end}}and takes its entry out of the config. A backup of the config is kept.</p>
 <form method="post" action="/projects/{{.Slug}}/remove">
-  <input type="hidden" name="csrf" value="{{.Auth.CSRF}}"><input type="hidden" name="confirm" value="1">
+  <input type="hidden" name="confirm" value="1">
   <div class="card"><h3>Files</h3>
     <label class="check" style="opacity:1;cursor:default"><input type="checkbox" name="delete_files" value="1" {{if .DeleteFiles}}checked{{end}} {{if .NoDelete}}disabled{{end}}> also delete files</label>
     <p class="muted">Deletes <code>{{.Dir}}</code> with its workspaces and databases. Cannot be undone. Off by default.</p>
