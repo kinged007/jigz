@@ -408,8 +408,9 @@ func Load(dir string) (*Config, error) {
 // defaultFilters are the label constraints for the shipped loops,
 // mirroring each workflow's query_filter so the SORTIE_TRACKER_QUERY_FILTER
 // env override (which replaces it) preserves the positive label clauses.
-// The github-pr loops need them: the /pulls list path runs no search
-// syntax, so the adapter enforces label: clauses client-side. A new
+// The github-pr loops need them: the adapter sends a non-empty filter to
+// GitHub search and lists from /pulls, without label clauses, when it is
+// empty. A new
 // WORKFLOW.*.md loop with no filters: entry gets defaultFilter (same
 // scope, no label constraint), so it starts but matches nothing until
 // the workflow's active_states or a filters: override narrows it.

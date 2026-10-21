@@ -177,7 +177,7 @@ func (s *supervisor) childEnv(name string) (envFile string, env []string, err er
 	}
 	// The env override replaces the workflow's query_filter, so
 	// defaultFilters must mirror each loop's label clauses (the github-pr
-	// adapter enforces label: client-side); a filters: entry narrows
+	// adapter sends a non-empty filter to GitHub search); a filters: entry narrows
 	// further, it does not add to the default.
 	env = append(os.Environ(), cfg.Env()...)
 	if filter := cfg.FilterFor(name); filter != "" {

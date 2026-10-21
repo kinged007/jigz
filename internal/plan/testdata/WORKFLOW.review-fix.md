@@ -3,10 +3,9 @@ tracker:
   kind: github-pr
   api_key: $SORTIE_TRACKER_API_KEY
   project: $SORTIE_TRACKER_PROJECT
-  # Exclusion enforced client-side by the adapter; the label
-  # clause rides along for visibility (the github-pr adapter lists via
-  # /pulls, which runs no search syntax — active_states below is what
-  # actually matches the label). Assignee scope is appended by
+  # A non-empty query_filter is sent to GitHub search, which applies the
+  # label and exclusion clauses; active_states below still decides which
+  # labels make a PR a candidate. Assignee scope is appended by
   # sortie-loop config at launch, not here. This loop shares the
   # agent:build trigger with the build loop: on an issue it means implement,
   # on a PR it means apply the posted review finding.

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/kinged007/sortie-loop/internal/rollup"
 )
 
 const (
@@ -17,10 +19,9 @@ const (
 )
 
 // testedSchemaVersions lists the workflow DB schema_migrations versions
-// this release was tested against (L4). All workflow DBs currently share
-// version 16 (verified via .sortie/workflows/*.db), alongside engine
-// v1.26.0 (engineTag in version.go).
-var testedSchemaVersions = []int{16}
+// this release was tested against: the latest version of the engine
+// pinned by engineTag in version.go.
+var testedSchemaVersions = []int{rollup.EngineSchema}
 
 // statusDoc is the machine-readable state of one supervisor, written to
 // the status file derived from the repo root. Later features add

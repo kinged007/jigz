@@ -4,14 +4,13 @@ tracker:
   api_key: $SORTIE_TRACKER_API_KEY
   project: $SORTIE_TRACKER_PROJECT
   # Strictly: PRs assigned to the token owner carrying agent:review
-  # (assignee scope is appended by sortie-loop config at launch, enforced
-  # client-side by the adapter); the label
-  # clause rides along for visibility (the github-pr adapter lists via
-  # /pulls, which runs no search syntax — active_states below is what
-  # actually matches the label). `in-progress` lets the same loop pick a
+  # (assignee scope is appended by sortie-loop config at launch). A
+  # non-empty query_filter is sent to GitHub search, which applies the label
+  # and exclusion clauses; active_states below still decides which labels
+  # make a PR a candidate. `in-progress` lets the same loop pick a
   # review back up after a crash; `-label:agent:build` and
   # `-label:agent:merge` keep a fix or merge orphan out. -label:needs-human
-  # keeps escalated PRs out, matched client-side by the adapter.
+  # keeps escalated PRs out.
   query_filter: "label:agent:review,in-progress -label:agent:build -label:agent:merge -label:needs-human"
   # `todo` first so a PR that carries only agent:review derives a state
   # other than in-progress and the claim actually lands (see the dev

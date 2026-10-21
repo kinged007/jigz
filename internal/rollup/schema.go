@@ -9,11 +9,16 @@ import (
 
 // SupportedSchemas lists the schema_migrations versions whose layout
 // this reader has been checked against: 18 for the older engine, 35 for
-// the engine pinned in go.mod. A workflow database at any other
+// engine 1.27.0, 38 for the pinned engine (EngineSchema). A workflow database at any other
 // version is reported with a SchemaNotice and read for nothing, because
 // a column that moved would turn into a wrong number rather than an
 // error.
-var SupportedSchemas = []int{18, 35}
+var SupportedSchemas = []int{18, 35, EngineSchema}
+
+// EngineSchema is the latest schema_migrations version of the pinned
+// engine. Migrations 36 to 38 only add columns and tables that this
+// reader does not use.
+const EngineSchema = 38
 
 // requiredColumns is every table and column central reads. A supported
 // version that lacks one hides only what depends on that table.

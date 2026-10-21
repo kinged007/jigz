@@ -49,8 +49,8 @@ func TestStatusAfterStart(t *testing.T) {
 		doc.Version != version || doc.StartedAt.IsZero() {
 		t.Errorf("unexpected top-level status: %+v", doc)
 	}
-	if len(doc.TestedSchemaVersions) == 0 || doc.TestedSchemaVersions[0] != 16 {
-		t.Errorf("tested_schema_versions = %v, want [16]", doc.TestedSchemaVersions)
+	if len(doc.TestedSchemaVersions) == 0 || doc.TestedSchemaVersions[0] != 38 {
+		t.Errorf("tested_schema_versions = %v, want [38]", doc.TestedSchemaVersions)
 	}
 	if len(doc.Workflows) != 1 {
 		t.Fatalf("got %d workflows, want 1", len(doc.Workflows))
@@ -244,13 +244,13 @@ func TestStatusJSONPassthroughKeepsTestedSchemaVersions(t *testing.T) {
 	if err := json.Unmarshal(raw["tested_schema_versions"], &vals); err != nil {
 		t.Fatal(err)
 	}
-	if len(vals) == 0 || vals[0] != 16 {
-		t.Errorf("tested_schema_versions = %v, want [16]", vals)
+	if len(vals) == 0 || vals[0] != 38 {
+		t.Errorf("tested_schema_versions = %v, want [38]", vals)
 	}
 }
 
 func TestTestedSchemaVersionsConstant(t *testing.T) {
-	if len(testedSchemaVersions) != 1 || testedSchemaVersions[0] != 16 {
-		t.Errorf("testedSchemaVersions = %v, want [16]", testedSchemaVersions)
+	if len(testedSchemaVersions) != 1 || testedSchemaVersions[0] != 38 {
+		t.Errorf("testedSchemaVersions = %v, want [38]", testedSchemaVersions)
 	}
 }
