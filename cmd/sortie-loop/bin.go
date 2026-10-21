@@ -7,51 +7,77 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/kinged007/sortie-loop/internal/config"
 )
 
-// resolveSortieBin finds the sortie binary: SORTIE_BIN env, then the copy
-// this loop was installed with, then beside it, then on PATH, then a
-// verified download of the pinned engine release.
+// resolveSortieBin finds the sortie binary: SORTIE_BIN, then the pinned
+// engine installed in a share directory, then a verified download of the
+// pinned release. Only when the download fails does it fall back to a
+// `sortie` beside this binary or on PATH, whose version is not checked.
 //
-// The installed copy is checked before PATH on purpose. A PATH hit wins
-// only by being the first thing a human typed, and a machine with two
-// engines on it would otherwise run the other one. Preferring the
-// version-pinned file is what makes --prefix self-consistent, and
-// SORTIE_BIN remains the documented way to override.
+// The pin is preferred over PATH because the workflows are written for one
+// engine version, and a machine with another `sortie` on PATH would
+// otherwise run that one.
 func resolveSortieBin() (string, error) {
-	return resolveSortieBinIn(sortieShareDirs())
+	bin, _, err := resolveEngine(sortieShareDirs())
+	return bin, err
 }
 
 // resolveSortieBinIn is resolveSortieBin over an explicit share-directory
 // list, so the precedence is testable without relocating the binary.
 func resolveSortieBinIn(dirs []string) (string, error) {
+	bin, _, err := resolveEngine(dirs)
+	return bin, err
+}
+
+// downloadPinnedEngine runs at most once per process, so an offline machine
+// does not retry the download and repeat the warning on every resolution.
+// It is a variable so tests can replace the download.
+var downloadPinnedEngine = sync.OnceValues(ensureEngine)
+
+// fallbackWarned limits the unpinned-engine warning to once per process.
+var fallbackWarned = new(sync.Once)
+
+// resolveEngine is the resolution behind resolveSortieBin. unpinned is true
+// when the result is the fallback engine, whose version is not checked.
+func resolveEngine(dirs []string) (bin string, unpinned bool, err error) {
 	if v := os.Getenv("SORTIE_BIN"); v != "" {
-		return v, nil
+		return v, false, nil
 	}
 	if p := installedSortieBinIn(dirs); p != "" {
-		return p, nil
+		return p, false, nil
 	}
+	p, dlErr := downloadPinnedEngine()
+	if dlErr == nil {
+		return p, false, nil
+	}
+	if p := unpinnedSortieBin(); p != "" {
+		fallbackWarned.Do(func() {
+			fmt.Fprintf(os.Stderr, "sortie-loop: warning: using %s, whose version is not checked and may not be the pinned %s: could not download the pinned engine: %v\n",
+				p, engineVersion(), dlErr)
+		})
+		return p, true, nil
+	}
+	_, notFound := ensureSortieBinIn(dirs)
+	return "", false, fmt.Errorf("%w; could not download the pinned engine: %v", notFound, dlErr)
+}
+
+// unpinnedSortieBin is a `sortie` beside the running binary or on PATH, or
+// "" when there is none.
+func unpinnedSortieBin() string {
 	if self, err := os.Executable(); err == nil {
 		if p := filepath.Join(filepath.Dir(self), "sortie"); p != self {
 			if _, err := os.Stat(p); err == nil {
-				return p, nil
+				return p
 			}
 		}
 	}
 	if p, err := exec.LookPath("sortie"); err == nil {
-		return p, nil
+		return p
 	}
-	if p, err := ensureSortieBinIn(dirs); err == nil {
-		return p, nil
-	}
-	// Nothing installed. Download the pinned release and verify it
-	// against that release's checksums.txt rather than giving up: a
-	// fresh machine has no engine yet, and that is the normal case, not
-	// an error. The download lands in a share directory, so the next
-	// call finds it through installedSortieBinIn.
-	return ensureEngine()
+	return ""
 }
 
 // installedSortieBin is the version-pinned engine in a share directory,
@@ -107,9 +133,12 @@ func ensureSortieLink() {
 // ensureSortieLinkIn is ensureSortieLink for a chosen directory, so the
 // self-link guard is testable without relocating the running binary.
 func ensureSortieLinkIn(dir string) {
-	bin, err := resolveSortieBin()
+	bin, unpinned, err := resolveEngine(sortieShareDirs())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "sortie-loop: warning: sortie engine not found:", err)
+		return
+	}
+	if unpinned {
 		return
 	}
 	dest := filepath.Join(dir, engineBinary)

@@ -674,11 +674,9 @@ func TestSelectLoopsAgainstInstalledWorkflows(t *testing.T) {
 	}
 }
 
-// resolveSortieBin finds the engine on PATH, which is the same
-// ~/.local/bin directory sortie-loop itself lives in. ensureSortieLink
-// then computed dest == bin and rewrote the engine as a symlink to
-// itself, leaving a 29MB binary that can never run. The engine must
-// survive being next to the loop binary.
+// An engine in the same directory as the link destination must not be
+// rewritten as a symlink to itself, which would leave a binary that can
+// never run.
 func TestEnsureSortieLinkDoesNotDestroyTheEngineBesideIt(t *testing.T) {
 	dir := t.TempDir()
 	engine := filepath.Join(dir, "sortie")

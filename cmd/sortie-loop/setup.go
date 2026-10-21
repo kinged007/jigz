@@ -94,9 +94,8 @@ func runSetup(dir, repo string, asJSON bool) {
 	// The engine is resolved here so a working setup leaves a bare
 	// `sortie` on PATH, for go install users and for anyone who only
 	// ever runs setup. A missing engine is a warning: config and labels
-	// do not need it. The order is resolveSortieBin's, so a SORTIE_BIN or
-	// a PATH install the user already trusts is used as-is rather than
-	// downloading a second engine beside it.
+	// do not need it. The order is resolveSortieBin's, so a SORTIE_BIN the
+	// user set is used as-is rather than downloading a second engine.
 	if _, err := resolveSortieBin(); err != nil {
 		fmt.Println("warning: sortie engine not installed:", err)
 	}

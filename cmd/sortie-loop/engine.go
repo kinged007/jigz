@@ -88,10 +88,9 @@ var releaseBase = func(repo, version string) string {
 	return fmt.Sprintf("https://github.com/%s/releases/download/v%s", repo, version)
 }
 
-// ensureEngine returns a path to a usable engine, installing one when
-// neither SORTIE_BIN, a sibling binary, nor PATH has one. A freshly
-// installed engine is also linked onto PATH, so a bare `sortie` works in
-// any new shell.
+// ensureEngine returns a path to the pinned engine, downloading it when it
+// is not cached. A freshly installed engine is also linked onto PATH, so a
+// bare `sortie` works in any new shell.
 func ensureEngine() (string, error) {
 	bin, err := fetchEngine()
 	if err != nil {
