@@ -64,7 +64,7 @@ func parseArgs(argv []string) (cmdline, error) {
 				continue
 			}
 			return c, fmt.Errorf("unknown flag %q", arg)
-		case "stop", "restart", "status", "cleanup", "wake", "pause", "resume", "budget", "reload", "validate":
+		case "stop", "restart", "status", "cleanup", "wake", "pause", "resume", "budget", "reload", "validate", "agent-exec":
 			// A subcommand: everything after it belongs to runRemote,
 			// which does its own parsing, so stop collecting here.
 			c.remote = name
@@ -206,6 +206,9 @@ func run() (code int) {
 	if c.remote == "reload" {
 		runReload(c.remoteArgs)
 		return 0
+	}
+	if c.remote == "agent-exec" {
+		return runAgentExec(c.remoteArgs, os.Stdin, os.Stdout, os.Stderr)
 	}
 	if c.remote == "validate" {
 		runValidate(c.remoteArgs)
