@@ -130,9 +130,10 @@ Without the fork, the issue workflow runs with `claude-code`, `codex`, or
   usage-limit output, and marks the entry exhausted until its reset time.
   A session that fails on a limit is retried by sortie and gets the next
   entry.
-- Runtime failover: one workflow per runtime over the same labels; exactly
-  one workflow of a pool is active; `sortie-loop` switches when every
-  entry of the active runtime is exhausted or outside its hours.
+- Runtime failover: each shipped workflow carries a block per runtime; the
+  engine reads the block named by `SORTIE_AGENT_KIND`. `sortie-loop` sets
+  that variable for each loop and recycles the loops when every entry of
+  the active runtime is exhausted or outside its hours.
 - Provider terms for unattended use of subscriptions are the member's
   responsibility; the documentation names the issue.
 
@@ -203,8 +204,9 @@ it needs no model and no real GitHub.
   class.
 - `sortie-loop agent-exec` wrapper: entry selection, usage-limit detection,
   exhausted-until tracking.
-- Runtime failover: one active workflow per pool, switch on exhaustion or
-  end of hours.
+- Runtime failover: the active runtime is set by an environment switch
+  (`SORTIE_AGENT_KIND`) on the same workflow; loops are recycled on
+  exhaustion or end of hours.
 - Dashboard: current window, pool entries and their state.
 - Acceptance: a scripted limit failure moves the next run to the next
   entry; no claims happen outside a window.
