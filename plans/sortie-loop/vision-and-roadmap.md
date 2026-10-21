@@ -179,7 +179,8 @@ Without the fork, the issue workflow runs with `claude-code`, `codex`, or
 
 Each phase ends with a release, a green acceptance suite, and release
 notes. The acceptance suite runs real sortie with its `mock` agent kind
-against a Gitea container, so it needs no model and no GitHub.
+and the real sortie-loop binary against an in-memory fake GitHub API, so
+it needs no model and no real GitHub.
 
 ### Phase 0: Finish and fix
 
@@ -191,7 +192,7 @@ against a Gitea container, so it needs no model and no GitHub.
 - `--host` flag for the dashboard; default 127.0.0.1.
 - Per-loop sortie HTTP servers bound to loopback where the engine allows
   it, and never linked or shown in the dashboard.
-- Acceptance harness: `make verify`, Gitea container, sortie `mock` agent.
+- Acceptance harness: `make verify`, fake GitHub API, sortie `mock` agent.
 
 ### Phase 1: Working hours and account pool (5.1, 5.2)
 

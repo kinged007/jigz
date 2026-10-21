@@ -53,9 +53,14 @@ later feature extends a working path; the skeleton's E2E test stays green.
 ### 2.3 One preview environment per PR
 
 `make preview` starts the built hub with seeded data, a local tracker
-(Gitea in a container), and a deterministic fake agent. CI runs the
+(a fake GitHub API), and a deterministic fake agent. CI runs the
 acceptance suite against it on every PR. The same command works on a
 laptop, so humans and agents test the same thing.
+
+Gitea is not used as the tracker because the shipped workflows use the
+`github` and `github-pr` trackers with GitHub search syntax, which Gitea
+lacks, and the engine has no Gitea PR tracker, so Gitea would test
+different workflows.
 
 ### 2.4 Deterministic fake agent
 
