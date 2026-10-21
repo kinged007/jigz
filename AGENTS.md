@@ -15,6 +15,8 @@ go test ./...           # ~70s; engine-dependent test is skipped if no `sortie` 
 go build ./...          # cross-build is exercised in CI
 ```
 
+`make verify` runs all of the above plus the acceptance test (`make test` and `make acceptance` run the two parts separately). The acceptance test (`cmd/sortie-loop/acceptance_test.go`, build tag `acceptance`, about 70s) runs the pinned engine with its `mock` agent under the real `sortie-loop` binary against the in-memory fake GitHub in `internal/fakegithub`. It needs the pinned engine from `SORTIE_BIN` or the share directory, and downloads it (network on first run) when neither has it. It fails, not skips, when the engine is missing or reports another version. Plain `go test ./...` does not run it and does not need the engine.
+
 CI (`.github/workflows/ci.yml`) runs all of the above on `push` to `main` and on every PR, plus a cross-build matrix (linux/darwin × amd64/arm64).
 
 ## Branch / PR workflow
