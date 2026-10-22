@@ -12,7 +12,7 @@ section 6.
   prompt install, env file (`setup.go`, `wizard.go`, `embed.go`, `bin.go`)
   — exists
 - Repo config and fleet config with validation (`internal/config`,
-  `internal/fleetconfig`) — exists
+  `internal/fleetconfig`) — exists; ignored in connected mode
 - Query filters with milestone and assignee scope (`config.go`) — exists
 - `validate [--json]` (`validate.go`) — exists
 - Engine resolution, pinned download with checksum (`engine.go`) — exists
@@ -71,11 +71,18 @@ section 6.
 - `join`, credential storage [4]
 - Config pull and apply when idle [4]
 - Heartbeat, run events, command channel [4]
+- Config source for the supervisor: local files or hub [4]
+- Loops per (project, workflow) from the hub config [4]
+- On-demand loop start and stop on `wake`; fallback search for items with
+  the runner label [4]
+- Default branch used for agent PRs [4]
 - Runner label in query filters [4]
 - Offline operation with last config [4]
 - No local dashboard in connected mode [4]
 - Status document fields match the hub protocol's status message [4]
-- Manager session host, internal to the hub, not documented for users [6]
+- Agent session host, internal to the hub, not documented for users [6]
+- Conversations: one session per (agent, project), idle timeout [6]
+- One-shot tasks (`task.run`) with the result returned on the socket [6]
 
 ## 7. Workspace modes
 

@@ -18,9 +18,9 @@ controls everything. It is complete on its own:
 - **Standalone:** one machine, labels and `assignee:@me` select the work.
 - **United:** several repositories on one machine in one dashboard,
   without the hub.
-- **Connected:** enrolled with a hub, it becomes the hub's daemon on that
+- **Connected:** enrolled with a hub, it becomes the hub's runner on that
   machine, without the local dashboard (`plans/system/overview.md`
-  section 4).
+  section 4). The hub is the only source of project config.
 
 The boundary with the hub is in `plans/system/overview.md` section 2.1.
 
@@ -29,8 +29,13 @@ The boundary with the hub is in `plans/system/overview.md` section 2.1.
 1. Useful without the hub. Every connected-mode feature is optional.
 2. Runs on a pinned sortie version, upstream or fork, with a documented
    minimum set of engine requirements (section 4).
-3. Machine-local settings (agent accounts, working hours, workspace mode,
-   budgets) are owned by the member on that machine.
+3. Machine-local settings are owned by the member on that machine: agent
+   CLIs and their logins (account pool), the tracker credential (the
+   member's GitHub token), working hours, budgets, workspace mode and
+   root, and the member's own tools and skills outside the project repo.
+   In connected mode the hub is the only source of project config; local
+   repo configs and the unite registry are ignored. Machine settings are
+   in `machine.yaml` (`internal/machine`).
 4. Agent credentials never leave the machine.
 5. One place maps engine output to `sortie-loop` types; the rest of the
    code does not parse engine data.
@@ -156,24 +161,51 @@ Without the fork, the issue workflow runs with `claude-code`, `codex`, or
 ### 5.5 Connected mode
 
 - `sortie-loop join <hub-url> <token>`; credential stored locally.
-- Config pulled from the hub (projects, workflows, prompts, labels);
-  applied when loops are idle.
-- Heartbeat with the status document; run events; command channel
-  (`hub-protocol.md` section 2).
+- Runner mode: the daemon takes its project config only from the hub
+  (projects, enabled workflows, workflow and prompt files with versions,
+  query filter additions, labels); applied when loops are idle.
+- Many repositories per daemon. The tracker takes one repository
+  (`SORTIE_TRACKER_PROJECT`), so the daemon runs one sortie process per
+  (project, workflow).
+- Loops start on demand. The hub is the only writer of runner labels, so
+  it knows when it routes an item and sends `wake {project, workflow}`.
+  The daemon starts or wakes that loop and stops it when it is drained and
+  idle for a configured time.
+- Fallback: when the hub is unreachable, and periodically otherwise, the
+  daemon runs one provider search for open items with its runner label
+  across its configured projects and starts the matching loops. The last
+  config is kept and used meanwhile.
+- Agent PRs target the repository's default branch. Branch protection,
+  merge rules, and promotion between branches are GitHub settings and the
+  project's own CI, not hub or `sortie-loop` config. The shipped build and
+  docs prompts resolve the default branch with
+  `gh api repos/$SORTIE_TRACKER_PROJECT --jq .default_branch`; the issue
+  workflow hooks read `origin/HEAD`; the merge prompt merges into the PR's
+  `baseRefName`.
+- Heartbeat with the status document (loops per project); run events;
+  command channel (`hub-protocol.md` section 2).
 - Runner label added to every loop's query filter.
-- Works on with the last config if the hub is unreachable.
 - No local dashboard in connected mode; the hub provides the views and
   controls.
 - The status document uses the same fields as the hub protocol's status
   message, so one format serves both.
 
-### 5.6 Manager session host
+### 5.6 Agent session host
 
 - Internal feature used only by the hub. It is not documented in the
   user docs or shown in the CLI help.
-- Runs product and project manager sessions for the hub: Claude Code or
-  `pi`, headless turns with session resume, in a checkout of the project;
-  later ACP.
+- Two ways of running agents on a daemon:
+  - Tracker-driven: sortie loops on issues and PRs. Used for all code
+    changes.
+  - Hub-driven: agent sessions started by the hub without an issue.
+    Multi-turn conversations with any hub agent (product manager, project
+    manager, or any other role the hub defines), and one-shot tasks
+    triggered by schedule, event, or request in the hub.
+- Rule: code changes go through an issue and a PR. Sessions do
+  coordination and operations and never push to protected branches.
+- Both ways use the same account pool and working hours.
+- Sessions run Claude Code or `pi`, headless turns with session resume, in
+  a checkout of the project; later ACP.
 - Relays messages and output over the command channel.
 
 ## 6. Roadmap
@@ -238,8 +270,18 @@ it needs no model and no real GitHub.
 
 - `sortie-loop join <hub-url> <token>`; credential stored locally.
 - Config pull with ETag; applied when loops are idle.
-- Heartbeat with the status document; batched run events; command channel
-  over WebSocket.
+- Config source for the supervisor: local files or the hub. This is the
+  one new abstraction; it has two implementations. In connected mode local
+  repo configs and the unite registry are ignored.
+- Loops per (project, workflow) from the hub config.
+- On-demand start and stop: `wake {project, workflow}` starts or wakes a
+  loop; a drained loop stops after a configured idle time.
+- Fallback search: one periodic provider search for open items with the
+  daemon's runner label across its projects; starts the matching loops.
+- Default-branch check: the shipped prompts and hooks use the repository's
+  default branch for agent PRs; fix any that do not.
+- Heartbeat with the status document (loops per project); batched run
+  events; command channel over WebSocket.
 - Runner label added to every loop's query filter.
 - Last config kept and used when the hub is unreachable.
 - No local dashboard in connected mode.
@@ -253,12 +295,17 @@ it needs no model and no real GitHub.
 - Long, random, expiring URLs; links on runs and work items in the
   dashboard; registered with the hub when connected; removed on expiry.
 
-### Phase 6: Manager session host (5.6)
+### Phase 6: Agent session host (5.6)
 
-- Claude Code or `pi` sessions in a checkout of the project, headless turns
-  with session resume.
-- Messages and output relayed over the command channel; one session per
-  project and role; idle timeout.
+- Conversations: Claude Code or `pi` sessions in a checkout of the
+  project, headless turns with session resume; one session per
+  (agent, project); idle timeout.
+- One-shot tasks: one session per `task.run`; the result is returned on the
+  socket.
+- Messages and output relayed over the command channel
+  (`session.*`, `task.run`).
+- Same account pool and working hours as the loops; sessions never push to
+  protected branches.
 - Internal and undocumented for users.
 
 ### Deferred: workspace modes

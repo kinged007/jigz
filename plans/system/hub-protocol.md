@@ -13,7 +13,7 @@ when implementation starts; until then this document is the reference.
 
 - The daemon opens every connection. The hub never connects to a daemon.
   No inbound ports on the daemon's machine.
-- HTTPS for requests; one WebSocket per daemon for commands and manager
+- HTTPS for requests; one WebSocket per daemon for commands and agent
   sessions.
 - Base path `/api/daemon/v0/`.
 - Enrollment exchanges a one-time token for a daemon credential (bearer
@@ -29,8 +29,8 @@ when implementation starts; until then this document is the reference.
 | Request | Body | Response |
 | ------- | ---- | -------- |
 | `POST enroll` | one-time token, daemon name, host info (OS, arch, CPU, memory), `sortie-loop` version, sortie version | daemon id, credential, runner label |
-| `GET config` (with ETag) | none | projects (provider, repo, workflows), workflow and prompt files with versions, label conventions, member identity |
-| `POST status` (heartbeat, every 30 s) | status document: loops (state, running, retrying), capacity, working hours and whether inside them now, agent accounts (name, runtime, available or exhausted until), budgets, last error | next heartbeat interval; config ETag (daemon re-fetches when it changes) |
+| `GET config` (with ETag) | none | projects (provider, repo, enabled workflows per project, query filter additions per project), workflow and prompt files with versions, label conventions, member identity |
+| `POST status` (heartbeat, every 30 s) | status document: loops per project (project, workflow, state: stopped, sleeping, or running; running, retrying), capacity, working hours and whether inside them now, agent accounts (name, runtime, available or exhausted until), budgets, last error | next heartbeat interval; config ETag (daemon re-fetches when it changes) |
 | `POST runs` (batch) | run events: started, finished, outcome class, usage (tokens, cost if known), work item reference, links (branch, PR, comment) | accepted ids |
 | `POST previews` | work item reference, URL, expiry, access kind | preview id |
 | `DELETE previews/{id}` | none | none |
@@ -46,14 +46,16 @@ the hub never parses sortie error text.
 | ------- | -------------------- |
 | `start`, `stop`, `drain`, `restart_when_idle` | per loop or all loops |
 | `pause`, `resume` | stop or resume claiming new work |
-| `wake` | end idle sleep |
+| `wake {project, workflow}` | start or wake that loop; the daemon stops it when it is drained and idle for a configured time |
 | `reload_config` | fetch config and apply when loops are idle |
-| `manager.open` | start a manager session (runtime, project, role, session id) |
-| `manager.message` | send a user message to a session |
-| `manager.close` | end a session |
+| `session.open` | start a conversation session (runtime, project, agent name and instructions, MCP config, session id) |
+| `session.message` | send a user message to a session |
+| `session.close` | end a session |
+| `task.run` | run a one-shot session (agent, project, instructions); the result is returned on the socket |
 
 Daemon → hub on the same socket: command acknowledgements and results,
-and `manager.output` (streamed text and tool-call summaries) per session.
+`session.output` (streamed text and tool-call summaries) per session, and
+the result of each `task.run`.
 
 ## 3. Routing labels
 

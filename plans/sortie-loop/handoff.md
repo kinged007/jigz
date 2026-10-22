@@ -34,7 +34,7 @@ Read, in order:
   `--host 0.0.0.0` opens it. The Host and Origin checks stay.
 - Dashboard scope: the current pages stay; metrics stay local and recent.
   Long history, cross-machine views, and analytics belong to the hub.
-- The manager session host (roadmap Phase 6) is internal: not in the user
+- The agent session host (roadmap Phase 6) is internal: not in the user
   docs or the CLI help.
 - Engine: the fork `kinged007/sortie` stays the default until upstream
   `sortie-ai/sortie` has the `pi` adapter and the `github-pr` tracker.
@@ -49,7 +49,8 @@ Read, in order:
 - The product boundary table in `plans/system/overview.md` 2.1 decides
   what goes in `sortie-loop` and what goes in the hub.
 - No cross-machine unite in `sortie-loop`; the hub's fleet view covers it.
-- Connected mode runs without the local dashboard.
+- Connected mode is runner mode: the hub is the only source of project
+  config, and there is no local dashboard.
 - Workspace modes (SSH, sandbox) are deferred. Hosted runners are a hub
   backlog item.
 - The acceptance harness uses an in-memory fake GitHub API
