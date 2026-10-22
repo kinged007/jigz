@@ -1,9 +1,9 @@
-# sortie-loop local state (added by sortie-loop setup)
+# Jigz local state (added by jig setup)
 .sortie/
-# Anchored: a bare pattern would also match cmd/sortie-loop/ in any
+# Anchored: a bare pattern would also match cmd/jig/ in any
 # subdirectory, which ignores the package source itself.
-/sortie-loop
-/cmd/sortie-loop/sortie-loop
+/jig
+/cmd/jig/jig
 
 # GoReleaser output
 /dist

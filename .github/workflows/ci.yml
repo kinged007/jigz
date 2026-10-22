@@ -29,9 +29,9 @@ jobs:
         run: go vet ./...
 
       # TestSortieValidate prefers an engine binary and skips without one.
-      # CI deliberately does not install one: it would run whatever
-      # `sortie` is on PATH, and the stock engine rejects the shipped
-      # workflows for the wrong reason.
+      # CI deliberately does not install one: it would run whatever engine
+      # is on PATH, and the stock engine rejects the shipped workflows for
+      # the wrong reason.
       - name: test
         run: go test ./...
 
