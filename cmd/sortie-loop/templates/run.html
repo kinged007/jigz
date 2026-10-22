@@ -113,7 +113,6 @@ pre.log { max-height: 20rem; white-space: pre-wrap; word-break: break-all; }
   <div class="tile off"><b>needs engine cost data (planned)</b><span>cost</span></div>
   <div class="tile"><b>{{if .Run.AgentAdapter}}{{.Run.AgentAdapter}}{{else}}<span class="na">not available</span>{{end}}</b><span>adapter</span></div>
   <div class="tile"><b>{{len .Attempts}}</b><span>{{if eq (len .Attempts) 1}}attempt{{else}}attempts of this issue{{end}}</span></div>
-  {{if .APIRequests}}<div class="tile"><b>{{.APIRequests}}</b><span>API requests</span></div>{{end}}
 </div>
 {{if .Run.Error}}<div class="banner"><b>Error.</b> <span class="chip">{{.Class.Label}}</span> {{.Run.Error}}
   {{if .HandoffWhy}}<br>The engine withheld the handoff: {{.HandoffWhy}}.{{end}}</div>{{end}}
@@ -196,10 +195,8 @@ pre.log { max-height: 20rem; white-space: pre-wrap; word-break: break-all; }
       {{if .Detail}}<tr><td>Commits</td><td>{{range .PRs}}{{if .Details}}<div>{{if gt (len $.PRs) 1}}#{{.Number}}: {{end}}{{.Details.Commits}}{{range .Details.Messages}}<div class="muted msg">{{.}}</div>{{end}}</div>{{else}}<div><span class="na">not available yet</span></div>{{end}}{{else}}{{template "ghna" .}}{{end}}</td></tr>
       <tr><td>Changed files</td><td>{{range .PRs}}{{if .Details}}<div>{{if gt (len $.PRs) 1}}#{{.Number}}: {{end}}{{.Details.Files}} <span class="muted">+{{.Details.Additions}} &minus;{{.Details.Deletions}}</span></div>{{else}}<div><span class="na">not available yet</span></div>{{end}}{{else}}{{template "ghna" .}}{{end}}</td></tr>
       <tr><td>Checks</td><td>{{range .PRs}}{{if .Details}}<div>{{if gt (len $.PRs) 1}}#{{.Number}}: {{end}}{{if or .Details.ChecksOK .Details.ChecksFailed .Details.ChecksPending}}{{if .Details.ChecksOK}}<span class="chip s-succeeded">{{.Details.ChecksOK}} passed</span> {{end}}{{if .Details.ChecksFailed}}<span class="chip s-failed">{{.Details.ChecksFailed}} failed</span> {{end}}{{if .Details.ChecksPending}}<span class="chip s-running">{{.Details.ChecksPending}} pending</span>{{end}}{{else}}<span class="na">no checks</span>{{end}}</div>{{else}}<div><span class="na">not available yet</span></div>{{end}}{{else}}{{template "ghna" .}}{{end}}</td></tr>{{end}}
-      <tr><td>Handoff</td><td>{{if .Run.HandoffReset}}absence counter reset at this run{{else if eq .Class.Key "handoff_withheld"}}withheld{{else}}<span class="na">not recorded</span>{{end}}</td></tr>
+      <tr><td>Handoff</td><td>{{if eq .Class.Key "handoff_withheld"}}withheld{{else}}<span class="na">not recorded</span>{{end}}</td></tr>
       <tr><td>Started</td><td>{{if .Row.Started}}{{.Row.Started}} UTC{{else}}<span class="na">not available</span>{{end}}</td></tr>
-      <tr><td>Workspace</td><td>{{if .Run.Workspace}}<code>{{.Run.Workspace}}</code>{{else}}<span class="na">not created</span>{{end}}</td></tr>
-      {{if .Run.TemplateID}}<tr><td>Prompt</td><td><code>{{.Run.TemplateID}}</code></td></tr>{{end}}
       {{if .Run.WorkflowFile}}<tr><td>Workflow file</td><td><code>{{.Run.WorkflowFile}}</code></td></tr>{{end}}
     </tbody></table>
   </div>
@@ -212,9 +209,8 @@ pre.log { max-height: 20rem; white-space: pre-wrap; word-break: break-all; }
     <tr><td>Agent adapter</td><td>{{if .Run.AgentAdapter}}{{.Run.AgentAdapter}}{{else}}<span class="na">not available</span>{{end}}</td></tr>
     <tr><td>Model</td><td>{{if .Run.Model}}{{.Run.Model}}{{if .Run.ModelSource}}<span class="tag">{{.Run.ModelSource}}</span>{{end}}{{else}}<span class="na">not available</span>{{end}}</td></tr>
     <tr><td>Turns completed</td><td class="num">{{.Run.TurnsCompleted}}</td></tr>
-    <tr><td>API requests</td><td class="num">{{if .APIRequests}}{{.APIRequests}}{{else}}<span class="na">not measured</span>{{end}}</td></tr>
   </tbody></table>
-  <p class="muted">The latest session of this issue as it was when central copied this run.</p>
+  <p class="muted">The session of this run.</p>
 </div>{{end}}
 
 <div class="card" id="logcard" data-url="{{.Log.URL}}" data-issue="{{.IssueNumber}}">

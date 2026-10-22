@@ -149,6 +149,10 @@ func TestStatusSleepingAndCleanupSibling(t *testing.T) {
 func TestFleetProbesOnlyAwakeRunningWorkflowsAndFallsBack(t *testing.T) {
 	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/state" {
+			http.NotFound(w, r)
+			return
+		}
 		hits.Add(1)
 		fmt.Fprint(w, `{"counts":{"running":1,"retrying":2},"running":[{"issue_identifier":"7","state":"running"}]}`)
 	}))

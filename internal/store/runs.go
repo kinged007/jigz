@@ -44,26 +44,17 @@ type Run struct {
 	TotalTokens       int64  `json:"total_tokens"`
 	CacheReadTokens   int64  `json:"cache_read_tokens"`
 	TokensMeasured    bool   `json:"tokens_measured"`
-	Workspace         string `json:"workspace,omitempty"`
 	WorkflowKind      string `json:"workflow_kind,omitempty"`
 	WorkflowFile      string `json:"workflow_file,omitempty"`
-	TemplateID        string `json:"template_id,omitempty"`
-	// SessionID and APIRequests are the issue's latest session as it was
-	// when the run was copied. APIRequests is nil when the session did not
-	// measure them.
-	SessionID    string `json:"session_id,omitempty"`
-	APIRequests  *int64 `json:"api_requests,omitempty"`
-	HandoffReset bool   `json:"handoff_reset,omitempty"`
-	// ReviewMetadata is reserved: the engine leaves it empty today.
-	ReviewMetadata string `json:"review_metadata,omitempty"`
+	SessionID         string `json:"session_id,omitempty"`
 	// PRs is filled by the API when GitHub enrichment is on.
 	PRs []PR `json:"pull_requests,omitempty"`
 }
 
 const runColumns = `id, project, workflow, run_id, issue_id, display_identifier, status, started_at,
 	completed_at, attempt, turns_completed, error, agent_adapter, model, model_source,
-	input_tokens, output_tokens, total_tokens, cache_read_tokens, tokens_measured, workspace, workflow_kind,
-	workflow_file, template_id, session_id, api_requests, handoff_reset, review_metadata`
+	input_tokens, output_tokens, total_tokens, cache_read_tokens, tokens_measured, workflow_kind,
+	workflow_file, session_id`
 
 // AddRuns inserts runs, replacing any already stored under the same
 // project, workflow and run id.
@@ -76,9 +67,9 @@ func (s *Store) AddRuns(runs []Run) error {
 	for _, r := range runs {
 		_, err := tx.Exec(`INSERT INTO runs_cache (project, workflow, run_id, issue_id, display_identifier,
 			status, started_at, completed_at, attempt, turns_completed, error, agent_adapter, model,
-			model_source, input_tokens, output_tokens, total_tokens, cache_read_tokens, tokens_measured, workspace, workflow_kind,
-			workflow_file, template_id, session_id, api_requests, handoff_reset, review_metadata)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			model_source, input_tokens, output_tokens, total_tokens, cache_read_tokens, tokens_measured, workflow_kind,
+			workflow_file, session_id)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 			ON CONFLICT (project, workflow, run_id) DO UPDATE SET
 			issue_id=excluded.issue_id, display_identifier=excluded.display_identifier,
 			status=excluded.status, started_at=excluded.started_at, completed_at=excluded.completed_at,
@@ -86,18 +77,14 @@ func (s *Store) AddRuns(runs []Run) error {
 			agent_adapter=excluded.agent_adapter, model=excluded.model, model_source=excluded.model_source,
 			input_tokens=excluded.input_tokens, output_tokens=excluded.output_tokens,
 			total_tokens=excluded.total_tokens, cache_read_tokens=excluded.cache_read_tokens,
-			tokens_measured=excluded.tokens_measured, workspace=excluded.workspace,
+			tokens_measured=excluded.tokens_measured,
 			workflow_kind=CASE WHEN excluded.workflow_kind = '' THEN workflow_kind ELSE excluded.workflow_kind END,
 			workflow_file=CASE WHEN excluded.workflow_file = '' THEN workflow_file ELSE excluded.workflow_file END,
-			template_id=CASE WHEN excluded.template_id = '' THEN template_id ELSE excluded.template_id END,
-			session_id=CASE WHEN excluded.session_id = '' THEN session_id ELSE excluded.session_id END,
-			api_requests=COALESCE(excluded.api_requests, api_requests),
-			handoff_reset=MAX(handoff_reset, excluded.handoff_reset),
-			review_metadata=CASE WHEN excluded.review_metadata = '' THEN review_metadata ELSE excluded.review_metadata END`,
+			session_id=CASE WHEN excluded.session_id = '' THEN session_id ELSE excluded.session_id END`,
 			r.Project, r.Workflow, r.ID, r.IssueID, r.DisplayIdentifier, r.Status, r.StartedAt,
 			r.CompletedAt, r.Attempt, r.TurnsCompleted, r.Error, r.AgentAdapter, r.Model, r.ModelSource,
-			r.InputTokens, r.OutputTokens, r.TotalTokens, r.CacheReadTokens, r.TokensMeasured, r.Workspace, r.WorkflowKind,
-			r.WorkflowFile, r.TemplateID, r.SessionID, r.APIRequests, r.HandoffReset, r.ReviewMetadata)
+			r.InputTokens, r.OutputTokens, r.TotalTokens, r.CacheReadTokens, r.TokensMeasured, r.WorkflowKind,
+			r.WorkflowFile, r.SessionID)
 		if err != nil {
 			return err
 		}
@@ -113,9 +100,8 @@ func (s *Store) SetWorkflowKind(project, workflow, kind string) error {
 	return err
 }
 
-// FillRunFiles sets workflow_file and template_id on stored runs that have
-// none, matching runs by id. It fills in runs copied before those columns
-// existed.
+// FillRunFiles sets workflow_file on stored runs that have none, matching
+// runs by id. It fills in runs copied before that column existed.
 func (s *Store) FillRunFiles(project, workflow string, runs []Run) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -123,9 +109,9 @@ func (s *Store) FillRunFiles(project, workflow string, runs []Run) error {
 	}
 	defer tx.Rollback()
 	for _, r := range runs {
-		if _, err := tx.Exec(`UPDATE runs_cache SET workflow_file = ?, template_id = ?
+		if _, err := tx.Exec(`UPDATE runs_cache SET workflow_file = ?
 			WHERE project = ? AND workflow = ? AND run_id = ? AND workflow_file = ''`,
-			r.WorkflowFile, r.TemplateID, project, workflow, r.ID); err != nil {
+			r.WorkflowFile, project, workflow, r.ID); err != nil {
 			return err
 		}
 	}
@@ -139,6 +125,12 @@ func (s *Store) NeedsRunFiles(project, workflow string) (bool, error) {
 	err := s.db.QueryRow(`SELECT EXISTS (SELECT 1 FROM runs_cache WHERE project = ? AND workflow = ? AND workflow_file = '')`,
 		project, workflow).Scan(&n)
 	return n == 1, err
+}
+
+// DeleteRuns removes every stored run of a workflow.
+func (s *Store) DeleteRuns(project, workflow string) error {
+	_, err := s.db.Exec(`DELETE FROM runs_cache WHERE project = ? AND workflow = ?`, project, workflow)
+	return err
 }
 
 // LastRunID is the highest run id stored for a workflow, 0 when none.
@@ -324,7 +316,6 @@ func scanRun(row interface{ Scan(...any) error }) (Run, error) {
 	err := row.Scan(&r.Cursor, &r.Project, &r.Workflow, &r.ID, &r.IssueID, &r.DisplayIdentifier, &r.Status,
 		&r.StartedAt, &r.CompletedAt, &r.Attempt, &r.TurnsCompleted, &r.Error, &r.AgentAdapter, &r.Model,
 		&r.ModelSource, &r.InputTokens, &r.OutputTokens, &r.TotalTokens, &r.CacheReadTokens,
-		&r.TokensMeasured, &r.Workspace, &r.WorkflowKind,
-		&r.WorkflowFile, &r.TemplateID, &r.SessionID, &r.APIRequests, &r.HandoffReset, &r.ReviewMetadata)
+		&r.TokensMeasured, &r.WorkflowKind, &r.WorkflowFile, &r.SessionID)
 	return r, err
 }

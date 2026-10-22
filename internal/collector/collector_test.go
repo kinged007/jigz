@@ -152,7 +152,7 @@ func TestStateChangesBecomeEventsAfterTheFirstPass(t *testing.T) {
 
 func TestUnusableDatabasesAreSkippedWithoutFailing(t *testing.T) {
 	good, _ := fixture(t)
-	newer, _ := fixture(t, `INSERT INTO schema_migrations VALUES (19, 'now')`)
+	newer, _ := fixture(t, `INSERT INTO schema_migrations VALUES (44, 'now')`)
 	garbage := filepath.Join(t.TempDir(), "x.db")
 	os.WriteFile(garbage, []byte("not a database"), 0o600)
 	for name, path := range map[string]string{

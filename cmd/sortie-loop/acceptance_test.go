@@ -249,7 +249,7 @@ func TestAcceptance(t *testing.T) {
 		t.Logf("scenario b: %s", time.Since(t0).Round(time.Millisecond))
 	})
 
-	t.Run("c_dashboard_reads_the_run_from_the_engine_database", func(t *testing.T) {
+	t.Run("c_dashboard_reads_the_run_through_the_engine_api", func(t *testing.T) {
 		t0 := time.Now()
 		var schema int
 		db, err := sql.Open("sqlite", "file:"+filepath.Join(repoDir, ".sortie", "workflows", ".sortie-issues.db")+"?mode=ro")
@@ -260,15 +260,16 @@ func TestAcceptance(t *testing.T) {
 		if err := db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&schema); err != nil {
 			t.Fatalf("read engine schema: %v", err)
 		}
-		if !slices.Contains(rollup.SupportedSchemas, schema) {
-			t.Errorf("engine database is at schema %d, which the dashboard does not read (supported %v)", schema, rollup.SupportedSchemas)
+		if schema < rollup.OldestSchema || schema > rollup.NewestSchema() {
+			t.Errorf("engine database is at schema %d, which the dashboard does not read (%d to %d)", schema, rollup.OldestSchema, rollup.NewestSchema())
 		}
-		if engine.Current().Tag == engine.DefaultTag && schema != rollup.EngineSchema {
-			t.Errorf("the pinned engine wrote schema %d, want %d", schema, rollup.EngineSchema)
+		if want, known := rollup.SchemaOf(engine.Current().Tag); known && schema != want {
+			t.Errorf("engine %s wrote schema %d, want %d", engine.Current().Tag, schema, want)
 		}
 
 		var runs struct {
 			Runs []struct {
+				ID                        int64
 				Project, Workflow, Status string
 				AgentAdapter              string `json:"agent_adapter"`
 				DisplayIdentifier         string `json:"display_identifier"`
@@ -276,7 +277,8 @@ func TestAcceptance(t *testing.T) {
 				TotalTokens               int64  `json:"total_tokens"`
 			}
 		}
-		// The collector copies runs on a 60 second timer.
+		// The collector copies runs on a 60 second timer. The engine is
+		// running, so it reads them from the engine's HTTP API.
 		waitFor("the dashboard to list the run", 120*time.Second, func() bool {
 			runs.Runs = nil
 			return getJSON(dash+"/api/v1/runs?project="+slug, &runs) == nil && len(runs.Runs) > 0
@@ -288,6 +290,34 @@ func TestAcceptance(t *testing.T) {
 		if r.Project != slug || r.Workflow != "issues" || r.Status != "succeeded" || r.AgentAdapter != "mock" ||
 			r.DisplayIdentifier != fmt.Sprintf("%s#%d", slug, planned) || r.TurnsCompleted != 1 || r.TotalTokens != 150 {
 			t.Errorf("unexpected run: %+v", r)
+		}
+
+		out, err := os.ReadFile(logPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(out), "collector: "+slug+"/issues: runs copied from the engine API: 1") {
+			t.Errorf("the dashboard did not copy the run from the engine API; sortie-loop output (tail):\n%s", logTail(logPath, 60))
+		}
+
+		for _, page := range []struct {
+			path string
+			want []string
+		}{
+			{"/runs", []string{fmt.Sprintf("%s#%d", slug, planned)}},
+			{fmt.Sprintf("/runs/%s/issues/%d", slug, r.ID), []string{"Session id", "Workflow file", "Handoff"}},
+		} {
+			body := getBody(t, dash+page.path)
+			for _, want := range page.want {
+				if !strings.Contains(body, want) {
+					t.Errorf("%s lacks %q", page.path, want)
+				}
+			}
+			for _, gone := range []string{">Workspace<", ">Prompt<", "API requests", "absence counter reset", "handoff counter reset"} {
+				if strings.Contains(body, gone) {
+					t.Errorf("%s still shows %q", page.path, gone)
+				}
+			}
 		}
 
 		var fleet struct {
@@ -599,6 +629,23 @@ func acceptanceWorkflow(shipped, endpoint string) (string, error) {
 		return "", err
 	}
 	return "---\n" + buf.String() + "---\n" + body, nil
+}
+
+func getBody(t *testing.T, u string) string {
+	t.Helper()
+	resp, err := http.Get(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(resp.Body); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET %s: %s", u, resp.Status)
+	}
+	return buf.String()
 }
 
 func freePort(t *testing.T) int {

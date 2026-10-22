@@ -33,19 +33,18 @@ func TestFreshAndV5DatabasesMigrateToV6KeepingRows(t *testing.T) {
 		t.Fatalf("version = %d, want %d", v, len(migrations))
 	}
 	r, err := s.Run("o/a", "build", 7)
-	if err != nil || r.Attempt != 2 || r.TotalTokens != 3 || r.Workspace != "/w" {
+	if err != nil || r.Attempt != 2 || r.TotalTokens != 3 {
 		t.Fatalf("migrated run = %+v, %v, want the old row", r, err)
 	}
-	if r.WorkflowFile != "" || r.SessionID != "" || r.APIRequests != nil || r.HandoffReset {
+	if r.WorkflowFile != "" || r.SessionID != "" {
 		t.Errorf("new fields = %+v, want empty defaults", r)
 	}
 }
 
 func TestSessionFieldsAreStoredAndNotBlankedByARecopy(t *testing.T) {
 	s := open(t)
-	n := int64(0)
 	r := run("build", 1, "2026-10-01T00:00:00Z", "succeeded")
-	r.WorkflowFile, r.TemplateID, r.SessionID, r.APIRequests, r.HandoffReset = "WORKFLOW.build.md", "/p/build.md", "s1", &n, true
+	r.WorkflowFile, r.SessionID = "WORKFLOW.build.md", "s1"
 	if err := s.AddRuns([]Run{r}); err != nil {
 		t.Fatal(err)
 	}
@@ -53,8 +52,42 @@ func TestSessionFieldsAreStoredAndNotBlankedByARecopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := s.Run("o/a", "build", 1)
-	if got.WorkflowFile != "WORKFLOW.build.md" || got.TemplateID != "/p/build.md" || got.SessionID != "s1" ||
-		got.APIRequests == nil || *got.APIRequests != 0 || !got.HandoffReset {
-		t.Errorf("run = %+v, want the session fields kept, zero requests distinct from NULL", got)
+	if got.WorkflowFile != "WORKFLOW.build.md" || got.SessionID != "s1" {
+		t.Errorf("run = %+v, want the session fields kept", got)
+	}
+}
+
+func TestMigrationDropsTheColumnsWithoutAnAPISource(t *testing.T) {
+	s := open(t)
+	for _, col := range []string{"workspace", "template_id", "api_requests", "handoff_reset", "review_metadata"} {
+		var n int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('runs_cache') WHERE name = ?`, col).Scan(&n); err != nil || n != 0 {
+			t.Errorf("runs_cache still has %s (%d, %v)", col, n, err)
+		}
+	}
+}
+
+func TestMigrationRemovesHandoffResetEvents(t *testing.T) {
+	dir := t.TempDir()
+	saved := migrations
+	migrations = saved[:len(saved)-1]
+	old, err := Open(dir)
+	migrations = saved
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.db.Exec(`INSERT INTO events (ts, project, workflow, issue_id, kind) VALUES
+		('t','o/a','build','1','handoff_reset'), ('t','o/a','build','1','handoff_reset_cleared'), ('t','o/a','build','1','parked')`); err != nil {
+		t.Fatal(err)
+	}
+	old.Close()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ev, err := s.IssueEvents("o/a", "build", "1")
+	if err != nil || len(ev) != 1 || ev[0].Kind != "parked" {
+		t.Errorf("events = %+v, %v, want only parked", ev, err)
 	}
 }

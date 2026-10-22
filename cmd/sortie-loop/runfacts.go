@@ -33,9 +33,17 @@ func attemptClass(status, text string) errorClass {
 	return errorClass{o.Class, o.Text}
 }
 
-// handoffReason is the text after "handoff withheld:".
+// handoffReason is the detail the engine gave for withholding a handoff:
+// the text after "handoff withheld:" in the stored error, or after "Sortie
+// did not hand the issue off:" in the sentence the API serves. It is empty
+// when the error carries no detail.
 func handoffReason(text string) string {
-	return strings.TrimSpace(strings.TrimPrefix(text, "handoff withheld:"))
+	for _, prefix := range []string{"handoff withheld:", "Sortie did not hand the issue off:"} {
+		if detail, ok := strings.CutPrefix(text, prefix); ok {
+			return strings.TrimSuffix(strings.TrimSpace(detail), ".")
+		}
+	}
+	return ""
 }
 
 // attemptRow is one stored run of an issue, formatted for the table and
@@ -161,9 +169,6 @@ func runEvents(rows []attemptRow, observed []store.Event) []eventRow {
 			detail = append(detail, "next attempt starts after "+rows[i+1].Gap)
 		}
 		out = append(out, eventRow{r.Run.CompletedAt, "attempt " + strconv.Itoa(r.Attempt) + " ended: " + r.Status, strings.Join(detail, ", "), sourceHistory})
-		if r.Run.HandoffReset {
-			out = append(out, eventRow{r.Run.CompletedAt, "handoff counter reset", "the handoff absence counter was reset at this run", sourceHistory})
-		}
 	}
 	for _, e := range observed {
 		out = append(out, eventRow{e.TS, e.Kind, e.Detail, sourceObserved})

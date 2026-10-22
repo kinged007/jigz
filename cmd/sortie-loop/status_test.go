@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/kinged007/sortie-loop/internal/engine"
+	"github.com/kinged007/sortie-loop/internal/rollup"
 )
 
 func startedSup(t *testing.T, script string) (*supervisor, string) {
@@ -51,8 +53,8 @@ func TestStatusAfterStart(t *testing.T) {
 		doc.Version != version || doc.StartedAt.IsZero() {
 		t.Errorf("unexpected top-level status: %+v", doc)
 	}
-	if len(doc.TestedSchemaVersions) == 0 || doc.TestedSchemaVersions[0] != 38 {
-		t.Errorf("tested_schema_versions = %v, want [38]", doc.TestedSchemaVersions)
+	if !slices.Equal(doc.TestedSchemaVersions, rollup.SupportedSchemas) {
+		t.Errorf("tested_schema_versions = %v, want %v", doc.TestedSchemaVersions, rollup.SupportedSchemas)
 	}
 	if len(doc.Workflows) != 1 {
 		t.Fatalf("got %d workflows, want 1", len(doc.Workflows))
@@ -246,13 +248,13 @@ func TestStatusJSONPassthroughKeepsTestedSchemaVersions(t *testing.T) {
 	if err := json.Unmarshal(raw["tested_schema_versions"], &vals); err != nil {
 		t.Fatal(err)
 	}
-	if len(vals) == 0 || vals[0] != 38 {
-		t.Errorf("tested_schema_versions = %v, want [38]", vals)
+	if !slices.Equal(vals, rollup.SupportedSchemas) {
+		t.Errorf("tested_schema_versions = %v, want %v", vals, rollup.SupportedSchemas)
 	}
 }
 
 func TestTestedSchemaVersionsConstant(t *testing.T) {
-	if len(testedSchemaVersions) != 1 || testedSchemaVersions[0] != 38 {
-		t.Errorf("testedSchemaVersions = %v, want [38]", testedSchemaVersions)
+	if !slices.Equal(testedSchemaVersions, []int{18, 35, 38, 43}) {
+		t.Errorf("testedSchemaVersions = %v, want [18 35 38 43]", testedSchemaVersions)
 	}
 }

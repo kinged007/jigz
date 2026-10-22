@@ -37,7 +37,6 @@ type runDetailData struct {
 	CacheRead, Total string
 	FailedTokens     string
 	Share            string
-	APIRequests      string
 	IssueNumber      string
 	OtherRuns        string
 	Log              logCard
@@ -110,9 +109,6 @@ func (a *app) runDetail(w http.ResponseWriter, r *http.Request) {
 	d.Events = runEvents(d.Attempts, observed)
 	d.IssueNumber = issueNumber(run.DisplayIdentifier, run.IssueID)
 	d.OtherRuns = "/runs?" + url.Values{"project": {project}, "workflow": {workflow}, "q": {d.IssueNumber}}.Encode()
-	if run.APIRequests != nil {
-		d.APIRequests = commas(*run.APIRequests)
-	}
 	if d.GitHub = a.githubOn(); d.GitHub {
 		d.Detail = a.githubSettings().DetailsOn()
 		if d.PRs, err = a.runPRs(run); err != nil {

@@ -1,15 +1,17 @@
-// Package collector copies what central needs from the workflow databases
-// into central.db on a timer: finished runs, state changes, and samples.
+// Package collector copies what central needs from the loops into
+// history.db on a timer: finished runs, state changes, and samples.
 //
-// It only reads the workflow databases. A database that is missing,
-// locked, or at an unsupported schema is skipped for that pass and tried
-// again on the next one.
+// A loop whose engine answers is read through the engine's HTTP API. Any
+// other loop is read from its workflow database, which is only read, never
+// written. A database that is missing, locked, or at an unsupported schema
+// is skipped for that pass and tried again on the next one.
 package collector
 
 import (
 	"context"
 	"database/sql"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -45,11 +47,14 @@ type Collector struct {
 	Host     func() machine.Metrics
 	Interval time.Duration
 	Now      func() time.Time
+	// Client reads the engine APIs. Nil uses a client with a short timeout.
+	Client *http.Client
 
-	// seen is the last state of each watched table per loop, keyed by
-	// loop and table, mapping issue id to detail. A loop with no entry
+	// seen is the last state of each watched list per loop, keyed by loop,
+	// source and list, mapping issue id to detail. A loop with no entry
 	// yet is only recorded, so a restart of central does not report every
-	// parked issue as new.
+	// parked issue as new, and a switch between the API and the database
+	// does not report the differences between their wordings.
 	seen map[string]map[string]string
 	// filled marks loops whose stored runs were checked for a missing
 	// workflow file in this process.
@@ -147,6 +152,9 @@ func (c *Collector) readLoop(l rollup.Loop, ts string) {
 			}
 		}
 	}
+	if l.Live && l.Port > 0 && c.readAPI(l, ts) {
+		return
+	}
 	if l.DBPath == "" {
 		return
 	}
@@ -171,21 +179,16 @@ func (c *Collector) readLoop(l rollup.Loop, ts string) {
 // session is the latest session of an issue in a workflow database.
 type session struct {
 	model, id string
-	apiReqs   sql.NullInt64
 }
 
 // readSessions reads session_metadata. Columns an older schema lacks are
 // left empty.
 func readSessions(db *sql.DB) map[string]session {
-	col := func(name, expr string) string {
-		if hasColumn(db, "session_metadata", name) {
-			return expr
-		}
-		return "NULL"
+	sessionID := "NULL"
+	if hasColumn(db, "session_metadata", "session_id") {
+		sessionID = "session_id"
 	}
-	rows, err := db.Query(`SELECT issue_id, model_name, ` + col("session_id", "session_id") + `, ` +
-		col("api_request_count", "CASE WHEN "+col("api_requests_measured", "api_requests_measured")+` = 1 THEN api_request_count END`) +
-		` FROM session_metadata`)
+	rows, err := db.Query(`SELECT issue_id, model_name, ` + sessionID + ` FROM session_metadata`)
 	if err != nil {
 		return nil
 	}
@@ -194,27 +197,8 @@ func readSessions(db *sql.DB) map[string]session {
 	for rows.Next() {
 		var issue string
 		var model, id sql.NullString
-		var s session
-		if rows.Scan(&issue, &model, &id, &s.apiReqs) == nil {
-			s.model, s.id = model.String, id.String
-			out[issue] = s
-		}
-	}
-	return out
-}
-
-func readResets(db *sql.DB) map[string]int64 {
-	rows, err := db.Query(`SELECT issue_id, reset_run_id FROM handoff_absence_resets`)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	out := map[string]int64{}
-	for rows.Next() {
-		var issue string
-		var id int64
-		if rows.Scan(&issue, &id) == nil {
-			out[issue] = id
+		if rows.Scan(&issue, &model, &id) == nil {
+			out[issue] = session{model.String, id.String}
 		}
 	}
 	return out
@@ -251,10 +235,6 @@ func (c *Collector) copyRuns(db *sql.DB, l rollup.Loop, schema rollup.Schema) er
 		if schema.Has("session_metadata") {
 			sessions = readSessions(db)
 		}
-		var resets map[string]int64
-		if schema.Has("handoff_absence_resets") {
-			resets = readResets(db)
-		}
 		newest := map[string]int64{}
 		for _, r := range runs {
 			newest[r.IssueID] = r.ID
@@ -271,12 +251,6 @@ func (c *Collector) copyRuns(db *sql.DB, l rollup.Loop, schema rollup.Schema) er
 			}
 			if ok && newest[r.IssueID] == r.ID {
 				r.SessionID = s.id
-				if s.apiReqs.Valid {
-					r.APIRequests = &s.apiReqs.Int64
-				}
-			}
-			if id, ok := resets[r.IssueID]; ok && id == r.ID {
-				r.HandoffReset = true
 			}
 		}
 		if err := c.Store.AddRuns(runs); err != nil {
@@ -289,8 +263,8 @@ func (c *Collector) copyRuns(db *sql.DB, l rollup.Loop, schema rollup.Schema) er
 	}
 }
 
-// fillRunFiles sets the workflow file and prompt path on runs stored before
-// central kept them, once per loop while central runs.
+// fillRunFiles sets the workflow file on runs stored before central kept
+// it, once per loop while central runs.
 func (c *Collector) fillRunFiles(db *sql.DB, l rollup.Loop, last int64) error {
 	key := l.Repo + "/" + l.Loop
 	if c.filled[key] {
@@ -331,8 +305,8 @@ func readRuns(db *sql.DB, after int64) ([]store.Run, error) {
 	}
 	rows, err := db.Query(`SELECT id, issue_id, COALESCE(NULLIF(display_identifier, ''), identifier), status,
 		started_at, completed_at, attempt, turns_completed, COALESCE(error, ''), agent_adapter,
-		input_tokens, output_tokens, total_tokens, cache_read_tokens, tokens_measured, workspace, `+
-		col("workflow_file")+`, `+col("template_id")+`, `+col("review_metadata")+`
+		input_tokens, output_tokens, total_tokens, cache_read_tokens, tokens_measured, `+
+		col("workflow_file")+`
 		FROM run_history WHERE id > ? ORDER BY id LIMIT ?`, after, batch)
 	if err != nil {
 		return nil, err
@@ -343,8 +317,7 @@ func readRuns(db *sql.DB, after int64) ([]store.Run, error) {
 		var r store.Run
 		if err := rows.Scan(&r.ID, &r.IssueID, &r.DisplayIdentifier, &r.Status, &r.StartedAt, &r.CompletedAt,
 			&r.Attempt, &r.TurnsCompleted, &r.Error, &r.AgentAdapter, &r.InputTokens, &r.OutputTokens,
-			&r.TotalTokens, &r.CacheReadTokens, &r.TokensMeasured, &r.Workspace,
-			&r.WorkflowFile, &r.TemplateID, &r.ReviewMetadata); err != nil {
+			&r.TotalTokens, &r.CacheReadTokens, &r.TokensMeasured, &r.WorkflowFile); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -364,14 +337,9 @@ var watched = []struct {
 		"retry_scheduled", "retry_cleared", "due_at_ms",
 		`SELECT issue_id, 'attempt ' || attempt || COALESCE(': ' || error, '') FROM retry_entries`},
 	{"budget_hold_notices", `SELECT issue_id, reason FROM budget_hold_notices`, "budget_hold", "budget_hold_cleared", "", ""},
-	{"handoff_absence_resets", `SELECT issue_id, 'reset at run ' || reset_run_id FROM handoff_absence_resets`,
-		"handoff_reset", "handoff_reset_cleared", "", ""},
 }
 
 func (c *Collector) diffState(db *sql.DB, l rollup.Loop, schema rollup.Schema, ts string) {
-	if c.seen == nil {
-		c.seen = map[string]map[string]string{}
-	}
 	var events []store.Event
 	for _, w := range watched {
 		if !schema.Has(w.table) {
@@ -386,26 +354,38 @@ func (c *Collector) diffState(db *sql.DB, l rollup.Loop, schema rollup.Schema, t
 			log.Printf("collector: %s/%s: %s: %v", l.Repo, l.Loop, w.table, err)
 			continue
 		}
-		key := l.Repo + "/" + l.Loop + "/" + w.table
-		before, known := c.seen[key]
-		c.seen[key] = now
-		if !known {
-			continue
-		}
-		for _, id := range sortedKeys(now) {
-			if _, ok := before[id]; !ok {
-				events = append(events, store.Event{TS: ts, Project: l.Repo, Workflow: l.Loop, IssueID: id, Kind: w.added, Detail: now[id]})
-			}
-		}
-		for _, id := range sortedKeys(before) {
-			if _, ok := now[id]; !ok {
-				events = append(events, store.Event{TS: ts, Project: l.Repo, Workflow: l.Loop, IssueID: id, Kind: w.removed, Detail: before[id]})
-			}
-		}
+		events = append(events, c.diff(l, "db/"+w.table, w.added, w.removed, now, ts)...)
 	}
 	if err := c.Store.AddEvents(events); err != nil {
 		log.Printf("collector: events: %v", err)
 	}
+}
+
+// diff records now as the state of a list and returns an event for every
+// issue that appeared or disappeared since the previous pass. The first
+// pass of a list returns nothing.
+func (c *Collector) diff(l rollup.Loop, list, added, removed string, now map[string]string, ts string) []store.Event {
+	if c.seen == nil {
+		c.seen = map[string]map[string]string{}
+	}
+	key := l.Repo + "/" + l.Loop + "/" + list
+	before, known := c.seen[key]
+	c.seen[key] = now
+	if !known {
+		return nil
+	}
+	var events []store.Event
+	for _, id := range sortedKeys(now) {
+		if _, ok := before[id]; !ok {
+			events = append(events, store.Event{TS: ts, Project: l.Repo, Workflow: l.Loop, IssueID: id, Kind: added, Detail: now[id]})
+		}
+	}
+	for _, id := range sortedKeys(before) {
+		if _, ok := now[id]; !ok {
+			events = append(events, store.Event{TS: ts, Project: l.Repo, Workflow: l.Loop, IssueID: id, Kind: removed, Detail: before[id]})
+		}
+	}
+	return events
 }
 
 func snapshot(db *sql.DB, query string) (map[string]string, error) {

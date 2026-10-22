@@ -3,8 +3,10 @@
 //
 // It reads the registry that sortie-loop writes rather than being told
 // what is running, so a repository started outside central still shows
-// up. Live figures come from each loop's own state API; all-time
-// figures come from its SQLite database, so totals survive restarts.
+// up. A loop whose engine answers is read entirely through the engine's
+// HTTP API: /api/v1/state for live figures and /api/v1/stats for all-time
+// run counts. A loop whose engine does not answer is read from its SQLite
+// database, so totals survive restarts.
 package rollup
 
 import (
@@ -276,20 +278,30 @@ func (r Reader) one(ep endpoint) Loop {
 	if ep.Probe {
 		l.readState(r.client())
 	}
-	l.readDB()
+	l.readTotals(r.client())
 	return l
 }
 
 // Loop builds one loop's figures for a loop known from elsewhere than
-// the registry. The engine's state API is read only when probe is set;
-// the database totals are always read.
+// the registry. The engine's API is read only when probe is set; without
+// an answer the database totals are read.
 func (r Reader) Loop(repo, loop string, port int, dbPath string, probe bool) Loop {
 	l := Loop{Repo: repo, Loop: loop, Port: port, DBPath: dbPath}
 	if probe && port > 0 {
 		l.readState(r.client())
 	}
-	l.readDB()
+	l.readTotals(r.client())
 	return l
+}
+
+// readTotals fills the all-time figures from the engine's stats API when the
+// state read found the engine live, and from the database otherwise or when
+// the stats read fails.
+func (l *Loop) readTotals(c *http.Client) {
+	if l.Live && l.readStats(c) {
+		return
+	}
+	l.readDB()
 }
 
 // statePayload mirrors the subset of the loop's state API the dashboard
@@ -303,35 +315,50 @@ type statePayload struct {
 	// running sessions, present only when the workflow configures
 	// token_rates.
 	ActiveEstimatedCostUSD *float64 `json:"active_estimated_cost_usd"`
-	Running                []struct {
+	AgentTotals            struct {
+		InputTokens  int64 `json:"input_tokens"`
+		OutputTokens int64 `json:"output_tokens"`
+		TotalTokens  int64 `json:"total_tokens"`
+	} `json:"agent_totals"`
+	Running []struct {
 		DisplayIdentifier string `json:"display_identifier"`
 		IssueIdentifier   string `json:"issue_identifier"`
 		State             string `json:"state"`
 		TurnCount         int    `json:"turn_count"`
 		ModelName         string `json:"model_name"`
 		StartedAt         string `json:"started_at"`
-		Tokens            struct {
+		// DispatchedAt is the start of the first run of the issue's
+		// current pass.
+		DispatchedAt *string `json:"dispatched_at"`
+		Tokens       struct {
 			TotalTokens *int64 `json:"total_tokens"`
 		} `json:"tokens"`
 	} `json:"running"`
 }
 
-func (l *Loop) readState(c *http.Client) {
-	resp, err := c.Get(fmt.Sprintf("http://127.0.0.1:%d/api/v1/state", l.Port))
+// GetJSON reads one path of an engine's HTTP API on loopback and decodes
+// the JSON answer into out.
+func GetJSON(c *http.Client, port int, path string, out any) error {
+	resp, err := c.Get(fmt.Sprintf("http://127.0.0.1:%d%s", port, path))
 	if err != nil {
-		return
+		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return
+		return fmt.Errorf("%s: %s", path, resp.Status)
 	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+func (l *Loop) readState(c *http.Client) {
 	var p statePayload
-	if err := json.NewDecoder(resp.Body).Decode(&p); err != nil {
+	if err := GetJSON(c, l.Port, "/api/v1/state", &p); err != nil {
 		return
 	}
 	l.Live = true
 	l.Retrying = p.Counts.Retrying
 	l.Cost = p.ActiveEstimatedCostUSD
+	l.Input, l.Output, l.Tokens = p.AgentTotals.InputTokens, p.AgentTotals.OutputTokens, p.AgentTotals.TotalTokens
 	for _, run := range p.Running {
 		id := run.DisplayIdentifier
 		if id == "" {
@@ -341,15 +368,55 @@ func (l *Loop) readState(c *http.Client) {
 		if run.Tokens.TotalTokens != nil {
 			toks = *run.Tokens.TotalTokens
 		}
-		l.Running = append(l.Running, Run{
+		r := Run{
 			Identifier: id,
 			State:      run.State,
 			Turns:      run.TurnCount,
 			Tokens:     toks,
 			Model:      run.ModelName,
 			StartedAt:  run.StartedAt,
-		})
+		}
+		if run.DispatchedAt != nil {
+			r.PickUp = *run.DispatchedAt
+		}
+		l.Running = append(l.Running, r)
 	}
+}
+
+// statsPayload mirrors the subset of GET /api/v1/stats the dashboard
+// consumes. The report covers every run of the engine's database.
+type statsPayload struct {
+	Summary struct {
+		Runs                 int `json:"runs"`
+		Issues               int `json:"issues"`
+		TokensUnmeasuredRuns int `json:"tokens_unmeasured_runs"`
+	} `json:"summary"`
+	ByStatus []struct {
+		Name string `json:"name"`
+		Runs int    `json:"runs"`
+	} `json:"by_status"`
+}
+
+// readStats fills the run counts from the engine's stats API and reports
+// whether it could. Succeeded and Failed count the runs with exactly that
+// status, as the database read does: the engine's own failed total also
+// holds other statuses.
+func (l *Loop) readStats(c *http.Client) bool {
+	var p statsPayload
+	if err := GetJSON(c, l.Port, "/api/v1/stats", &p); err != nil {
+		return false
+	}
+	l.Runs, l.Issues, l.Unmeasured = p.Summary.Runs, p.Summary.Issues, p.Summary.TokensUnmeasuredRuns
+	l.Succeeded, l.Failed = 0, 0
+	for _, g := range p.ByStatus {
+		switch g.Name {
+		case "succeeded":
+			l.Succeeded = g.Runs
+		case "failed":
+			l.Failed = g.Runs
+		}
+	}
+	return true
 }
 
 // readDB fills the all-time figures. A missing or fresh database leaves

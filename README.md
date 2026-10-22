@@ -199,8 +199,9 @@ repository, wakes a sleeping run, runs the cleanup command, pauses or
 resumes one workflow, overrides a budget hold, and stops everything.
 
 It reads the shared registry and each repository's status document plus
-its loops' SQLite databases, so the numbers survive restarts and a
-repository that is not running still shows its last known state. Every
+run data from its loops, so the numbers survive restarts and a repository
+that is not running still shows its last known state (see
+[Run data](#run-data)). Every
 3 seconds the changing parts are re-fetched as fragments, so the page
 needs no build step and works as static HTML without scripting.
 
@@ -209,6 +210,31 @@ per-loop rows), Runs and Usage from the history database, Workflows (the
 pipeline each repository's files describe, plus validation), Projects,
 Agents (the settings each workflow file declares), Settings, the workflow
 editor, and each loop's child log.
+
+### Run data
+
+While a loop's engine answers on its port, the dashboard reads that loop
+through the engine's HTTP API: finished runs from `/api/v1/runs`, the
+parked, retrying and budget-held issues from `/api/v1/state`, and the
+all-time run counts from `/api/v1/stats`. Each pass copies the runs the
+history database does not have yet, matched by the engine's run id. When two
+workflows share one engine database, only the runs of each workflow's own
+file are copied to it.
+
+When the engine does not answer, the dashboard reads the loop's SQLite
+database read-only, so the history of a stopped repository stays visible.
+The database reader accepts the engine schema versions 18 to 43 (the
+engine releases 1.28.1 and 1.29.0 write 38 and 43) when the tables and
+columns it reads exist. A database written by a newer engine than the
+newest known one is reported as a schema notice and not read.
+
+A run shows the fields the engine reports for it: status, error, attempts,
+turns, tokens, agent adapter, model, session id and workflow file. The
+engine reports no workspace path, prompt template, API request count,
+handoff counter reset or review metadata, so the dashboard does not show
+them. If the engine database was replaced by a new one, whose newest run id
+is lower than the last copied one, the stored runs of that workflow are
+removed and copied again from the engine.
 
 Running loops in several repos at once? Pass `--unite`:
 

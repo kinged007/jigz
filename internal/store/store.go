@@ -137,6 +137,12 @@ var migrations = []string{
 	ALTER TABLE github_cache ADD COLUMN checks_pending INTEGER NOT NULL DEFAULT 0;
 	ALTER TABLE github_cache ADD COLUMN commits_etag TEXT NOT NULL DEFAULT '';
 	ALTER TABLE github_cache ADD COLUMN checks_etag TEXT NOT NULL DEFAULT '';`,
+	`ALTER TABLE runs_cache DROP COLUMN workspace;
+	ALTER TABLE runs_cache DROP COLUMN template_id;
+	ALTER TABLE runs_cache DROP COLUMN api_requests;
+	ALTER TABLE runs_cache DROP COLUMN handoff_reset;
+	ALTER TABLE runs_cache DROP COLUMN review_metadata;
+	DELETE FROM events WHERE kind IN ('handoff_reset', 'handoff_reset_cleared');`,
 }
 
 // Open opens dir/history.db, creating the directory and the database, and

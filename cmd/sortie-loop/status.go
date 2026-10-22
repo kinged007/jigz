@@ -19,9 +19,8 @@ const (
 )
 
 // testedSchemaVersions lists the workflow DB schema_migrations versions
-// this release was tested against: the latest version of the engine
-// pinned by engine.DefaultTag.
-var testedSchemaVersions = []int{rollup.EngineSchema}
+// whose layout this release was checked against.
+var testedSchemaVersions = rollup.SupportedSchemas
 
 // statusDoc is the machine-readable state of one supervisor, written to
 // the status file derived from the repo root. Later features add

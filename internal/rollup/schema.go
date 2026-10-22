@@ -7,33 +7,58 @@ import (
 	"strings"
 )
 
-// SupportedSchemas lists the schema_migrations versions whose layout
-// this reader has been checked against: 18 for the older engine, 35 for
-// engine 1.27.0, 38 for the pinned engine (EngineSchema). A workflow database at any other
-// version is reported with a SchemaNotice and read for nothing, because
-// a column that moved would turn into a wrong number rather than an
-// error.
-var SupportedSchemas = []int{18, 35, EngineSchema}
+// OldestSchema is the oldest schema_migrations version this reader
+// accepts: 18, written by the older engine. A database between OldestSchema
+// and the newest known engine schema is read when it has every column in
+// requiredColumns; later migrations only add columns, tables and indexes.
+const OldestSchema = 18
 
-// EngineSchema is the latest schema_migrations version of the pinned
-// engine. Migrations 36 to 38 only add columns and tables that this
-// reader does not use.
-const EngineSchema = 38
+// EngineRelease is a sortie release and the schema_migrations version its
+// database ends at.
+type EngineRelease struct {
+	Version string
+	Schema  int
+}
+
+// EngineReleases lists the engine releases this reader has been checked
+// against, oldest first. A database newer than the last entry was written by
+// an engine this release does not know and is not read.
+var EngineReleases = []EngineRelease{{"1.28.1", 38}, {"1.29.0", 43}}
+
+// SupportedSchemas lists the schema versions with a checked layout: 18 for
+// the older engine, 35 for engine 1.27.0, and the end version of each
+// EngineReleases entry. It is informative; the accepted range is
+// OldestSchema to NewestSchema.
+var SupportedSchemas = []int{OldestSchema, 35, 38, 43}
+
+// NewestSchema is the schema version of the newest known engine release.
+func NewestSchema() int { return EngineReleases[len(EngineReleases)-1].Schema }
+
+// SchemaOf returns the schema version of an engine release tag such as
+// "v1.28.1" or "1.28.1", and false for a release that is not known.
+func SchemaOf(tag string) (int, bool) {
+	tag = strings.TrimPrefix(tag, "v")
+	for _, r := range EngineReleases {
+		if r.Version == tag {
+			return r.Schema, true
+		}
+	}
+	return 0, false
+}
 
 // requiredColumns is every table and column central reads. A supported
 // version that lacks one hides only what depends on that table.
 var requiredColumns = map[string][]string{
 	"run_history": {
 		"id", "issue_id", "identifier", "display_identifier", "attempt", "agent_adapter",
-		"workspace", "started_at", "completed_at", "status", "error", "turns_completed",
+		"started_at", "completed_at", "status", "error", "turns_completed",
 		"input_tokens", "output_tokens", "total_tokens", "cache_read_tokens", "tokens_measured",
 	},
-	"aggregate_metrics":      {"key", "input_tokens", "output_tokens", "total_tokens", "cache_read_tokens"},
-	"session_metadata":       {"issue_id", "model_name"},
-	"parked_issues":          {"issue_id", "reason"},
-	"retry_entries":          {"issue_id", "attempt", "error"},
-	"budget_hold_notices":    {"issue_id", "reason"},
-	"handoff_absence_resets": {"issue_id", "reset_run_id"},
+	"aggregate_metrics":   {"key", "input_tokens", "output_tokens", "total_tokens", "cache_read_tokens"},
+	"session_metadata":    {"issue_id", "model_name"},
+	"parked_issues":       {"issue_id", "reason"},
+	"retry_entries":       {"issue_id", "attempt", "error"},
+	"budget_hold_notices": {"issue_id", "reason"},
 }
 
 // SchemaNotice says why a workflow database is not fully read.
@@ -51,7 +76,10 @@ func (n SchemaNotice) String() string {
 	if len(n.Missing) > 0 {
 		return fmt.Sprintf("schema %d is missing %s", n.Version, strings.Join(n.Missing, ", "))
 	}
-	return fmt.Sprintf("unsupported schema version %d (supported: %v)", n.Version, n.Supported)
+	if n.Version > NewestSchema() {
+		return fmt.Sprintf("schema %d was written by a newer engine than this release knows (newest known: schema %d)", n.Version, NewestSchema())
+	}
+	return fmt.Sprintf("unsupported schema version %d (supported: %d to %d)", n.Version, OldestSchema, NewestSchema())
 }
 
 // Schema is what one workflow database offers.
@@ -75,7 +103,7 @@ func OpenReadOnly(path string) (*sql.DB, error) {
 	return db, nil
 }
 
-// InspectSchema checks schema_migrations against SupportedSchemas and
+// InspectSchema checks schema_migrations against the accepted range and
 // the columns of every table central reads.
 func InspectSchema(db *sql.DB) Schema {
 	version := 0
@@ -88,7 +116,7 @@ func InspectSchema(db *sql.DB) Schema {
 		// A database that has not been written yet is not broken.
 		return Schema{}
 	}
-	if !slices.Contains(SupportedSchemas, version) {
+	if version < OldestSchema || version > NewestSchema() {
 		return Schema{Notice: &SchemaNotice{Version: version, Supported: SupportedSchemas}}
 	}
 	s := Schema{usable: map[string]bool{}}

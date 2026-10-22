@@ -47,7 +47,7 @@ section 6.
 - History store and collector (`internal/store`, `internal/collector`) —
   exists
 - JSON API (`api.go`) — exists
-- Run data through sortie's HTTP API; SQLite only for history [2]
+- Run data through sortie's HTTP API; SQLite only for history (`internal/collector/api.go`, `internal/rollup`) — exists
 - Outcome classes of the hub protocol, mapped in one adapter (`internal/store/outcome.go`) — exists
 - Disabled-feature notices from capability detection [2]
 - Questions page with answering [3]
