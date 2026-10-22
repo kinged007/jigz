@@ -247,8 +247,12 @@ func TestSortieValidate(t *testing.T) {
 		cmd := exec.Command(bin, "validate", e.Name())
 		cmd.Dir = dir
 		cmd.Env = env
-		if out, err := cmd.CombinedOutput(); err != nil {
+		out, err := cmd.CombinedOutput()
+		if err != nil {
 			t.Errorf("%s: %v\n%s", e.Name(), err, out)
+		}
+		if got := dropRuntimeBlockWarnings(string(out)); strings.Contains(got, "unknown top-level key") {
+			t.Errorf("%s: unknown-key warnings remain:\n%s", e.Name(), got)
 		}
 	}
 	if build == "" {

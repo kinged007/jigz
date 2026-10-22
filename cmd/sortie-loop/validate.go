@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/kinged007/sortie-loop/internal/config"
+	"github.com/kinged007/sortie-loop/internal/plan"
 )
 
 // validateCheck is one validation result.
@@ -134,5 +135,19 @@ func runSortieValidate(bin, dir string, loop loopDef, cfg *config.Config) (strin
 	cmd.Dir = dir
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
-	return string(out), err
+	return dropRuntimeBlockWarnings(string(out)), err
+}
+
+func dropRuntimeBlockWarnings(out string) string {
+	lines := strings.Split(out, "\n")
+	keep := lines[:0]
+	for _, line := range lines {
+		if rest, ok := strings.CutPrefix(line, "warning: "); ok {
+			if check, msg, ok := strings.Cut(rest, ": "); ok && plan.IsRuntimeBlockWarning(check, msg) {
+				continue
+			}
+		}
+		keep = append(keep, line)
+	}
+	return strings.Join(keep, "\n")
 }

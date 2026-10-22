@@ -1,6 +1,7 @@
 package plan
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -664,5 +665,20 @@ func TestSetupFailsWhenTheTokenVariableIsUnset(t *testing.T) {
 	}
 	if _, serr := os.Stat(record); serr == nil {
 		t.Error("setup ran without a token")
+	}
+}
+
+func TestWithoutRuntimeBlockWarnings(t *testing.T) {
+	raw := `{"valid":true,"errors":[],"warnings":[` +
+		`{"severity":"warning","check":"unknown_key","message":"claude-code: unknown top-level key \"claude-code\""},` +
+		`{"severity":"warning","check":"unknown_key","message":"pi: unknown top-level key \"pi\""},` +
+		`{"severity":"warning","check":"unknown_key","message":"extra: unknown top-level key \"extra\""}]}`
+	var res FileResult
+	if err := json.Unmarshal([]byte(raw), &res); err != nil {
+		t.Fatal(err)
+	}
+	got := res.WithoutRuntimeBlockWarnings().Warnings
+	if len(got) != 1 || !strings.HasPrefix(got[0].Message, "extra:") {
+		t.Fatalf("warnings = %+v", got)
 	}
 }

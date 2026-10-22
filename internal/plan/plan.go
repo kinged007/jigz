@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	config "github.com/kinged007/sortie-loop/internal/fleetconfig"
+	"github.com/kinged007/sortie-loop/internal/machine"
 	"gopkg.in/yaml.v3"
 )
 
@@ -697,6 +698,34 @@ type Issue struct {
 	Message string `json:"message"`
 }
 
+// IsRuntimeBlockWarning reports whether an engine warning only says that
+// the workflow carries the adapter block of a runtime other than the active
+// one. The shipped workflows hold one block per runtime and the engine reads
+// only the block named by agent.kind.
+func IsRuntimeBlockWarning(check, message string) bool {
+	if check != "unknown_key" {
+		return false
+	}
+	for _, rt := range machine.Runtimes {
+		if message == fmt.Sprintf("%s: unknown top-level key %q", rt, rt) {
+			return true
+		}
+	}
+	return false
+}
+
+// WithoutRuntimeBlockWarnings drops the warnings IsRuntimeBlockWarning matches.
+func (r FileResult) WithoutRuntimeBlockWarnings() FileResult {
+	var keep []Issue
+	for _, w := range r.Warnings {
+		if !IsRuntimeBlockWarning(w.Check, w.Message) {
+			keep = append(keep, w)
+		}
+	}
+	r.Warnings = keep
+	return r
+}
+
 // FileResult is the engine's verdict on one workflow file.
 type FileResult struct {
 	Valid    bool    `json:"valid"`
@@ -736,7 +765,7 @@ func (p Plan) validateFile(bin string, env []string, f string) (FileResult, erro
 	if err := json.Unmarshal([]byte(stdout.String()), &out); err != nil {
 		return FileResult{}, fmt.Errorf("%s validate %s: unreadable output: %w", bin, filepath.Base(f), err)
 	}
-	return out, nil
+	return out.WithoutRuntimeBlockWarnings(), nil
 }
 
 // workflowFiles lists the workflow files this repository starts: the

@@ -211,7 +211,7 @@ func validateWorkflow(dir, path string) (plan.FileResult, error) {
 	if err := json.Unmarshal([]byte(stdout.String()), &out); err != nil {
 		return plan.FileResult{}, fmt.Errorf("%s validate %s: unreadable output: %w", bin, filepath.Base(path), err)
 	}
-	return out, nil
+	return out.WithoutRuntimeBlockWarnings(), nil
 }
 
 // ---------------------------------------------------------------------------
