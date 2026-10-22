@@ -485,6 +485,225 @@ func TestAcceptance(t *testing.T) {
 	t.Logf("shutdown %s, total %s", time.Since(t0).Round(time.Millisecond), time.Since(start).Round(time.Second))
 }
 
+// TestAcceptanceUpstreamEngine runs the stack on the upstream engine release
+// sortie-ai/sortie v1.29.0, selected by the engine block of machine.yaml. The
+// engine has no github-pr tracker, so the issues loop runs and the PR loop is
+// disabled with the reason. The workflow is the same acceptance variant of the
+// issues workflow as in TestAcceptance. The PR workflow is installed and
+// enabled, but its loop never starts, so the fake GitHub needs no PR routes.
+//
+// The engine is resolved as for the default one: the installed copy in the
+// share directory, else a verified download. A failed download fails the test.
+func TestAcceptanceUpstreamEngine(t *testing.T) {
+	start := time.Now()
+	t.Setenv("SORTIE_BIN", "")
+	t.Setenv("SORTIE_ENGINE_REPO", "sortie-ai/sortie")
+	t.Setenv("SORTIE_ENGINE_VERSION", "v1.29.0")
+	engineBin := acceptanceEngine(t)
+	spec, err := engine.Configured()
+	if err != nil {
+		t.Fatal(err)
+	}
+	loopBin := buildLoop(t)
+
+	const (
+		slug  = "acme/widgets"
+		owner = "octo"
+		token = "acceptance-token"
+	)
+	gh := fakegithub.New(owner, token)
+	gh.Logf = t.Logf
+	gh.AddRepo(slug, labelNames(config.DefaultLabels)...)
+	srv := httptest.NewServer(gh)
+	defer srv.Close()
+	planned := gh.Add(fakegithub.Item{Repo: slug, Title: "Plan this", Body: "Write a plan.",
+		Labels: []string{"agent:plan"}, Assignees: []string{owner}})
+
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	repoDir := filepath.Join(root, "repo")
+	writeAcceptanceRepo(t, repoDir, slug, token, srv.URL)
+
+	// The loop resolves the engine from the isolated share directory and
+	// the engine block of machine.yaml, not from SORTIE_BIN.
+	shareDir := filepath.Join(home, ".local", "share", "sortie-loop")
+	if err := os.MkdirAll(shareDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(engineBin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(spec.CachePath(shareDir), raw, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgDir := filepath.Join(home, ".config", "sortie-loop")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	machineYAML := fmt.Sprintf("engine:\n  repo: %s\n  version: %s\n", spec.Repo, spec.Tag)
+	if err := os.WriteFile(filepath.Join(cfgDir, "machine.yaml"), []byte(machineYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	dashPort := freePort(t)
+	logPath := filepath.Join(root, "sortie-loop.log")
+	logf, err := os.Create(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer logf.Close()
+	cmd := exec.Command(loopBin, "--host", "127.0.0.1", "--dashboard-port", strconv.Itoa(dashPort), repoDir)
+	cmd.Dir = repoDir
+	env := []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + home,
+		"XDG_CACHE_HOME=" + filepath.Join(home, ".cache"),
+		"XDG_DATA_HOME=" + filepath.Join(home, ".local", "share"),
+		"XDG_CONFIG_HOME=" + filepath.Join(home, ".config"),
+		"XDG_STATE_HOME=" + filepath.Join(home, ".local", "state"),
+	}
+	cmd.Env = env
+	cmd.Stdout, cmd.Stderr = logf, logf
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	pgid := cmd.Process.Pid
+	exited := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(exited) }()
+	defer func() {
+		_ = syscall.Kill(-pgid, syscall.SIGKILL)
+		<-exited
+	}()
+	fail := func(format string, args ...any) {
+		t.Helper()
+		t.Errorf(format, args...)
+		t.Logf("sortie-loop output (tail):\n%s", logTail(logPath, 60))
+		t.Logf("fake GitHub label events for #%d: %v", planned, labelLog(gh, slug, planned))
+		t.FailNow()
+	}
+	waitFor := func(what string, d time.Duration, ok func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(d)
+		for !ok() {
+			select {
+			case <-exited:
+				fail("sortie-loop exited while waiting for %s", what)
+			default:
+			}
+			if time.Now().After(deadline) {
+				fail("timed out after %s waiting for %s", d, what)
+			}
+			time.Sleep(250 * time.Millisecond)
+		}
+	}
+	dash := fmt.Sprintf("http://127.0.0.1:%d", dashPort)
+	waitFor("the dashboard to answer", 60*time.Second, func() bool {
+		return getJSON(dash+"/api/v1/fleet", new(map[string]any)) == nil
+	})
+
+	t.Run("a_issue_is_handed_off_and_the_pr_loop_is_disabled", func(t *testing.T) {
+		t0 := time.Now()
+		waitFor("the issue to reach agent:done", 90*time.Second, func() bool {
+			it, _ := gh.Get(slug, planned)
+			return slices.Contains(it.Labels, "agent:done") && !slices.Contains(it.Labels, "in-progress")
+		})
+		log := labelLog(gh, slug, planned)
+		if c, d := slices.Index(log, "+in-progress"), slices.Index(log, "+agent:done"); c < 0 || d < 0 || c > d {
+			t.Errorf("want +in-progress before +agent:done, got %v", log)
+		}
+		if it, _ := gh.Get(slug, planned); !slices.Equal(it.Labels, []string{"agent:done"}) {
+			t.Errorf("final labels %v, want [agent:done]", it.Labels)
+		}
+
+		sc := exec.Command(loopBin, "status", "--json", repoDir)
+		sc.Env = env
+		out, err := sc.Output()
+		if err != nil {
+			t.Fatalf("sortie-loop status: %v", err)
+		}
+		var doc statusDoc
+		if err := json.Unmarshal(out, &doc); err != nil {
+			t.Fatalf("status document: %v", err)
+		}
+		if doc.EngineVersion != spec.Version() {
+			t.Errorf("status engine_version %q, want %q", doc.EngineVersion, spec.Version())
+		}
+		states := map[string]workflowStatus{}
+		for _, w := range doc.Workflows {
+			states[w.LoopType] = w
+		}
+		const wantOff = "PR workflow is off: engine sortie-ai/sortie v1.29.0 has no github-pr tracker."
+		if w := states["issues"]; w.State != "running" {
+			t.Errorf("issues loop state %q, want running: %+v", w.State, doc.Workflows)
+		}
+		if w := states["prs"]; w.State != "disabled" || w.Hold != wantOff || w.PID != 0 {
+			t.Errorf("PR loop %+v, want state disabled, pid 0, hold %q (workflows %+v)", w, wantOff, doc.Workflows)
+		}
+		for _, r := range gh.Requests() {
+			if strings.Contains(r.Query, "type:pr") || strings.Contains(r.Path, "/pulls") {
+				t.Errorf("the PR loop reached GitHub: %s %s?%s", r.Method, r.Path, r.Query)
+			}
+		}
+
+		vc := exec.Command(loopBin, "validate", repoDir)
+		vc.Env = env
+		vout, err := vc.CombinedOutput()
+		if err != nil {
+			t.Errorf("validate failed: %v\n%s", err, vout)
+		}
+		if !strings.Contains(string(vout), "disabled: "+wantOff) {
+			t.Errorf("validate output lacks the disabled line:\n%s", vout)
+		}
+
+		live := getBody(t, dash+"/live")
+		if !strings.Contains(live, wantOff) {
+			t.Errorf("Operations page lacks %q", wantOff)
+		}
+		settings := getBody(t, dash+"/settings")
+		for _, kind := range []string{"github", "mock", "claude-code"} {
+			if !strings.Contains(settings, kind) {
+				t.Errorf("Settings page does not list the registered kind %q", kind)
+			}
+		}
+		t.Logf("upstream scenario a: %s, engine %s", time.Since(t0).Round(time.Millisecond), spec)
+	})
+
+	t.Run("b_dashboard_reads_the_run_through_the_engine_api", func(t *testing.T) {
+		t0 := time.Now()
+		var runs struct {
+			Runs []struct {
+				Project, Workflow, Status string
+				AgentAdapter              string `json:"agent_adapter"`
+			}
+		}
+		waitFor("the dashboard to list the run", 120*time.Second, func() bool {
+			runs.Runs = nil
+			return getJSON(dash+"/api/v1/runs?project="+slug, &runs) == nil && len(runs.Runs) > 0
+		})
+		if len(runs.Runs) != 1 {
+			t.Fatalf("dashboard lists %d runs, want 1: %+v", len(runs.Runs), runs.Runs)
+		}
+		if r := runs.Runs[0]; r.Workflow != "issues" || r.Status != "succeeded" || r.AgentAdapter != "mock" {
+			t.Errorf("unexpected run: %+v", r)
+		}
+		if out, _ := os.ReadFile(logPath); !strings.Contains(string(out), "collector: "+slug+"/issues: runs copied from the engine API: 1") {
+			t.Errorf("the dashboard did not copy the run from the engine API; sortie-loop output (tail):\n%s", logTail(logPath, 60))
+		}
+		var fleet struct {
+			SchemaNotices []json.RawMessage `json:"schema_notices"`
+		}
+		if err := getJSON(dash+"/api/v1/fleet", &fleet); err != nil {
+			t.Fatal(err)
+		}
+		if len(fleet.SchemaNotices) != 0 {
+			t.Errorf("schema notices: %s", fleet.SchemaNotices)
+		}
+		t.Logf("upstream scenario b: %s, total %s", time.Since(t0).Round(time.Millisecond), time.Since(start).Round(time.Second))
+	})
+}
+
 func labelNames(ls []config.Label) []string {
 	out := make([]string, len(ls))
 	for i, l := range ls {
