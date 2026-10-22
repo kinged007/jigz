@@ -8,8 +8,8 @@ and it has no code yet.
 
 Build `sortie-loop` as a free, open-source tool that is complete without
 the hub, following `plans/sortie-loop/vision-and-roadmap.md` section 6.
-Phase 0 is done except the merge. Phase 1 is implemented; its release is
-not done. Phase 2 is next.
+Phase 0 is done except the merge. Phase 1 is complete in code, tests, and
+docs; its release and release notes are not done. Phase 2 is next.
 
 Read, in order:
 
@@ -138,6 +138,25 @@ In order of the roadmap:
    release notes. Neither is done. Ask the user before releasing.
 3. Phase 2: engine independence (roadmap section 6).
 
+Phase 1 against the roadmap (section 6, Phase 1):
+
+- Working hours per machine and per pool entry, no new claims outside a
+  window, optional stop of running sessions: done (`internal/machine`,
+  `cmd/sortie-loop/gate.go`; `hours.end: finish | stop`).
+- Agent pool config with runtime, account env, hours, cost class: done
+  (`machine.yaml`).
+- `sortie-loop agent-exec`: entry selection, usage-limit detection,
+  exhausted-until tracking in `pool.json`: done
+  (`cmd/sortie-loop/agentexec.go`).
+- Runtime failover by `SORTIE_AGENT_KIND` / `SORTIE_AGENT_COMMAND`; loops
+  recycled when they have no running session: done.
+- Dashboard: current window, pool entries and their state, gate holds on
+  Operations: done; checked in a browser against an isolated instance.
+- Acceptance: a scripted limit failure moves the next run to the next
+  entry; no claims outside a window: done (scenarios d and e).
+- Release and release notes: not done.
+- Reporting hours and pool to the hub belongs to Phase 4 (connected mode).
+
 Known gaps, not scheduled:
 
 - Engine v1.28.1 runs a credential check through the agent command before
@@ -146,7 +165,9 @@ Known gaps, not scheduled:
 - A usage limit that occurs mid-turn posts a failure comment.
 - With `max_concurrent_agents` greater than 1, a loop can claim work between
   window close and stop.
-- Acceptance covers `end: finish` only, not `end: stop`.
+- Acceptance covers `end: finish` only; `end: stop` is covered by
+  supervisor integration tests with a fake engine (`gate_test.go`,
+  `supervise_test.go`).
 - The agent-exec "no entry until" time uses the global next change, not a
   time per runtime.
 - The limit detection patterns are not checked against real `claude` or
@@ -168,14 +189,18 @@ Known gaps, not scheduled:
   dashboard code).
 - `plans/sortie-loop/enhancements.md` and `production-readiness.md` refer
   to `plans/pm-agent.md`, which does not exist in the repository.
+- Target repositories installed before Phase 1 have workflows without the
+  `claude-code:` block; the runtime switch to claude-code needs
+  `sortie-loop setup` re-run there (AGENTS.md: installed workflows are
+  refreshed by setup).
 
 ## 7. Processes on this machine
 
 A real `sortie-loop` instance with its `sortie` children runs on ports
 7677 to 7679, using the registry in `~/.cache/sortie-loop/`. It started
 before the engine resolution fix (`9313e3e`) and still runs engine 1.27.0
-until restarted. Do not stop it or write to its registry. Tests isolate `HOME` and `XDG_*` to temporary
-directories; keep doing that.
+until restarted. Do not stop it or write to its registry. Tests isolate
+`HOME` and `XDG_*` to temporary directories; keep doing that.
 
 ## 8. Lessons for routing work
 
@@ -194,7 +219,7 @@ directories; keep doing that.
 
 ## 9. Next action
 
-Phase 1 is implemented. Ask the user about:
+Phase 1 is complete except its release. Ask the user about:
 
 1. A Phase 1 release (release and release notes).
 2. Phase 2: engine independence.
