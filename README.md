@@ -677,8 +677,12 @@ the message, or for `limits.default_reset`. The state is stored in
 exits 75. When the active runtime changes, loops are restarted once they have
 no running session.
 
-A usage limit costs one failed engine session: the engine posts a failure
-comment and retries after about 10 seconds with the next available entry.
+A usage limit is usually detected by `agent-exec` during the engine's credential
+check, which runs before each worker run. The run then fails before the turn
+starts, the engine posts no failure comment, and it retries after about 10
+seconds with the next available entry. A limit reached in the middle of a turn
+fails that engine session: the engine posts a "Sortie session failed" comment on
+the issue and retries the same way.
 
 Known limitation: with `max_concurrent_agents` above 1, a loop can claim new
 work between the window close and the moment it is stopped.

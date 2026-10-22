@@ -135,8 +135,12 @@ Per tick the supervisor computes whether the machine window is open and
    Exit with the child's exit code.
 4. When a limit is detected, mark the entry exhausted until the reset time.
 
-A limit hit fails one engine session. The engine posts a failure comment and
-retries after about 10 seconds. The retry picks the next available entry.
+A usage limit is usually detected by `agent-exec` during the engine's credential
+check, which runs before each worker run. The run then fails before the turn
+starts, the engine posts no failure comment, and it retries after about 10
+seconds. The retry picks the next available entry. A limit reached in the middle
+of a turn fails that engine session: the engine posts a "Sortie session failed"
+comment on the issue and retries the same way.
 
 ## Known limitation
 
