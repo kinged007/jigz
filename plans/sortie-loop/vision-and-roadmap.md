@@ -227,23 +227,6 @@ it needs no model and no real GitHub.
   it, and never linked or shown in the dashboard.
 - Acceptance harness: `make verify`, fake GitHub API, sortie `mock` agent.
 
-### Rename to Jigz
-
-- Go module path changes to the Jigz repository path. The binary is `jig`.
-  The daemon runs as `jig daemon`, installed as the service `jigd`
-  (systemd unit `jigd.service` on Linux, launchd label `jigd` on macOS).
-- Release archive names and the install script use `jig`.
-- State directories move from `~/.cache/sortie-loop` and
-  `~/.local/share/sortie-loop`, and `machine.yaml` from the `sortie-loop`
-  user config directory, to `jigz` directories under the same roots.
-  The old paths are read and migrated on first start.
-- GitHub repository renamed to Jigz. GitHub redirects the old URL.
-- README and docs use the new names.
-- Engine-owned names stay: `SORTIE_*` variables, the `.sortie/` directory,
-  and the `sortie` binary.
-- Acceptance: an existing install with state in the old directories keeps
-  its registry, history, and settings after upgrading.
-
 ### Phase 1: Working hours and account pool (5.1, 5.2)
 
 - Working-hours config per machine and per pool entry (days, hours,
@@ -272,6 +255,23 @@ it needs no model and no real GitHub.
 - Upstream PRs for the `pi` adapter and the `github-pr` tracker: in
   progress. Until both are merged and released upstream, the fork
   `kinged007/sortie` stays the default engine.
+
+### Rename to Jigz
+
+- Go module path changes to the Jigz repository path. The binary is `jig`.
+  The daemon runs as `jig daemon`, installed as the service `jigd`
+  (systemd unit `jigd.service` on Linux, launchd label `jigd` on macOS).
+- Release archive names and the install script use `jig`.
+- State directories move from `~/.cache/sortie-loop` and
+  `~/.local/share/sortie-loop`, and `machine.yaml` from the `sortie-loop`
+  user config directory, to `jigz` directories under the same roots.
+  The old paths are read and migrated on first start.
+- GitHub repository renamed to Jigz. GitHub redirects the old URL.
+- README and docs use the new names.
+- Engine-owned names stay: `SORTIE_*` variables, the `.sortie/` directory,
+  and the `sortie` binary.
+- Acceptance: an existing install with state in the old directories keeps
+  its registry, history, and settings after upgrading.
 
 ### Phase 3: Questions (5.3)
 
