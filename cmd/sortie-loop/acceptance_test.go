@@ -26,6 +26,7 @@ import (
 
 	"github.com/kinged007/sortie-loop/internal/config"
 	"github.com/kinged007/sortie-loop/internal/fakegithub"
+	"github.com/kinged007/sortie-loop/internal/machine"
 	"github.com/kinged007/sortie-loop/internal/rollup"
 )
 
@@ -47,6 +48,12 @@ import (
 //     so the issue would stay active and run all ten turns before the
 //     handoff, where the shipped agent removes its own trigger.
 //   - the pi: block becomes a mock: block.
+//
+// Scenarios d and e write machine.yaml into the isolated config directory
+// while the stack runs. The supervisor reads it again when it changes. In e
+// the pool entries run fake `claude` scripts, and the engine reaches them
+// through `sortie-loop agent-exec`, which the supervisor sets as the agent
+// command; SORTIE_AGENT_KIND replaces agent.kind: mock.
 //
 // Labels, states, handoff, query_filter, dispatch rules and prompts are as
 // shipped. The assignee scope comes from sortie-loop itself (config default
@@ -94,15 +101,17 @@ func TestAcceptance(t *testing.T) {
 	defer logf.Close()
 	cmd := exec.Command(loopBin, "--host", "127.0.0.1", "--dashboard-port", strconv.Itoa(dashPort), repoDir)
 	cmd.Dir = repoDir
-	cmd.Env = []string{
+	env := []string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + home,
 		"XDG_CACHE_HOME=" + filepath.Join(home, ".cache"),
 		"XDG_DATA_HOME=" + filepath.Join(home, ".local", "share"),
 		"XDG_CONFIG_HOME=" + filepath.Join(home, ".config"),
+		"XDG_STATE_HOME=" + filepath.Join(home, ".local", "state"),
 		"SORTIE_BIN=" + engine,
 		"SORTIE_LOOP_ONLY=issues",
 	}
+	cmd.Env = env
 	cmd.Stdout, cmd.Stderr = logf, logf
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
@@ -115,11 +124,12 @@ func TestAcceptance(t *testing.T) {
 		_ = syscall.Kill(-pgid, syscall.SIGKILL)
 		<-exited
 	}()
+	focus := planned
 	fail := func(format string, args ...any) {
 		t.Helper()
 		t.Errorf(format, args...)
 		t.Logf("sortie-loop output (tail):\n%s", logTail(logPath, 60))
-		t.Logf("fake GitHub label events for #%d: %v", planned, labelLog(gh, slug, planned))
+		t.Logf("fake GitHub label events for #%d: %v", focus, labelLog(gh, slug, focus))
 		t.FailNow()
 	}
 	waitFor := func(what string, d time.Duration, ok func() bool) {
@@ -139,18 +149,14 @@ func TestAcceptance(t *testing.T) {
 	}
 	dash := fmt.Sprintf("http://127.0.0.1:%d", dashPort)
 
-	waitFor("the dashboard to answer", 60*time.Second, func() bool {
-		return getJSON(dash+"/api/v1/fleet", new(map[string]any)) == nil
-	})
-	t.Logf("stack up after %s", time.Since(start).Round(time.Second))
-
-	t.Run("a_plan_issue_is_claimed_and_handed_off", func(t *testing.T) {
-		t0 := time.Now()
-		waitFor("the plan issue to reach agent:done", 90*time.Second, func() bool {
-			it, _ := gh.Get(slug, planned)
+	assertHandedOff := func(t *testing.T, n int, d time.Duration) []string {
+		t.Helper()
+		focus = n
+		waitFor(fmt.Sprintf("issue #%d to reach agent:done", n), d, func() bool {
+			it, _ := gh.Get(slug, n)
 			return slices.Contains(it.Labels, "agent:done") && !slices.Contains(it.Labels, "in-progress")
 		})
-		log := labelLog(gh, slug, planned)
+		log := labelLog(gh, slug, n)
 		addedClaim := slices.Index(log, "+in-progress")
 		addedDone := slices.Index(log, "+agent:done")
 		if addedClaim < 0 || addedDone < 0 || addedClaim > addedDone {
@@ -161,10 +167,49 @@ func TestAcceptance(t *testing.T) {
 				t.Errorf("label event %s missing from %v", want, log)
 			}
 		}
-		it, _ := gh.Get(slug, planned)
+		it, _ := gh.Get(slug, n)
 		if !slices.Equal(it.Labels, []string{"agent:done"}) {
 			t.Errorf("final labels %v, want [agent:done]", it.Labels)
 		}
+		return log
+	}
+	writeMachine := func(content string) {
+		t.Helper()
+		path := filepath.Join(home, ".config", "sortie-loop", "machine.yaml")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path+".tmp", []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(path+".tmp", path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	status := func() statusDoc {
+		t.Helper()
+		sc := exec.Command(loopBin, "status", "--json", repoDir)
+		sc.Env = env
+		out, err := sc.Output()
+		if err != nil {
+			t.Fatalf("sortie-loop status: %v", err)
+		}
+		var doc statusDoc
+		if err := json.Unmarshal(out, &doc); err != nil {
+			t.Fatalf("status document: %v", err)
+		}
+		return doc
+	}
+
+	waitFor("the dashboard to answer", 60*time.Second, func() bool {
+		return getJSON(dash+"/api/v1/fleet", new(map[string]any)) == nil
+	})
+	t.Logf("stack up after %s", time.Since(start).Round(time.Second))
+
+	t.Run("a_plan_issue_is_claimed_and_handed_off", func(t *testing.T) {
+		t0 := time.Now()
+		log := assertHandedOff(t, planned, 90*time.Second)
+		it, _ := gh.Get(slug, planned)
 		if it.State != "open" || len(it.Comments) != 0 {
 			t.Errorf("state %q with %d comments, want open with none (comments.on_completion is off)", it.State, len(it.Comments))
 		}
@@ -262,6 +307,128 @@ func TestAcceptance(t *testing.T) {
 			t.Errorf("fleet counts %d runs, want 1: %+v", fleet.Totals.Runs, fleet)
 		}
 		t.Logf("scenario c: %s, schema %d, run %+v", time.Since(t0).Round(time.Millisecond), schema, r)
+	})
+
+	t.Run("d_no_claim_outside_working_hours", func(t *testing.T) {
+		t0 := time.Now()
+		now := time.Now().UTC()
+		window := func(from, to time.Time) string {
+			return fmt.Sprintf("hours:\n  timezone: UTC\n  windows:\n    - days: [mon, tue, wed, thu, fri, sat, sun]\n      start: %q\n      end: %q\n",
+				from.Format("15:04"), to.Format("15:04"))
+		}
+		// A one-minute window twelve hours away is closed for the whole test.
+		writeMachine(window(now.Add(12*time.Hour), now.Add(12*time.Hour+time.Minute)))
+		waitFor("the gate to hold the loop outside the window", 60*time.Second, func() bool {
+			doc := status()
+			return doc.Gate != nil && !doc.Gate.HoursOpen && len(doc.Workflows) == 1 && doc.Workflows[0].State == "held"
+		})
+		doc := status()
+		if doc.Gate.Open || doc.Gate.Hold != "outside working hours" || doc.Workflows[0].Hold != doc.Gate.Hold {
+			t.Errorf("gate %+v, workflow hold %q, want closed with hold %q", *doc.Gate, doc.Workflows[0].Hold, "outside working hours")
+		}
+
+		held := gh.Add(fakegithub.Item{Repo: slug, Title: "Outside hours", Body: "Wait for the window.",
+			Labels: []string{"agent:plan"}, Assignees: []string{owner}})
+		focus = held
+		searches := countSearches(gh)
+		time.Sleep(5 * time.Second)
+		it, _ := gh.Get(slug, held)
+		if ev := labelLog(gh, slug, held); len(ev) != 0 || slices.Contains(it.Labels, "in-progress") {
+			t.Errorf("issue #%d was claimed outside the window: events %v, labels %v", held, ev, it.Labels)
+		}
+		if n := countSearches(gh); n != searches {
+			t.Errorf("the engine polled %d times while the gate was closed", n-searches)
+		}
+
+		writeMachine(window(now.Add(-time.Hour), now.Add(time.Hour)))
+		assertHandedOff(t, held, 90*time.Second)
+		if doc := status(); doc.Gate == nil || !doc.Gate.HoursOpen || !doc.Gate.Open {
+			t.Errorf("gate %+v after the window opened, want open", doc.Gate)
+		}
+		t.Logf("scenario d: %s", time.Since(t0).Round(time.Millisecond))
+	})
+
+	t.Run("e_usage_limit_moves_to_the_next_pool_entry", func(t *testing.T) {
+		t0 := time.Now()
+		fakes := filepath.Join(root, "fakes")
+		if err := os.MkdirAll(fakes, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		calls := filepath.Join(fakes, "calls")
+		reset := time.Now().Add(2 * time.Hour).Truncate(time.Second)
+		fakeClaude := func(name, result string, isError bool, exit int) string {
+			path := filepath.Join(fakes, name)
+			script := fmt.Sprintf("#!/bin/sh\necho %s >> %s\necho '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"%s\"}'\n"+
+				"echo '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":%t,\"result\":\"%s\",\"usage\":{\"input_tokens\":100,\"output_tokens\":50}}'\nexit %d\n",
+				name, calls, name, isError, result, exit)
+			if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			return path
+		}
+		limitMsg := fmt.Sprintf("Claude AI usage limit reached|%d", reset.Unix())
+		a := fakeClaude("claude-a", limitMsg, true, 1)
+		b := fakeClaude("claude-b", "All done.", false, 0)
+		writeMachine(fmt.Sprintf("pool:\n  - name: claude-a\n    runtime: claude-code\n    command: %q\n  - name: claude-b\n    runtime: claude-code\n    command: %q\n", a, b))
+
+		// The loop has to restart with the pool environment before the issue
+		// exists, or a loop without the pool could take it.
+		before := status().Workflows[0].PID
+		waitFor("the loop to restart with the pool", 90*time.Second, func() bool {
+			doc := status()
+			return doc.Gate != nil && doc.Gate.Runtime == "claude-code" && len(doc.Workflows) == 1 &&
+				doc.Workflows[0].State == "running" && doc.Workflows[0].PID != before
+		})
+		pooled := gh.Add(fakegithub.Item{Repo: slug, Title: "Hit a limit", Body: "Switch accounts.",
+			Labels: []string{"agent:plan"}, Assignees: []string{owner}})
+		assertHandedOff(t, pooled, 90*time.Second)
+
+		raw, _ := os.ReadFile(calls)
+		// The engine first runs a credential check through the agent command,
+		// so claude-a hits its limit there and claude-b answers the check and
+		// then the turn.
+		got := strings.Fields(string(raw))
+		if len(got) < 2 || got[0] != "claude-a" || slices.Contains(got[1:], "claude-a") {
+			t.Errorf("fake claude calls %v, want one claude-a call and then only claude-b", got)
+		}
+		st, err := machine.LoadState(filepath.Join(home, ".local", "state", "sortie-loop", "pool.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		sa, sb := st["claude-a"], st["claude-b"]
+		if !sa.ExhaustedUntil.Equal(reset) || !strings.Contains(sa.Reason, "usage limit reached") || sa.LastUsed.IsZero() {
+			t.Errorf("claude-a state %+v, want exhausted until %s with the limit message and last_used set", sa, reset)
+		}
+		if !sb.ExhaustedUntil.IsZero() || sb.LastUsed.IsZero() {
+			t.Errorf("claude-b state %+v, want not exhausted and last_used set", sb)
+		}
+
+		db, err := sql.Open("sqlite", "file:"+filepath.Join(repoDir, ".sortie", "workflows", ".sortie-issues.db")+"?mode=ro")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		rows, err := db.Query(`SELECT attempt, agent_adapter, status FROM run_history WHERE display_identifier = ? ORDER BY id`,
+			fmt.Sprintf("%s#%d", slug, pooled))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var attempts []string
+		for rows.Next() {
+			var attempt int
+			var adapter, status string
+			if err := rows.Scan(&attempt, &adapter, &status); err != nil {
+				t.Fatal(err)
+			}
+			attempts = append(attempts, fmt.Sprintf("%d:%s:%s", attempt, adapter, status))
+		}
+		if len(attempts) != 2 || !strings.HasPrefix(attempts[0], "1:claude-code:") || strings.HasSuffix(attempts[0], ":succeeded") ||
+			!strings.HasSuffix(attempts[1], ":claude-code:succeeded") {
+			t.Errorf("engine run history %v, want a failed attempt then a succeeded one on claude-code", attempts)
+		}
+		it, _ := gh.Get(slug, pooled)
+		t.Logf("scenario e: %s, runs %v, %d comments, claude-a %+v", time.Since(t0).Round(time.Millisecond), attempts, len(it.Comments), sa)
 	})
 
 	if un := gh.Unexpected(); len(un) > 0 {
