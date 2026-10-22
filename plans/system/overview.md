@@ -2,10 +2,11 @@
 
 Status: draft for discussion (2026-10-21)
 
-The system has two products, `sortie-loop` and the hub (product name
-pending), plus two external dependencies: the sortie engine and a git
-provider. This document describes how they fit together and the rules that
-let each product be built by its own agent stream.
+The system has two products: Jigz (`sortie-loop` in code; command `jig`;
+background service `jigd`) and Shiftd, the hub, a web platform. It also has
+two external dependencies: the sortie engine and a git provider. This
+document describes how they fit together and the rules that let each
+product be built by its own agent stream.
 
 Document map:
 
@@ -114,7 +115,7 @@ kept.
 1. A member signs in to the hub (GitHub App sign-in, limited to members of
    the configured GitHub organization).
 2. The hub shows a one-time enrollment token.
-3. On their machine: `sortie-loop join <hub-url> <token>`. The daemon
+3. On their machine: `jig join <hub-url> <token>`. The daemon
    receives an id, a credential, and its runner label, then pulls its
    config.
 

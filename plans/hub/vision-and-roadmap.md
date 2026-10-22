@@ -2,7 +2,7 @@
 
 Status: draft for discussion (2026-10-21)
 
-The hub (product name pending) is the control centre of the system
+Shiftd, the hub, is the control centre of the system
 described in `plans/system/overview.md`. It plans, assigns, governs,
 verifies, and measures work; the git provider holds the record, and
 `sortie-loop` daemons on members' machines do the execution. These
@@ -101,7 +101,7 @@ Every row belongs to an organization from the first version.
 - SSO through OIDC or SAML for organizations that need it (phase 10).
 - Audit log export and retention settings (phase 7).
 - A member enrolls daemons from the hub (one-time token, then
-  `sortie-loop join`).
+  `jig join`).
 - A public read-only view (roadmap, progress, aggregate metrics) for
   building in public; all actions need sign-in. It is an organization
   setting, on or off (4.12).
@@ -334,7 +334,7 @@ protocol schemas, so it does not wait for `sortie-loop` releases.
 
 ### Phase 0: Repository and harness
 
-- Repository, name, license decision, README.
+- Repository, license decision, README.
 - Delivery harness (`plans/system/delivery-method.md` section 5).
 - GitHub App sign-in with organization check; organizations and members.
 - Protocol v0 schemas and the fake daemon.
@@ -408,11 +408,10 @@ protocol schemas, so it does not wait for `sortie-loop` releases.
 
 ## 6. Open decisions
 
-1. Product name.
-2. Stack: Go, SQLite or Postgres, server-rendered UI (reuses `sortie-loop`
+1. Stack: Go, SQLite or Postgres, server-rendered UI (reuses `sortie-loop`
    experience), or another.
-3. License and commercial model (`plans/system/overview.md` section 7).
-4. How a guest signs in to the dashboard, for example Sign in with Slack.
+2. License and commercial model (`plans/system/overview.md` section 7).
+3. How a guest signs in to the dashboard, for example Sign in with Slack.
 
 ## 7. Backlog
 

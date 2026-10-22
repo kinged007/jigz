@@ -160,7 +160,7 @@ Without the fork, the issue workflow runs with `claude-code`, `codex`, or
 
 ### 5.5 Connected mode
 
-- `sortie-loop join <hub-url> <token>`; credential stored locally.
+- `jig join <hub-url> <token>`; credential stored locally.
 - Runner mode: the daemon takes its project config only from the hub
   (projects, enabled workflows, workflow and prompt files with versions,
   query filter additions, labels); applied when loops are idle.
@@ -227,6 +227,23 @@ it needs no model and no real GitHub.
   it, and never linked or shown in the dashboard.
 - Acceptance harness: `make verify`, fake GitHub API, sortie `mock` agent.
 
+### Rename to Jigz
+
+- Go module path changes to the Jigz repository path. The binary is `jig`.
+  The daemon runs as `jig daemon`, installed as the service `jigd`
+  (systemd unit `jigd.service` on Linux, launchd label `jigd` on macOS).
+- Release archive names and the install script use `jig`.
+- State directories move from `~/.cache/sortie-loop` and
+  `~/.local/share/sortie-loop`, and `machine.yaml` from the `sortie-loop`
+  user config directory, to `jigz` directories under the same roots.
+  The old paths are read and migrated on first start.
+- GitHub repository renamed to Jigz. GitHub redirects the old URL.
+- README and docs use the new names.
+- Engine-owned names stay: `SORTIE_*` variables, the `.sortie/` directory,
+  and the `sortie` binary.
+- Acceptance: an existing install with state in the old directories keeps
+  its registry, history, and settings after upgrading.
+
 ### Phase 1: Working hours and account pool (5.1, 5.2)
 
 - Working-hours config per machine and per pool entry (days, hours,
@@ -270,7 +287,8 @@ it needs no model and no real GitHub.
 
 ### Phase 4: Connected mode (5.5)
 
-- `sortie-loop join <hub-url> <token>`; credential stored locally.
+- `jig join <hub-url> <token>` stores the credential locally, then installs
+  and starts the `jigd` service, which runs `jig daemon`.
 - Config pull with ETag; applied when loops are idle.
 - Config source for the supervisor: local files or the hub. This is the
   one new abstraction; it has two implementations. In connected mode local
@@ -321,5 +339,3 @@ Not scheduled.
 ## 7. Open decisions
 
 1. Default agent runtime for new users: `claude-code` or `pi`.
-2. Name of the daemon role: keep `sortie-loop`, or rename when the product
-   name is chosen.

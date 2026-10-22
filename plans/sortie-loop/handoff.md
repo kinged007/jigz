@@ -65,12 +65,13 @@ Read, in order:
   to another entry.
 - `hours.end` is a config setting with the values `finish` or `stop`. The
   default is `finish`.
+- Names: Jigz for `sortie-loop` (command `jig`; the daemon runs as
+  `jig daemon`, installed as service `jigd`). Shiftd for the hub. The rename
+  is a roadmap item (`plans/sortie-loop/vision-and-roadmap.md` section 6);
+  code still says `sortie-loop` until it is done.
 
 Open decisions (do not decide them; ask):
 
-- Product names for `sortie-loop` and the hub. Candidates discussed:
-  Jig + Shiftwork, Stint + Rota, Peg + Pegboard, Plumb + Level,
-  Caliper + Muster. `shift` cannot be a command name (bash builtin).
 - Default agent runtime for new users: `claude-code` or `pi`.
 - Whether CI runs the acceptance test (downloads the engine, about 70 s).
 
