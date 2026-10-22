@@ -8,8 +8,10 @@ and it has no code yet.
 
 Build `sortie-loop` as a free, open-source tool that is complete without
 the hub, following `plans/sortie-loop/vision-and-roadmap.md` section 6.
-Phase 0 is done except the merge. Phase 1 is complete in code, tests, and
-docs; its release and release notes are not done. Phase 2 is next.
+Phase 0 is done except the merge. Phases 1 and 2 are complete in code,
+tests, and docs. Neither has a release or release notes; releases are
+deferred until the user asks. The next steps are the acceptance test in CI,
+the Jigz rename, and Phase 3.
 
 Read, in order:
 
@@ -42,6 +44,7 @@ Read, in order:
   The upstream PRs for both are in progress.
 - New tools or dependencies, and CI workflow changes, need the user's
   approval first.
+- No releases for now. Do not release unless the user asks.
 - Global rules in `~/.claude/AGENT_ORCHESTRATION.md`: the main agent
   delegates exploration, edits, and test runs to workers and reports on
   delegation after each assignment.
@@ -57,9 +60,9 @@ Read, in order:
   backlog item.
 - The acceptance harness uses an in-memory fake GitHub API
   (`internal/fakegithub`), not Gitea (reason in `delivery-method.md` 2.3).
-- Machine-local settings (working hours, pool entries) are in `machine.yaml`
-  in the user config directory. Pool state is in `pool.json` in the user
-  state directory.
+- Machine-local settings (working hours, pool entries, engine selection)
+  are in `machine.yaml` in the user config directory. Pool state is in
+  `pool.json` in the user state directory.
 - Runtime failover sets `SORTIE_AGENT_KIND` and `SORTIE_AGENT_COMMAND` on
   one workflow, so the workflow switches agent runtime when the pool moves
   to another entry.
@@ -67,37 +70,44 @@ Read, in order:
   default is `finish`.
 - Names: Jigz for `sortie-loop` (command `jig`; the daemon runs as
   `jig daemon`, installed as service `jigd`). Shiftd for the hub. The rename
-  is a roadmap item (`plans/sortie-loop/vision-and-roadmap.md` section 6);
-  code still says `sortie-loop` until it is done.
+  is scheduled after Phase 2 (`plans/sortie-loop/vision-and-roadmap.md`
+  section 6, "Rename to Jigz"); code still says `sortie-loop` until it is
+  done.
+- Fields with no engine API source are not shown in the dashboard:
+  workspace path, prompt template, API request count, handoff counter reset,
+  and review metadata.
+- Engine selection is machine-local (`engine:` in `machine.yaml`). The
+  default stays `kinged007/sortie` v1.28.1 until upstream has `pi` and
+  `github-pr`.
+- The dashboard counts succeeded and failed runs by status name from
+  `/api/v1/stats` `by_status`. The engine's `summary.failed` counts every
+  non-success status except cancelled, needs_person, and budget_stopped.
+- The user approved running the acceptance test in CI (2026-10-22). It is
+  not implemented yet.
+- Releases are deferred until the user asks.
 
 Open decisions (do not decide them; ask):
 
 - Default agent runtime for new users: `claude-code` or `pi`.
-- Whether CI runs the acceptance test (downloads the engine, about 70 s).
 
 ## 4. State of the work
 
-Branch `feat/united-dashboard`, 27 commits ahead of `main`, not pushed, no
-PR open. Commits from this session:
+Branch `feat/united-dashboard`, 37 commits ahead of `main`, not pushed, no
+PR open. Phase 1 (working hours, account pool, `agent-exec`, runtime
+failover, dashboard pages) is in `internal/machine`, `cmd/sortie-loop/gate.go`
+and `cmd/sortie-loop/agentexec.go`. Phase 2 commits:
 
 | Commit | Change |
 | ------ | ------ |
-| `ae57e5a` | plans split into system, sortie-loop, and hub; product boundary |
-| `fbee073` | schema gate accepts engine schema 38; PR filter comments corrected |
-| `bbfa5b1` | authentication removed; per-loop engine servers not linked; `--loop-url-template` and `loop_bind_host` removed; wildcard bind label; unknown paths return 404; add-project wizard and project removal routed |
-| `79825f4` | plans name the fake GitHub API |
-| `7d1e0be` | acceptance harness and `make verify` |
-| `9313e3e` | engine resolution: SORTIE_BIN, installed pin, download of the pin; a `sortie` beside the binary or on PATH only when the download fails, with a warning; one download attempt per process; unit tests disable the download in TestMain |
-| `8aea1f4` | machine config package: working hours and an agent account pool |
-| `b254060` | agent-exec: runs the next available pool account as the agent command |
-| `b890abd` | supervisor gate on working hours; runtime switch from the pool; shipped workflows carry `pi:` and `claude-code:` blocks |
-| `09376c6` | validate hides the other runtime's unknown_key warning |
-| `c899be4` | dashboard: working hours, account pool, and gate holds; README section |
-| `891c510` | acceptance scenarios d and e (section 5) |
-| `220393e` | docs on the usage-limit cost through the engine's credential check |
+| `b69906d` | `internal/store/outcome.go` maps runs to the classes `succeeded`, `failed_agent`, `failed_workspace`, `failed_limit`, `cancelled`, `timeout`, `handoff_withheld`. The account-limit pattern is `machine.BuiltinLimit`. The CSV outcome column and the API `error_class.key` carry the class key. |
+| `6940822` | `internal/engine` has one resolver with a configurable repository and version: the `engine:` block in `machine.yaml`, overridden by `SORTIE_ENGINE_REPO` and `SORTIE_ENGINE_VERSION`; `SORTIE_BIN` wins. Cache files are named `sortie-<owner>+<name>-<version>`. |
+| `250d045` | `internal/collector/api.go` reads runs from `/api/v1/runs` (paged by run id, filtered by `workflow_file`), events from `/api/v1/state`, and rollup counts from `/api/v1/stats` `by_status`. A SQLite fallback serves stopped loops; its schema range is 18 to 43, with `rollup.EngineReleases` {1.28.1: 38, 1.29.0: 43}. Store migration 8 drops `workspace`, `template_id`, `api_requests`, `handoff_reset`, and `review_metadata`. A replaced engine database with a lower newest run id re-copies that workflow's runs. |
+| `59d2ba2` | Capability detection (`internal/engine/probe.go`, `gate.go`, `internal/plan/gating.go`, `cmd/sortie-loop/capabilities.go`). The version comes from `-dumpversion`; kinds come from `validate` on a workflow with unknown kinds. Without `github-pr` the PR loop is disabled (state `disabled`, reason in `hold`). Without `pi` the shipped workflows run with `claude-code`. Engine below 1.27.0 runs no loops. An explicitly set unsupported agent is an error. Pool entries for a missing runtime are not picked. One alert is shown per disabled feature. Settings lists the kinds. The status document `engine_version` is the binary's version. |
+| `01a0ad0` | The dashboard reads parked and budget-hold alerts from `/api/v1/state` while the engine runs. Settings shows the schema range. |
+| `3accb2b` | `TestAcceptanceUpstreamEngine` runs upstream `sortie-ai/sortie` v1.29.0 selected through `machine.yaml`: the issue is handed off, the PR loop is disabled with no PR requests, `validate` passes, the alert and kinds are shown, and a run arrives through the API. The Makefile acceptance target runs both tests. |
 
-Commits `f5d9b45`, `cb566b6`, and `8bc988b` (hub plans) are on the branch
-from the hub stream, not from this work.
+Commits `f5d9b45`, `cb566b6`, `8bc988b` (hub plans), `1d5ce19`, and
+`14919dd` (product names, rename schedule) are plan changes on the branch.
 
 Outside this repository:
 
@@ -109,70 +119,76 @@ Outside this repository:
   the fork's Release workflow skip jobs that need upstream-only secrets,
   skip Windows signing, and leave Windows out of fork releases. It is not
   run yet; the workflow has a `dry_run` input for a test.
+- `/home/coder/sortie` has refs `refs/upstream-tags/*` (upstream tags;
+  the local tags v1.26.0, v1.27.0, and v1.28.1 point at fork commits). Its
+  working tree is the user's `feat/pi-adapter` branch: read it only with
+  `git show <ref>:<path>`.
+- Upstream engine v1.29.0 is cached at
+  `~/.local/share/sortie-loop/sortie-sortie-ai+sortie-1.29.0`.
 
 ## 5. Checks
 
-- `make verify` passes with no overrides: gofmt, `go vet` (also with
-  `-tags acceptance`), build, `go test ./...`, and the acceptance test.
-  The acceptance test takes about 104 s.
-- The acceptance test (`cmd/sortie-loop/acceptance_test.go`, tag
-  `acceptance`) runs the real `sortie-loop` binary and engine v1.28.1. Scenarios:
-  - an `agent:plan` issue is claimed and handed off;
-  - `needs-human` and other-assignee issues are not dispatched;
-  - the dashboard API reports the run from the schema 38 database;
-  - scenario d: no claims outside a working-hours window, and a claim after
-    the window opens;
-  - scenario e: a usage limit on pool entry A moves the retry to entry B;
-    entry A stays exhausted until the reset epoch.
-
-  It fails if the fake GitHub API receives an unknown route, parameter, or
-  search qualifier.
-- Dashboard pages were loaded in a browser after the auth removal; a
-  foreign Origin or Host gets 403.
+- `make verify` passes on `3accb2b`: gofmt, `go vet` (also with
+  `-tags acceptance`), build, `go test ./...`, and both acceptance tests
+  (`TestAcceptance` about 105 s, `TestAcceptanceUpstreamEngine` about 65 s;
+  about 3 minutes in total). The acceptance tests download each engine
+  (about 25 MB) on first run per machine and fail if the download fails.
+- `TestAcceptance` runs the real `sortie-loop` binary and engine v1.28.1.
+  Scenarios: an `agent:plan` issue is claimed and handed off;
+  `needs-human` and other-assignee issues are not dispatched; the dashboard
+  API reports the run; no claims outside a working-hours window and a claim
+  after it opens; a usage limit on pool entry A moves the retry to entry B
+  and A stays exhausted until the reset epoch. It fails if the fake GitHub
+  API receives an unknown route, parameter, or search qualifier.
+- Browser checks: obscura refuses loopback addresses and Playwright is not
+  installed for this Go repo. Page checks were done with Go-side HTTP
+  fetches, in the acceptance tests and in an isolated instance on free
+  ports.
 
 ## 6. Outstanding work
 
-In order of the roadmap:
-
 1. Merge `feat/united-dashboard` into `main` through a PR (the user does
    this, or asks for it).
-2. Phase 1 release: the roadmap says each phase ends with a release and
-   release notes. Neither is done. Ask the user before releasing.
-3. Phase 2: engine independence (roadmap section 6).
-   The upstream PRs for the `pi` adapter and the `github-pr` tracker are
-   in progress and owned by the user; the rest of Phase 2 does not wait
-   for them.
+2. Add the acceptance test to CI (approved).
+3. The Jigz rename.
+4. Phase 3: Questions (roadmap section 6).
+5. Phase 1 and Phase 2 releases and release notes: deferred; only when
+   the user asks.
 
-Phase 1 against the roadmap (section 6, Phase 1):
+The upstream PRs for the `pi` adapter and the `github-pr` tracker are in
+progress and owned by the user.
 
-- Working hours per machine and per pool entry, no new claims outside a
-  window, optional stop of running sessions: done (`internal/machine`,
-  `cmd/sortie-loop/gate.go`; `hours.end: finish | stop`).
-- Agent pool config with runtime, account env, hours, cost class: done
-  (`machine.yaml`).
-- `sortie-loop agent-exec`: entry selection, usage-limit detection,
-  exhausted-until tracking in `pool.json`: done
-  (`cmd/sortie-loop/agentexec.go`).
-- Runtime failover by `SORTIE_AGENT_KIND` / `SORTIE_AGENT_COMMAND`; loops
-  recycled when they have no running session: done.
-- Dashboard: current window, pool entries and their state, gate holds on
-  Operations: done; checked in a browser against an isolated instance.
-- Acceptance: a scripted limit failure moves the next run to the next
-  entry; no claims outside a window: done (scenarios d and e).
-- Release and release notes: not done.
-- Reporting hours and pool to the hub belongs to Phase 4 (connected mode).
+Known gaps from Phase 2, not scheduled:
 
-Known gaps, not scheduled:
+- `failed_limit` is recognised only when the limit text reaches the
+  engine's error (agent result text, or stderr on early exit). A custom
+  limit pattern in `pool.json` is not visible to the classifier.
+- History holds raw error text for runs copied from SQLite and API
+  sentences for runs copied from the API.
+- Capabilities are probed once per supervisor process; a pin change needs
+  a restart.
+- `codex` and `opencode` run only with `agent.kind` and `agent.command`
+  both set; there is no pool runtime, default command, or shipped block
+  for them.
+- A replacement engine database whose ids already exceed the stored last
+  run id is not detected.
+- The PR-workflow-off alert is also shown for projects started with
+  `SORTIE_LOOP_ONLY=issues`.
+- `fillRunFiles` (the `workflow_file` backfill) runs only on the SQLite
+  path.
+- Existing installs download the default engine once more because of the
+  new cache file name; the old `sortie-<version>` files are not removed.
+
+Known gaps from Phase 1, not scheduled:
 
 - Engine v1.28.1 runs a credential check through the agent command before
   each worker run, so a usage limit is usually found there: the run fails,
-  posts no comment, and retries after about 10 s.
-- A usage limit that occurs mid-turn posts a failure comment.
+  posts no comment, and retries after about 10 s. A usage limit that occurs
+  mid-turn posts a failure comment.
 - With `max_concurrent_agents` greater than 1, a loop can claim work between
   window close and stop.
 - Acceptance covers `end: finish` only; `end: stop` is covered by
-  supervisor integration tests with a fake engine (`gate_test.go`,
-  `supervise_test.go`).
+  supervisor integration tests with a fake engine.
 - The agent-exec "no entry until" time uses the global next change, not a
   time per runtime.
 - The limit detection patterns are not checked against real `claude` or
@@ -181,53 +197,62 @@ Known gaps, not scheduled:
   loop per tick, with a 3 s timeout.
 - A dashboard started while offline keeps the PATH fallback engine until
   restart, because the download is attempted once per process.
-- No acceptance scenario for the PR workflow (`github-pr`); the fake
-  serves its routes and has unit tests.
+- No acceptance scenario for the PR workflow (`github-pr`) on the fork
+  engine; the fake serves its routes and has unit tests.
 - GitHub enrichment in the collector (PR timeline, commits, check runs)
   never runs: nothing sets `app.github`.
 - The collector copies runs every 60 s and the interval is not
-  configurable, so the dashboard scenario waits about a minute.
-- When the dashboard was stopped by a signal during a test with a hung fake
-  engine, its `validate` child processes were left running. Not checked
-  with the real engine.
+  configurable.
+- A dashboard stopped by a signal while a `validate` child hangs may leave
+  the child running. Not checked with the real engine.
 - About 113 Go lines still say "central" (the earlier name of the
   dashboard code).
 - `plans/sortie-loop/enhancements.md` and `production-readiness.md` refer
   to `plans/pm-agent.md`, which does not exist in the repository.
 - Target repositories installed before Phase 1 have workflows without the
   `claude-code:` block; the runtime switch to claude-code needs
-  `sortie-loop setup` re-run there (AGENTS.md: installed workflows are
-  refreshed by setup).
+  `sortie-loop setup` re-run there.
 
 ## 7. Processes on this machine
 
 A real `sortie-loop` instance with its `sortie` children runs on ports
 7677 to 7679, using the registry in `~/.cache/sortie-loop/`. It started
-before the engine resolution fix (`9313e3e`) and still runs engine 1.27.0
-until restarted. Do not stop it or write to its registry. Tests isolate
-`HOME` and `XDG_*` to temporary directories; keep doing that.
+before the engine resolution fix (`9313e3e`) and the Phase 2 changes, and
+still runs engine 1.27.0 until restarted. Do not stop it or write to its
+registry. Tests isolate `HOME` and `XDG_*` to temporary directories; keep
+doing that.
 
 ## 8. Lessons for routing work
 
 - Research before building when an external system is involved: the
   research ruled out Gitea before any harness code was written.
-- Research the engine source before designing a wrapper: env overrides,
-  retry, and the credential check changed the design and the docs.
+- Research the engine source before designing a wrapper. It changed the
+  design twice: env overrides, retry, and the credential check in Phase 1;
+  and in Phase 2 the API has no machine-readable error kind, kinds are
+  discoverable only through `validate` errors, and `/runs` `ended_since` is
+  not a run cursor.
 - Include a browser check of the affected pages in the implementation
   brief. Render tests missed a wrong bind label and three missing routes.
 - Fakes must reject what they do not know; otherwise a test passes while
   the engine makes calls nobody checked.
 - Parallel workers need disjoint files; a worker's `go test` can fail on
   another worker's half-finished edit, so the lead runs the final gate.
+- Workers split by step left follow-ups across the boundary (`alerts.go`
+  still read SQLite after the collector moved to the API). Brief shared
+  consumers together, or plan a review pass for them.
+- The lead splits shared files (README, `features.md`) into per-commit
+  hunks; workers list which hunks are theirs.
 - A worker hit a usage limit mid-task; resuming the same worker kept its
   progress.
 
 ## 9. Next action
 
-Phase 1 is complete except its release. Ask the user about:
+1. Add the acceptance test to CI in `.github/workflows/ci.yml`. It needs
+   network to download both engines and takes about 3 minutes. Consider
+   caching the engines in `~/.local/share/sortie-loop`, keyed on
+   repository and version. Ask the user before adding any action or tool
+   beyond what the workflow already uses.
+2. The Jigz rename (roadmap section 6, "Rename to Jigz").
+3. Phase 3 (Questions) after the rename.
 
-1. A Phase 1 release (release and release notes).
-2. Phase 2: engine independence.
-3. The acceptance test in CI (needs the user's approval).
-
-Open decisions in section 3 remain open.
+The default agent runtime in section 3 remains open.
