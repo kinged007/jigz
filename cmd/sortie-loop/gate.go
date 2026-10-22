@@ -132,7 +132,8 @@ func (v gateView) hold() string {
 //
 // A workflow has `hold` set to the same text while the gate is closed,
 // unless a budget pause holds it. A workflow the gate stopped has state
-// "held".
+// "held". A workflow that capability detection disabled has state
+// "disabled" and its `hold` is the reason.
 type gateStatus struct {
 	Open       bool       `json:"open"`
 	HoursOpen  bool       `json:"hours_open"`

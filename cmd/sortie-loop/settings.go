@@ -2,11 +2,11 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os/exec"
 	"path/filepath"
 	"runtime/debug"
-	"strconv"
 	"strings"
 	"time"
 
@@ -66,7 +66,7 @@ func (a *app) toolVersions() []pair {
 		}
 		a.versions = append(a.versions, pair{"engine", reported}, pair{"engine release", engine.Current().String()})
 		a.versions = append(a.versions, engineCapabilities(a.gate())...)
-		a.versions = append(a.versions, pair{"supported database schema", schemaList(rollup.SupportedSchemas)})
+		a.versions = append(a.versions, pair{"supported database schema", fmt.Sprintf("%d to %d", rollup.OldestSchema, rollup.NewestSchema())})
 	})
 	return a.versions
 }
@@ -84,14 +84,6 @@ func buildVersion() string {
 		}
 	}
 	return version
-}
-
-func schemaList(versions []int) string {
-	parts := make([]string, len(versions))
-	for i, v := range versions {
-		parts[i] = strconv.Itoa(v)
-	}
-	return strings.Join(parts, ", ")
 }
 
 func firstLine(bin string, args ...string) string {

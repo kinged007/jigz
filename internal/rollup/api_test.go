@@ -99,3 +99,26 @@ func TestLoopWithoutAnEngineIsReadFromTheDatabase(t *testing.T) {
 		t.Errorf("loop = live %v, runs %d, tokens %d, want the totals of the database", l.Live, l.Runs, l.Tokens)
 	}
 }
+
+func TestLiveLoopReadsHeldIssuesFromState(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/state" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write([]byte(`{"counts":{},"parked":[{"issue_id":"7","reason":"needs a person"}],
+			"budget_exhausted":[{"issue_id":"9","reason":"token budget used"}]}`))
+	}))
+	defer srv.Close()
+	u, _ := url.Parse(srv.URL)
+	port, _ := strconv.Atoi(u.Port())
+	l := Reader{}.Loop("acme/app", "build", port, filepath.Join(t.TempDir(), "none.db"), true)
+	if len(l.Parked) != 1 || l.Parked[0] != (Held{"7", "needs a person"}) {
+		t.Errorf("parked = %+v", l.Parked)
+	}
+	if len(l.BudgetHeld) != 1 || l.BudgetHeld[0] != (Held{"9", "token budget used"}) {
+		t.Errorf("budget held = %+v", l.BudgetHeld)
+	}
+}

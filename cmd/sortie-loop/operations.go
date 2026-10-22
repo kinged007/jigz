@@ -28,7 +28,8 @@ type opsLoop struct {
 	// Paused marks a workflow whose budget holds it, and PausedBy why.
 	Paused   bool
 	PausedBy string
-	// Hold is the machine gate's reason for keeping this loop down, and
+	// Hold is the reason the machine gate or capability detection keeps
+	// this loop down, and
 	// Runtime the agent runtime the gate selected.
 	Hold    string
 	Runtime string

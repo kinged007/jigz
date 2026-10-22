@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -155,9 +156,14 @@ func (a *app) dbAlerts(projects []opsProject) []alert {
 	return out
 }
 
-// loopDBAlerts reads the budget holds and parked issues of one loop's
-// database. A database that cannot be read or lacks a table gives none.
+// loopDBAlerts gives the budget holds and parked issues of one loop. They
+// come from the engine's state API while it answers, and from the loop's
+// database otherwise. A database that cannot be read or lacks a table
+// gives none.
 func loopDBAlerts(l rollup.Loop) []alert {
+	if l.Live {
+		return heldAlerts(l, l.BudgetHeld, l.Parked)
+	}
 	if l.DBPath == "" || l.Schema != nil {
 		return nil
 	}
@@ -166,30 +172,49 @@ func loopDBAlerts(l rollup.Loop) []alert {
 		return nil
 	}
 	defer db.Close()
-	var out []alert
-	for _, q := range []struct{ table, kind, what string }{
-		{"budget_hold_notices", "Budget hold", "held by the budget"},
-		{"parked_issues", "Parked issue", "parked"},
-	} {
-		rows, err := db.Query("SELECT issue_id, reason FROM " + q.table + " ORDER BY issue_id")
+	var lists [2][]rollup.Held
+	for i, table := range []string{"budget_hold_notices", "parked_issues"} {
+		rows, err := db.Query("SELECT issue_id, reason FROM " + table + " ORDER BY issue_id")
 		if err != nil {
 			continue
 		}
-		var items []string
 		for rows.Next() {
 			var id string
 			var reason *string
 			if rows.Scan(&id, &reason) == nil {
-				item := "#" + id
-				if reason != nil && *reason != "" {
-					item += " (" + trunc(*reason, 80) + ")"
+				h := rollup.Held{ID: id}
+				if reason != nil {
+					h.Reason = *reason
 				}
-				items = append(items, item)
+				lists[i] = append(lists[i], h)
 			}
 		}
 		rows.Close()
-		if len(items) > 0 {
-			out = append(out, alert{"warn", q.kind, fmt.Sprintf("%s/%s: %s %s", l.Repo, l.Loop, q.what, strings.Join(items, ", ")), "/projects/" + l.Repo})
+	}
+	return heldAlerts(l, lists[0], lists[1])
+}
+
+func heldAlerts(l rollup.Loop, budget, parked []rollup.Held) []alert {
+	var out []alert
+	for _, q := range []struct {
+		items      []rollup.Held
+		kind, what string
+	}{
+		{budget, "Budget hold", "held by the budget"},
+		{parked, "Parked issue", "parked"},
+	} {
+		items := slices.Clone(q.items)
+		slices.SortFunc(items, func(a, b rollup.Held) int { return strings.Compare(a.ID, b.ID) })
+		var parts []string
+		for _, h := range items {
+			item := "#" + h.ID
+			if h.Reason != "" {
+				item += " (" + trunc(h.Reason, 80) + ")"
+			}
+			parts = append(parts, item)
+		}
+		if len(parts) > 0 {
+			out = append(out, alert{"warn", q.kind, fmt.Sprintf("%s/%s: %s %s", l.Repo, l.Loop, q.what, strings.Join(parts, ", ")), "/projects/" + l.Repo})
 		}
 	}
 	return out

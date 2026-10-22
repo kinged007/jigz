@@ -80,6 +80,17 @@ type Loop struct {
 	// Schema is set when the database is at an unsupported version or
 	// lacks a column; the figures that depend on it are left empty.
 	Schema *SchemaNotice `json:"schema_notice,omitempty"`
+	// Parked and BudgetHeld are the issues the engine's state API lists
+	// as parked and as stopped by a budget. They are set only while the
+	// engine answers.
+	Parked     []Held `json:"-"`
+	BudgetHeld []Held `json:"-"`
+}
+
+// Held is one issue the engine keeps out of dispatch, with the reason.
+type Held struct {
+	ID     string
+	Reason string
 }
 
 // Repo is one repository's totals across its loops.
@@ -320,6 +331,14 @@ type statePayload struct {
 		OutputTokens int64 `json:"output_tokens"`
 		TotalTokens  int64 `json:"total_tokens"`
 	} `json:"agent_totals"`
+	Parked []struct {
+		IssueID string `json:"issue_id"`
+		Reason  string `json:"reason"`
+	} `json:"parked"`
+	BudgetExhausted []struct {
+		IssueID string `json:"issue_id"`
+		Reason  string `json:"reason"`
+	} `json:"budget_exhausted"`
 	Running []struct {
 		DisplayIdentifier string `json:"display_identifier"`
 		IssueIdentifier   string `json:"issue_identifier"`
@@ -359,6 +378,12 @@ func (l *Loop) readState(c *http.Client) {
 	l.Retrying = p.Counts.Retrying
 	l.Cost = p.ActiveEstimatedCostUSD
 	l.Input, l.Output, l.Tokens = p.AgentTotals.InputTokens, p.AgentTotals.OutputTokens, p.AgentTotals.TotalTokens
+	for _, e := range p.Parked {
+		l.Parked = append(l.Parked, Held{e.IssueID, e.Reason})
+	}
+	for _, e := range p.BudgetExhausted {
+		l.BudgetHeld = append(l.BudgetHeld, Held{e.IssueID, e.Reason})
+	}
 	for _, run := range p.Running {
 		id := run.DisplayIdentifier
 		if id == "" {
