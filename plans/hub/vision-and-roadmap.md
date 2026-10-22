@@ -16,8 +16,8 @@ Features by area: `plans/hub/features.md`. Contract with daemons:
 A control centre for teams of humans and their agents across many
 projects:
 
-- product and project management done by agents, with humans approving
-  and steering;
+- management roles (product manager, project manager, and any other role
+  the team defines) filled by agents, with humans approving and steering;
 - work assigned to members and routed to their own machines;
 - questions and approvals that reach the right person or agent;
 - a change counts as done only with evidence from the product in use;
@@ -32,9 +32,11 @@ kinds of projects can be added later.
 | ---------- | -------------- |
 | Organizations, members, sign-in | Running agents (`sortie-loop` and sortie) |
 | Projects and provider sync | Agent credentials and subscriptions |
-| Product and project management, manager sessions | Workspaces, sandboxes, preview hosting |
+| Agents (product manager, project manager, other roles), their instructions, tools, and permissions | Workspaces, sandboxes, preview hosting |
+| Tasks and triggers for hub-driven work | |
 | Assignment and routing to daemons | Machine-local working hours and account pools |
 | Inbox, questions, approvals | Data of record for issues and PRs (provider) |
+| Gateway: channel connectors (Slack first) and guests | Branch policy, merge rules, promotion workflows (provider settings and project CI) |
 | Verification records, outcomes, readiness | |
 | Fleet view of daemons, all machines of all members | |
 | Authenticating proxy for previews, shared with reviewers outside the team | |
@@ -65,7 +67,12 @@ The hub has no dependency on sortie.
 | Milestone | release scope (product level) |
 | Sprint | an ordered set of work inside a milestone (project level) |
 | Work item | an issue or PR, synced from the provider, with acceptance criteria and evidence requirements |
-| Proposal | a planned feature or change from a manager session, before approval |
+| Agent | a named role with instructions, tools, and one assigned runner (4.5) |
+| Task | hub-driven work with no issue: agent, project, instructions, approval level, triggers (4.7) |
+| Proposal | a planned feature or change from an agent session, before approval |
+| Environment | a deployment target (dev, staging, prod) read from the provider (4.10) |
+| Channel | a connector to an external platform, with the agents and actions it allows (4.12) |
+| Guest | a person without a provider account, identified by a channel account (4.12) |
 | Daemon | an enrolled `sortie-loop` instance: member, runner label, status |
 | Run | one agent execution reported by a daemon |
 | Evidence | artifacts that prove acceptance criteria |
@@ -91,12 +98,13 @@ Every row belongs to an organization from the first version.
 - Sign-in through the GitHub App, limited to members of the configured
   GitHub organization. Other providers through OAuth or OIDC later.
 - Roles: admin and member. Every member sees every project.
-- SSO through OIDC or SAML for organizations that need it (phase 8).
-- Audit log export and retention settings (phase 5).
+- SSO through OIDC or SAML for organizations that need it (phase 10).
+- Audit log export and retention settings (phase 7).
 - A member enrolls daemons from the hub (one-time token, then
   `sortie-loop join`).
 - A public read-only view (roadmap, progress, aggregate metrics) for
-  building in public; all actions need sign-in.
+  building in public; all actions need sign-in. It is an organization
+  setting, on or off (4.12).
 
 ### 4.4 Daemons and routing
 
@@ -112,7 +120,23 @@ Every row belongs to an organization from the first version.
   capacity, by cost class.
 - Control: start, stop, drain, pause, resume, reload, per daemon or loop.
 
-### 4.5 Product manager and project manager
+### 4.5 Agents
+
+An agent is an entity of the core model:
+
+| Field | Meaning |
+| ----- | ------- |
+| Name | for example `product-manager` |
+| Role description | what the agent is responsible for |
+| Instructions | the agent's standing prompt |
+| Runtime | Claude Code or `pi` |
+| MCP tools and permissions | which hub MCP tools it may call |
+| Projects | the projects it serves |
+| Autonomy level | L0–L4 (4.15) |
+| Assigned runner | the one daemon that hosts it (4.6) |
+
+Product manager and project manager are presets. Any other role can be
+created, for example a marketing manager or a scrum master.
 
 | | Product manager | Project manager |
 | --- | --- | --- |
@@ -127,6 +151,9 @@ PR triage uses fixed signals first (CI status, size, conflicts, linked
 issue, area, contributor history), then a model judgement of product fit;
 a human confirms the ranked list.
 
+Deterministic gates (quality, done gate, release readiness) are code. A
+role owns each gate, whoever fills the role.
+
 Release discipline: a milestone defines the scope; work-in-progress limits
 per sprint; a freeze window before a release; feature flags for unfinished
 work; a release readiness gate (evidence for every item, staging verified,
@@ -136,23 +163,117 @@ Each role can be filled by an agent, a human, or both. When no agent is
 configured, its questions and approvals go to the humans subscribed to the
 role.
 
-### 4.6 Manager sessions
+Agents communicate through inbox threads. The hub MCP tool `send_message`
+sends a message to an agent or a role. The limits in 4.13 apply.
 
-- A member chats with the product or project manager of a project in the
-  hub while other work runs.
-- The session runs on a daemon chosen as manager host, as Claude Code or
-  `pi` with that member's subscription, in a checkout of the project. It
-  uses its own subagents for research.
+### 4.6 Agent sessions and hosting
+
+- A member chats with an agent in the hub while other work runs. One
+  session per (agent, project).
+- Each agent has exactly one assigned runner. The session runs on that
+  runner, as Claude Code or `pi` with the runner member's subscription,
+  in a checkout of the project. It uses its own subagents for research.
+- There is no fallback to other runners: management agents usually hold
+  wider GitHub permissions through that member's credentials. When the
+  runner is offline, the agent's work waits and the hub dashboard shows
+  the runner as offline.
+- The plan assumes management agents are assigned to an always-on runner,
+  a server running `sortie-loop` in connected mode. A member's
+  subscription then serves requests from other people. Provider terms for
+  that are the organization's responsibility.
 - The hub relays messages over the daemon's connection
-  (`hub-protocol.md` 2.2). First version: headless CLI turns with session
-  resume. Later: ACP.
+  (`hub-protocol.md` 2.2: `session.*`). First version: headless CLI turns
+  with session resume. Later: ACP.
 - The hub's MCP server gives the session tools: read work items,
-  milestones, runs, and the inbox; create proposals; answer questions.
-  Writes to the provider go through the hub as staged outputs.
+  milestones, runs, and the inbox; create proposals; answer questions;
+  `send_message`; request approval (4.8).
+- The session does coordination and operations. Code changes go through an
+  issue and a PR. The session never pushes to protected branches.
+- Writes to the provider by the hub's GitHub App are limited to hub
+  bookkeeping: runner labels, answers to questions, issues the hub creates
+  (4.9), and sync. Other provider actions are performed by the agent with
+  the runner member's credentials after approval (4.8).
 - An approved proposal becomes a spec with acceptance criteria and work
   items in a milestone.
 
-### 4.7 Inbox and questions
+### 4.13 Tasks and triggers
+
+- A task is hub-driven work with no issue: agent, project, instructions,
+  approval level.
+- Triggers: a schedule (cron with timezone, missed-run policy, overlap
+  guard, run now), a provider event, a request in chat or a channel, or
+  another agent.
+- A task runs as `task.run` on the agent's assigned runner
+  (`hub-protocol.md` 2.2). The result is recorded and posted to the inbox.
+- Examples: a daily standup by a scrum master, a morning CI review, a
+  release.
+
+### 4.14 Governed actions
+
+Actions such as a release or the promotion of `dev` to `main`:
+
+1. The agent requests approval through a hub MCP tool.
+2. The request is an inbox approval, gated by the autonomy level.
+3. On approval, the hub tells the agent's session on its assigned runner
+   to proceed.
+4. The agent performs the action with the runner member's credentials, for
+   example `gh release create` or `gh workflow run`.
+5. The hub records the request, the approval, and the result.
+
+### 4.15 CI failures
+
+- The GitHub App receives `workflow_run` completed events with conclusion
+  failure on watched branches, configured per project (for example `dev`).
+- Deterministic code re-runs the failed jobs once. On a second failure it
+  creates an issue, or updates the open issue for the same workflow and
+  job, labels it for the normal pipeline, and routes it.
+- An optional agent task reads logs and groups failures. A scheduled CI
+  review task can supplement it.
+- PR CI failures stay with the review-fix workflow.
+
+### 4.16 Branches and environments
+
+- The hub has no branch policy. Branch protection, merge rules, and
+  promotion workflows are GitHub settings and the project's CI.
+- Agent PRs target the repository's default branch. A team that integrates
+  into `dev` sets `dev` as the default branch.
+- Environments (dev, staging, prod) and their URLs are read from GitHub
+  Environments and deployments through provider sync. The hub does not
+  define them. They are shown on the milestone for verification.
+
+### 4.17 Milestone review rounds
+
+- Milestone states: in development, in review, changes requested, accepted,
+  released. "In review" and "changes requested" alternate until the
+  milestone is accepted.
+- In review: the product agent verifies on staging, then humans review.
+- A review round is a sprint inside the same milestone. It does not create
+  a new milestone.
+- A member submits change requests in the inbox or a channel. The project
+  manager groups them into dispatches: a parent issue with sub-issues, one
+  PR per dispatch, run through the full pipeline.
+- At the end of each round and of the milestone, the hub sends a report:
+  work done, evidence, environment and preview links.
+- Members set notification preferences, for example a report at the end of
+  each round and of the milestone.
+
+### 4.12 Gateway and guests
+
+- Channel connectors carry inbox threads to and from external platforms.
+  Slack first, Telegram later.
+- An inbound message opens or continues a thread addressed to an agent.
+  The agent's reply is posted back. Digests, reports, and release
+  announcements go out to channels.
+- Each channel config lists the agents it can reach and the actions it
+  allows.
+- Guests are people without a provider account, for example product or
+  marketing staff on Slack. A guest is identified by their channel account.
+- Organization config: guests on or off; guest permissions (submit
+  requests, discuss with listed agents, receive updates, read the
+  dashboard); public read-only view on or off.
+- Guests never approve merges or releases.
+
+### 4.13 Inbox and questions
 
 - Threads with kinds note, question, report, escalation, approval request;
   references to work items, runs, PRs, previews.
@@ -160,12 +281,13 @@ role.
   open a thread addressed to the product or project role.
 - The role's agent and subscribed humans can both reply. The hub writes
   the chosen answer back to the issue and clears `needs-answer`.
-- Approvals (plans, merges, releases) are inbox messages with actions.
-- Limits on agent messages: per thread, per hour, loop detection, token
-  budget per thread.
+- Approvals (plans, merges, releases, governed actions) are inbox messages
+  with actions.
+- Limits on agent messages, including `send_message` between agents: per
+  thread, per hour, loop detection, token budget per thread.
 - Daily digest of open questions and approvals.
 
-### 4.8 Verification
+### 4.14 Verification
 
 - Work items carry acceptance criteria and the evidence each needs.
 - An evaluator stage, run by a different agent from the builder, produces
@@ -178,7 +300,7 @@ role.
   outside the team see a preview after sign-in. Long random expiring URLs
   and provider access control remain the access kinds a daemon can register.
 
-### 4.9 Governance and decisions
+### 4.15 Governance and decisions
 
 - Autonomy matrix (project × action type, L0–L4), protected areas,
   budgets, circuit breakers, kill switch, audit log.
@@ -187,7 +309,7 @@ role.
   Model decisions gate only reversible, low-stakes actions; evidence decides
   whether a change works.
 
-### 4.10 Context engineering
+### 4.16 Context engineering
 
 - The hub delivers context to agents through workflow prompts (pulled by
   daemons as config) and MCP tools (project brief, relevant decisions,
@@ -197,7 +319,7 @@ role.
 - Prompt sections in a fixed order for provider caching; outcome
   measurement per prompt and context version.
 
-### 4.11 Self-improvement
+### 4.17 Self-improvement
 
 A retrospective agent groups failures by cause and proposes changes to
 prompts, workflows, and context (as PRs at L2). Later, a harness
@@ -236,32 +358,50 @@ protocol schemas, so it does not wait for `sortie-loop` releases.
 - Preview list per work item.
 - Authenticating proxy for previews; sharing with reviewers outside the
   team.
+- Environments from GitHub deployments, shown on the milestone.
+- Milestone review rounds and reports (4.11).
 - The hub's own repository is managed by the hub at L2.
 
-### Phase 4: Manager sessions
+### Phase 4: Agents and sessions
 
-- Chat with product and project managers through a manager-host daemon.
-- Hub MCP server; proposals → specs → work items.
+- Agent entity with the product manager and project manager presets;
+  assigned runner; runner offline state in the dashboard.
+- Chat with agents on their assigned runners.
+- Hub MCP server including `send_message`; proposals → specs → work items.
 
-### Phase 5: Planning and governance
+### Phase 5: Tasks, triggers, and governed actions
+
+- Tasks with schedule, provider event, request, and agent triggers;
+  `task.run` on the assigned runner.
+- Governed actions: approval request, inbox approval, proceed message,
+  recorded result (4.8).
+- CI failure handling: re-run once, then issue (4.9).
+
+### Phase 6: Gateway and guests
+
+- Channel connectors, Slack first; threads to and from agents; digests,
+  reports, and announcements to channels.
+- Guests and organization guest config.
+
+### Phase 7: Planning and governance
 
 - Issue and PR triage, milestones, sprints, assignment by capacity,
   release readiness gate, schedules.
 - Autonomy matrix, decision primitive in shadow mode.
 - Organization budgets and team schedules; audit log export and retention.
 
-### Phase 6: Outcomes and readiness
+### Phase 8: Outcomes and readiness
 
 - Outcome metrics per project, runtime, model, prompt version, kept as
   long history with a retention setting; comparison across projects,
   models, and prompt versions.
 - Readiness: static pillars, live checks, outcome correlation.
 
-### Phase 7: Context and self-improvement
+### Phase 9: Context and self-improvement
 
 - Context and memory through MCP, prompt versioning, retrospective agent.
 
-### Phase 8: More providers and domains
+### Phase 10: More providers and domains
 
 - GitLab, Gitea, Jira; SSO; harness improvement loop; extension API; a second
   domain pack from real demand.
@@ -272,8 +412,7 @@ protocol schemas, so it does not wait for `sortie-loop` releases.
 2. Stack: Go, SQLite or Postgres, server-rendered UI (reuses `sortie-loop`
    experience), or another.
 3. License and commercial model (`plans/system/overview.md` section 7).
-4. How a manager host is chosen: per project, per organization, or by
-   availability.
+4. How a guest signs in to the dashboard, for example Sign in with Slack.
 
 ## 7. Backlog
 

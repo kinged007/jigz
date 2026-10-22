@@ -31,8 +31,8 @@ machines by `sortie-loop`.
 | ---- | ---- | ------------ |
 | Git provider (GitHub first; GitLab, Gitea, Jira later) | record of issues, PRs, labels, assignees, milestones, comments | external |
 | sortie engine | polls the provider, claims work, runs agent sessions | external, pinned version, fork or upstream |
-| `sortie-loop` | sets up and supervises sortie on one machine; dashboard; optional daemon for the hub | open source, free, usable alone |
-| Hub | team, projects, product and project management, assignment, inbox, verification, outcomes, readiness, fleet view | separate product; possibly paid |
+| `sortie-loop` | sets up and supervises sortie on one machine; dashboard; optional runner for the hub | open source, free, usable alone |
+| Hub | team, projects, agents and their tasks, assignment, inbox, gateway to channels, verification, outcomes, readiness, fleet view | separate product; possibly paid |
 
 Responsibilities:
 
@@ -40,14 +40,20 @@ Responsibilities:
 | ------- | ----- |
 | Issues, PRs, labels, comments (data of record) | git provider |
 | Running an agent on an issue or PR | sortie, started by `sortie-loop` |
-| Machine-local settings: agent accounts, working hours, workspace mode, budgets | `sortie-loop` |
+| Machine-local settings: agent CLIs and their logins (account pool), the member's tracker credential, working hours, budgets, workspace mode and root, the member's own tools and skills outside the project repo | `sortie-loop`, on the member's machine |
+| Running agents, tracker-driven: sortie loops on issues and PRs, used for all code changes | sortie, started by `sortie-loop` |
+| Running agents, hub-driven: sessions started by the hub without an issue (conversations and one-shot tasks) | the agent session host in `sortie-loop`, on the agent's assigned runner |
 | Agent credentials and subscriptions | `sortie-loop`, on the member's machine; never sent to the hub |
-| Which projects a machine works on | `sortie-loop` alone; the hub when connected |
+| Project config (projects, enabled workflows, prompts, labels, query filter additions) | local config files when standalone or united; the hub alone when connected |
 | Assignment of work to members and machines | humans on the provider; the hub when connected |
 | Planning, triage, milestones, sprints, releases | hub |
 | Questions, approvals, inbox | hub; `sortie-loop` shows open questions locally |
 | Evidence, outcomes, readiness | hub; `sortie-loop` shows run metrics locally |
 | Preview environments | `sortie-loop` creates them; the hub lists them and shares them with reviewers |
+
+Rule for both ways of running agents: code changes go through an issue and
+a PR. Sessions do coordination and operations and never push to protected
+branches. Both ways use the same account pool and working hours.
 
 ### 2.1 Product boundary
 
@@ -81,15 +87,25 @@ promoted separately. The only hub-related surface in `sortie-loop` is the
 2. **United.** Several `sortie-loop` instances, one per repository, shown
    and controlled in one dashboard on the same machine, without the hub
    (`plans/sortie-loop/united-dashboard.md`).
-3. **Connected.** `sortie-loop` has enrolled with a hub. The daemon runs
-   without the local dashboard; the hub provides the views and controls.
-   It pulls projects, workflows, labels, and prompts from the hub, reports
-   status and runs, accepts control commands, and filters work by its
-   runner label (4.2). Local settings (agent accounts, working hours,
-   workspace mode) stay local and are reported to the hub as status.
+3. **Connected (runner mode).** `sortie-loop` has enrolled with a hub. The
+   hub is the only source of project config; local repo configs and the
+   unite registry are ignored. The daemon runs without the local
+   dashboard; the hub provides the views and controls. It pulls projects,
+   enabled workflows, workflow and prompt files, labels, and query filter
+   additions from the hub, runs one sortie process per (project,
+   workflow), reports status and runs, accepts control commands, and
+   filters work by its runner label (4.2). Local settings stay local and
+   are reported to the hub as status: agent CLIs and their logins
+   (account pool), the member's tracker credential, working hours,
+   budgets, workspace mode and root, and the member's own tools and skills
+   outside the project repo.
 
-A connected `sortie-loop` keeps working on already routed items if the hub
-is unreachable.
+Loops start on demand. The hub sends `wake {project, workflow}` when it
+routes an item; the daemon stops a loop that is drained and idle for a
+configured time. When the hub is unreachable, and periodically otherwise,
+the daemon searches the provider for open items with its runner label
+across its projects and starts the matching loops. The last config is
+kept.
 
 ## 4. How work flows when connected
 
@@ -104,8 +120,7 @@ is unreachable.
 
 ### 4.2 Assignment and routing
 
-- The hub (product and project manager agents, or a human in the hub)
-  assigns a work item to a member. Members can also assign on the provider
+- The hub (its agents, or a human in the hub) assigns a work item to a member. Members can also assign on the provider
   directly; the hub sees it through provider sync.
 - The hub picks one of the member's daemons by availability (online,
   working hours, agent accounts not exhausted, free capacity) and adds that
@@ -144,21 +159,33 @@ is unreachable.
 - Non-blocking questions: the agent proceeds with its suggested answer and
   records the assumption; a human can override it until the work starts.
 
-### 4.5 Manager sessions
+### 4.5 Agent sessions
 
-- Product and project manager agents run as Claude Code or `pi` sessions
-  on a daemon chosen as manager host, using that member's subscription.
+- Hub agents (product manager, project manager, and any other role the hub
+  defines) run as Claude Code or `pi` sessions on the agent's one assigned
+  runner, using that member's subscription. There is no fallback to other
+  runners. Management agents are assumed to run on an always-on runner.
 - The hub sends chat messages to the session over the daemon's connection
-  and streams replies back. First version: headless CLI turns with session
-  resume. Later: Agent Client Protocol (ACP).
+  (`session.*`) and streams replies back. First version: headless CLI
+  turns with session resume. Later: Agent Client Protocol (ACP).
 - The session runs in a checkout of the project and uses its own subagents
   for research. The hub provides an MCP server with tools over hub data
-  (work items, milestones, inbox, proposals).
+  (work items, milestones, inbox, proposals, `send_message`, approval
+  requests).
 - An approved proposal becomes a spec with acceptance criteria and then
   work items in a milestone.
-- The manager session host is internal to connected mode. It is not
+- The agent session host is internal to connected mode. It is not
   documented in the `sortie-loop` user documentation or shown in its CLI
   help.
+
+### 4.5.1 Tasks, governed actions, and CI failures
+
+Hub-driven work with no issue runs as `task.run` on the agent's assigned
+runner. Actions such as a release are requested by the agent, approved in
+the hub inbox, and performed by the agent with the runner member's
+credentials. Failed CI on watched branches is turned into issues by the
+hub. Details are in `plans/hub/vision-and-roadmap.md` sections 4.7 to
+4.9.
 
 ### 4.6 Previews
 
