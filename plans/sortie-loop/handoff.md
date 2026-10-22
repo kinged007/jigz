@@ -1,6 +1,6 @@
 # sortie-loop: handoff
 
-Status: 2026-10-21. Read this first in a new session working on
+Status: 2026-10-22. Read this first in a new session working on
 `sortie-loop`. The hub is a separate stream; its plans are in `plans/hub/`
 and it has no code yet.
 
@@ -8,7 +8,8 @@ and it has no code yet.
 
 Build `sortie-loop` as a free, open-source tool that is complete without
 the hub, following `plans/sortie-loop/vision-and-roadmap.md` section 6.
-Phase 0 is done except the merge. Phase 1 is next.
+Phase 0 is done except the merge. Phase 1 is implemented; its release is
+not done. Phase 2 is next.
 
 Read, in order:
 
@@ -55,6 +56,14 @@ Read, in order:
   backlog item.
 - The acceptance harness uses an in-memory fake GitHub API
   (`internal/fakegithub`), not Gitea (reason in `delivery-method.md` 2.3).
+- Machine-local settings (working hours, pool entries) are in `machine.yaml`
+  in the user config directory. Pool state is in `pool.json` in the user
+  state directory.
+- Runtime failover sets `SORTIE_AGENT_KIND` and `SORTIE_AGENT_COMMAND` on
+  one workflow, so the workflow switches agent runtime when the pool moves
+  to another entry.
+- `hours.end` is a config setting with the values `finish` or `stop`. The
+  default is `finish`.
 
 Open decisions (do not decide them; ask):
 
@@ -66,7 +75,7 @@ Open decisions (do not decide them; ask):
 
 ## 4. State of the work
 
-Branch `feat/united-dashboard`, 14 commits ahead of `main`, not pushed, no
+Branch `feat/united-dashboard`, 27 commits ahead of `main`, not pushed, no
 PR open. Commits from this session:
 
 | Commit | Change |
@@ -77,6 +86,16 @@ PR open. Commits from this session:
 | `79825f4` | plans name the fake GitHub API |
 | `7d1e0be` | acceptance harness and `make verify` |
 | `9313e3e` | engine resolution: SORTIE_BIN, installed pin, download of the pin; a `sortie` beside the binary or on PATH only when the download fails, with a warning; one download attempt per process; unit tests disable the download in TestMain |
+| `8aea1f4` | machine config package: working hours and an agent account pool |
+| `b254060` | agent-exec: runs the next available pool account as the agent command |
+| `b890abd` | supervisor gate on working hours; runtime switch from the pool; shipped workflows carry `pi:` and `claude-code:` blocks |
+| `09376c6` | validate hides the other runtime's unknown_key warning |
+| `c899be4` | dashboard: working hours, account pool, and gate holds; README section |
+| `891c510` | acceptance scenarios d and e (section 5) |
+| `220393e` | docs on the usage-limit cost through the engine's credential check |
+
+Commits `f5d9b45`, `cb566b6`, and `8bc988b` (hub plans) are on the branch
+from the hub stream, not from this work.
 
 Outside this repository:
 
@@ -93,12 +112,16 @@ Outside this repository:
 
 - `make verify` passes with no overrides: gofmt, `go vet` (also with
   `-tags acceptance`), build, `go test ./...`, and the acceptance test.
+  The acceptance test takes about 104 s.
 - The acceptance test (`cmd/sortie-loop/acceptance_test.go`, tag
-  `acceptance`) runs the real `sortie-loop` binary and engine v1.28.1 with
-  the `mock` agent. Scenarios:
+  `acceptance`) runs the real `sortie-loop` binary and engine v1.28.1. Scenarios:
   - an `agent:plan` issue is claimed and handed off;
   - `needs-human` and other-assignee issues are not dispatched;
-  - the dashboard API reports the run from the schema 38 database.
+  - the dashboard API reports the run from the schema 38 database;
+  - scenario d: no claims outside a working-hours window, and a claim after
+    the window opens;
+  - scenario e: a usage limit on pool entry A moves the retry to entry B;
+    entry A stays exhausted until the reset epoch.
 
   It fails if the fake GitHub API receives an unknown route, parameter, or
   search qualifier.
@@ -111,13 +134,25 @@ In order of the roadmap:
 
 1. Merge `feat/united-dashboard` into `main` through a PR (the user does
    this, or asks for it).
-2. Phase 1: working hours and agent account pool (roadmap section 6).
-   Usage-limit scenarios need a fake agent command behind
-   `agent.command`, because the engine's `mock` agent cannot produce
-   usage-limit errors.
+2. Phase 1 release: the roadmap says each phase ends with a release and
+   release notes. Neither is done. Ask the user before releasing.
+3. Phase 2: engine independence (roadmap section 6).
 
 Known gaps, not scheduled:
 
+- Engine v1.28.1 runs a credential check through the agent command before
+  each worker run, so a usage limit is usually found there: the run fails,
+  posts no comment, and retries after about 10 s.
+- A usage limit that occurs mid-turn posts a failure comment.
+- With `max_concurrent_agents` greater than 1, a loop can claim work between
+  window close and stop.
+- Acceptance covers `end: finish` only, not `end: stop`.
+- The agent-exec "no entry until" time uses the global next change, not a
+  time per runtime.
+- The limit detection patterns are not checked against real `claude` or
+  `pi` output.
+- The supervisor's closed-gate check makes one blocking state request per
+  loop per tick, with a 3 s timeout.
 - A dashboard started while offline keeps the PATH fallback engine until
   restart, because the download is attempted once per process.
 - No acceptance scenario for the PR workflow (`github-pr`); the fake
@@ -146,15 +181,23 @@ directories; keep doing that.
 
 - Research before building when an external system is involved: the
   research ruled out Gitea before any harness code was written.
+- Research the engine source before designing a wrapper: env overrides,
+  retry, and the credential check changed the design and the docs.
 - Include a browser check of the affected pages in the implementation
   brief. Render tests missed a wrong bind label and three missing routes.
 - Fakes must reject what they do not know; otherwise a test passes while
   the engine makes calls nobody checked.
 - Parallel workers need disjoint files; a worker's `go test` can fail on
   another worker's half-finished edit, so the lead runs the final gate.
+- A worker hit a usage limit mid-task; resuming the same worker kept its
+  progress.
 
 ## 9. Next action
 
-Phase 1 (working hours and account pool, section 6, item 2) is in progress
-in the session that wrote this handoff. After it, the recommended next step
-is adding the acceptance test to CI, which needs the user's approval.
+Phase 1 is implemented. Ask the user about:
+
+1. A Phase 1 release (release and release notes).
+2. Phase 2: engine independence.
+3. The acceptance test in CI (needs the user's approval).
+
+Open decisions in section 3 remain open.

@@ -28,8 +28,10 @@ section 6.
 - Budgets with pause and override (`budget.go`, `budget_cmd.go`) — exists
 - Workspace cleanup (`cleanup.go`) — exists
 - Status document (`status.go`) — exists
-- Working hours per machine and per pool entry [1]
-- Agent account pool, `agent-exec` wrapper, runtime failover [1]
+- Working hours per machine and per pool entry (`internal/machine`,
+  `cmd/sortie-loop/gate.go`) — exists
+- Agent account pool, `agent-exec` wrapper, runtime failover
+  (`agentexec.go`, `agents.go`) — exists
 
 ## 3. Dashboard
 
@@ -49,7 +51,7 @@ section 6.
 - Outcome classes shared with the hub protocol [2]
 - Disabled-feature notices from capability detection [2]
 - Questions page with answering [3]
-- Working hours and account pool status [1]
+- Working hours and account pool status (`gate.go`, `agents.go`) — exists
 - Preview links on runs [5]
 
 ## 4. Unite
