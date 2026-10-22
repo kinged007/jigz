@@ -13,5 +13,26 @@
 {{else}}<tr><td>{{.Label}}{{if .Note}} <span class="muted">{{.Note}}</span>{{end}}</td>{{range .Cells}}<td>{{if .Value}}<code>{{.Value}}</code>{{else}}<span class="muted">&mdash;</span>{{end}}</td>{{end}}<td><a class="btn" href="{{.EditURL}}">Edit</a></td></tr>
 {{end}}{{end}}
 </tbody></table></div>
+
+<div class="sechead"><h2>Working hours</h2></div>
+{{with .Machine}}{{if .Err}}<p class="errtext">{{.Err}}</p>{{end}}
+{{if .Present}}{{range .Warnings}}<p class="muted">{{.}}</p>
+{{end}}<div class="tw"><table class="agents"><tbody>
+<tr><th>Timezone</th><td>{{.Timezone}}</td></tr>
+<tr><th>Windows</th><td>{{range .Windows}}<div><code>{{.}}</code></div>{{else}}<span class="muted">always open</span>{{end}}</td></tr>
+<tr><th title="finish: loops claim nothing new and stop once idle. stop: loops stop when the window closes.">When a window ends</th><td>{{.End}}</td></tr>
+<tr><th>Open now</th><td><span class="chip s-{{if .OpenNow}}running{{else}}paused{{end}}">{{if .OpenNow}}open{{else}}closed{{end}}</span></td></tr>
+<tr><th>Next change</th><td>{{.NextChange}}</td></tr>
+</tbody></table></div>
+
+<div class="sechead"><h2>Account pool</h2></div>
+{{if .Pool}}<div class="tw"><table class="agents">
+<thead><tr><th>Name</th><th>Runtime</th><th>Command</th><th>Cost class</th><th>Hours</th><th>State</th><th>Last used</th></tr></thead><tbody>
+{{range .Pool}}<tr><td>{{.Name}}</td><td>{{.Runtime}}</td><td><code>{{.Command}}</code></td><td>{{if .CostClass}}{{.CostClass}}{{else}}<span class="muted">&mdash;</span>{{end}}</td><td>{{.Hours}}</td>
+<td><span class="chip s-{{.Class}}">{{.State}}</span>{{if .Reason}}<div class="muted">{{.Reason}}</div>{{end}}</td>
+<td>{{if .LastUsed}}{{.LastUsed}}{{else}}<span class="muted">&mdash;</span>{{end}}</td></tr>
+{{end}}</tbody></table></div>
+{{else}}<p class="muted">The pool is empty. Loops use the agent each workflow file declares.</p>{{end}}
+{{else if not .Err}}<p class="muted">No machine file at <code>{{.Path}}</code>. Loops run without working hours or an account pool. See the README section "Working hours and agent accounts".</p>{{end}}{{end}}
 {{template "statuspoll"}}
 {{template "shell-bottom" .}}{{end}}

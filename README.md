@@ -624,6 +624,68 @@ Env overrides: `SORTIE_LOOP_REPO`, `SORTIE_LOOP_TOKEN`,
 `SORTIE_LOOP_MILESTONE` (plus `GH_MILESTONE` as a legacy alias),
 `SORTIE_LOOP_ASSIGNEE` (overrides `assignee:`).
 
+### Working hours and agent accounts
+
+The optional file `<user config dir>/sortie-loop/machine.yaml` (Linux:
+`$XDG_CONFIG_HOME/sortie-loop/machine.yaml` or `~/.config/sortie-loop/machine.yaml`)
+applies to the loops of every repository on the machine. Without it, loops run
+without an hours limit and without a pool. The Agents page of the dashboard
+shows the hours and the pool.
+
+```yaml
+hours:
+  timezone: Europe/Madrid     # IANA name; empty = local time
+  end: finish                 # finish | stop; default finish
+  windows:
+    - days: [mon, tue, wed, thu, fri]
+      start: "09:00"
+      end: "18:00"            # an end earlier than start wraps past midnight
+pool:
+  - name: claude-work
+    runtime: claude-code      # claude-code | pi
+    command: claude           # default "claude" or "pi" by runtime
+    env:
+      CLAUDE_CONFIG_DIR: ~/.claude-work
+    hours:                    # optional; windows only, same shape as above
+      windows: []
+    cost_class: subscription  # free-text label shown in the dashboard
+  - name: pi-api
+    runtime: pi
+    env:
+      ANTHROPIC_API_KEY: ...
+limits:
+  default_reset: 1h           # used when the CLI message has no reset time
+  patterns: []                # extra case-insensitive regexes
+```
+
+Without windows the hours are always open. `env` values expand a leading `~/`
+and `$VAR` or `${VAR}`. The file can hold API keys, so keep it readable by you
+only (`chmod 600`); loading warns when it is not.
+
+`end: finish` makes loops claim nothing new when the window closes and stops
+each loop once it has no running session. `end: stop` stops the loops when the
+window closes; the engine aborts the turn, the issue keeps its in-progress
+label and is dispatched again when the next window opens.
+
+With a pool, the supervisor starts each loop with `SORTIE_AGENT_COMMAND` set to
+`sortie-loop agent-exec <runtime>`. `agent-exec` runs the CLI of the first
+available entry of that runtime (not exhausted and inside its own hours), passes
+stdout through unchanged and exits with the CLI's exit code. When the CLI output
+reports a usage limit, the entry is marked exhausted until the reset time in
+the message, or for `limits.default_reset`. The state is stored in
+`<state dir>/sortie-loop/pool.json`. Without an available entry, `agent-exec`
+exits 75. When the active runtime changes, loops are restarted once they have
+no running session.
+
+A usage limit costs one failed engine session: the engine posts a failure
+comment and retries after about 10 seconds with the next available entry.
+
+Known limitation: with `max_concurrent_agents` above 1, a loop can claim new
+work between the window close and the moment it is stopped.
+
+Using a subscription account unattended can be restricted by the provider.
+Checking the provider's terms is your responsibility.
+
 ## Ad hoc: auto-merge on clean review
 
 To fully automate build → review → merge on one repo (not a template

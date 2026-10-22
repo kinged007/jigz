@@ -4,8 +4,11 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strings"
+	"time"
 
 	fleetconfig "github.com/kinged007/sortie-loop/internal/fleetconfig"
+	"github.com/kinged007/sortie-loop/internal/machine"
 	"github.com/kinged007/sortie-loop/internal/plan"
 )
 
@@ -33,6 +36,26 @@ type agentsView struct {
 	Columns []agentColumn
 	Span    int
 	Rows    []agentRow
+	Machine machineView
+}
+
+type poolRow struct {
+	Name, Runtime, Command, CostClass, Hours string
+	State, Class, Reason, LastUsed           string
+}
+
+// machineView is the machine file as the page shows it. Path is set and
+// Present false when there is no file or it cannot be read.
+type machineView struct {
+	Path, Err  string
+	Present    bool
+	Warnings   []string
+	Timezone   string
+	Windows    []string
+	End        string
+	OpenNow    bool
+	NextChange string
+	Pool       []poolRow
 }
 
 func (a *app) agents(w http.ResponseWriter, r *http.Request) {
@@ -55,7 +78,81 @@ func (a *app) agents(w http.ResponseWriter, r *http.Request) {
 			v.Rows = append(v.Rows, row)
 		}
 	}
+	v.Machine = loadMachineView(time.Now())
 	execPage(w, "agents", v)
+}
+
+func loadMachineView(now time.Time) machineView {
+	var mv machineView
+	path, err := machine.DefaultPath()
+	if err != nil {
+		mv.Err = err.Error()
+		return mv
+	}
+	mv.Path = path
+	if _, err := os.Stat(path); err != nil {
+		return mv
+	}
+	cfg, err := machine.Load(path)
+	if err != nil {
+		mv.Err = err.Error()
+		return mv
+	}
+	var state machine.State
+	if sp, err := machine.StatePath(); err == nil {
+		if state, err = machine.LoadState(sp); err != nil {
+			mv.Err = err.Error()
+		}
+	}
+	mv.Present, mv.Warnings = true, cfg.Warnings
+	mv.Timezone = cfg.Hours.Timezone
+	if mv.Timezone == "" {
+		mv.Timezone = "local time"
+	}
+	mv.Windows = windowTexts(cfg.Hours)
+	mv.End = cfg.Hours.End
+	if mv.End == "" {
+		mv.End = machine.EndFinish
+	}
+	mv.OpenNow = cfg.Hours.Open(now)
+	mv.NextChange = "—"
+	if next := cfg.NextChange(state, now); !next.IsZero() {
+		mv.NextChange = localText(next)
+	}
+	for _, e := range cfg.Pool {
+		row := poolRow{Name: e.Name, Runtime: e.Runtime, Command: e.Command, CostClass: e.CostClass,
+			Hours: "always", State: "available", Class: "running"}
+		if row.Command == "" {
+			row.Command = e.Runtime
+			if e.Runtime == "claude-code" {
+				row.Command = "claude"
+			}
+		}
+		if w := windowTexts(e.Hours); len(w) > 0 {
+			row.Hours = strings.Join(w, "; ")
+		}
+		es := state[e.Name]
+		switch {
+		case now.Before(es.ExhaustedUntil):
+			row.State, row.Class = "exhausted until "+localText(es.ExhaustedUntil), "failed"
+			row.Reason = es.Reason
+		case !e.Hours.Open(now):
+			row.State, row.Class = "outside its hours", "paused"
+		}
+		if !es.LastUsed.IsZero() {
+			row.LastUsed = agoText(es.LastUsed)
+		}
+		mv.Pool = append(mv.Pool, row)
+	}
+	return mv
+}
+
+func windowTexts(h machine.Hours) []string {
+	var out []string
+	for _, w := range h.Windows {
+		out = append(out, strings.Join(w.Days, ",")+" "+w.Start+"-"+w.End)
+	}
+	return out
 }
 
 // agentCellFor turns a workflow file's knob value into a cell. The value

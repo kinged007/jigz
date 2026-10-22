@@ -77,6 +77,18 @@ type WorkflowInfo struct {
 	// Budget is the loop's spend for the current period, absent when the
 	// workflow configures none.
 	Budget *BudgetInfo `json:"budget,omitempty"`
+	// Hold is why the machine gate keeps this workflow down.
+	Hold string `json:"hold,omitempty"`
+}
+
+// GateInfo is the machine gate of a status document, absent when the
+// machine file sets neither working hours nor a pool.
+type GateInfo struct {
+	Open       bool       `json:"open"`
+	HoursOpen  bool       `json:"hours_open"`
+	Runtime    string     `json:"runtime"`
+	NextChange *time.Time `json:"next_change"`
+	Hold       string     `json:"hold"`
 }
 
 // BudgetInfo is one workflow's token budget as the status document reports
@@ -113,6 +125,7 @@ type StatusInfo struct {
 	Sleep         SleepInfo      `json:"sleep"`
 	Cleanup       *CleanupInfo   `json:"cleanup,omitempty"`
 	Workflows     []WorkflowInfo `json:"workflows"`
+	Gate          *GateInfo      `json:"gate,omitempty"`
 }
 
 // Workflow returns the named workflow of the document.
@@ -156,6 +169,7 @@ type statusDocJSON struct {
 	Workflows     []WorkflowInfo `json:"workflows"`
 	Cleanup       *CleanupInfo   `json:"cleanup"`
 	Sleep         SleepInfo      `json:"sleep"`
+	Gate          *GateInfo      `json:"gate"`
 }
 
 // StatusDoc reads the status document each sortie-loop supervisor
@@ -253,7 +267,7 @@ func (d StatusDoc) status(project, root string) (StatusInfo, error) {
 	st := StatusInfo{
 		Project: project, Version: doc.Version, EngineVersion: doc.EngineVersion, PID: doc.PID,
 		StartedAt: doc.StartedAt, UpdatedAt: doc.UpdatedAt, State: doc.State, Sleep: doc.Sleep,
-		Cleanup: doc.Cleanup, Workflows: doc.Workflows,
+		Cleanup: doc.Cleanup, Workflows: doc.Workflows, Gate: doc.Gate,
 	}
 	if st.Workflows == nil {
 		st.Workflows = []WorkflowInfo{}

@@ -28,6 +28,10 @@ type opsLoop struct {
 	// Paused marks a workflow whose budget holds it, and PausedBy why.
 	Paused   bool
 	PausedBy string
+	// Hold is the machine gate's reason for keeping this loop down, and
+	// Runtime the agent runtime the gate selected.
+	Hold    string
+	Runtime string
 }
 
 // cleanupView is a project's last cleanup run.
@@ -127,7 +131,11 @@ func loopRow(l *rollup.Loop, p *opsProject) opsLoop {
 	case p.IsRunning() && l.Port > 0:
 		row.State, row.Class = stateNotAnswering, "warn"
 	}
+	if p.Status != nil && p.Status.Gate != nil {
+		row.Runtime = p.Status.Gate.Runtime
+	}
 	if hasDoc {
+		row.Hold = w.Hold
 		row.Hint = loopHint(w)
 		if b := w.Budget; b != nil {
 			row.Paused, row.PausedBy = b.Paused, b.PausedBy
