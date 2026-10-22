@@ -269,7 +269,7 @@ func (s *supervisor) resumeLoop(name string) error {
 	}
 	start := p == nil && !hold
 	s.mu.Unlock()
-	if start {
+	if start && s.startable(name) {
 		return s.startOne(name)
 	}
 	return nil

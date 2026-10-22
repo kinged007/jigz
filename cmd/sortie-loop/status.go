@@ -40,6 +40,7 @@ type statusDoc struct {
 	Workflows            []workflowStatus `json:"workflows"`
 	Cleanup              *cleanupRecord   `json:"cleanup,omitempty"`
 	Sleep                sleepStatus      `json:"sleep"`
+	Gate                 *gateStatus      `json:"gate,omitempty"`
 }
 
 type workflowStatus struct {
@@ -55,6 +56,7 @@ type workflowStatus struct {
 	ConfigHash   string        `json:"config_hash"`
 	LogPath      string        `json:"log_path"`
 	Budget       *budgetStatus `json:"budget,omitempty"`
+	Hold         string        `json:"hold,omitempty"`
 }
 
 // statusPath returns the status file for a repo root. The name is a

@@ -24,6 +24,8 @@ func newTestSup(t *testing.T, root string, names ...string) *supervisor {
 	// The registry is shared across every repo on the machine, and a
 	// republish would leave this test's rows in the user's real one.
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	var defs []loopDef
 	for _, n := range names {
 		defs = append(defs, loopDef{name: n, file: "WORKFLOW." + n + ".md"})
@@ -257,7 +259,7 @@ func TestAReplacedLoopReadsTheConfigOnDisk(t *testing.T) {
 	mustWrite(t, cfgPath, "repo: owner/from-boot\n")
 	sup := newTestSup(t, root, "plan")
 
-	if _, _, err := sup.childEnv("plan"); err != nil {
+	if _, _, _, err := sup.childEnv("plan"); err != nil {
 		t.Fatal(err)
 	}
 	if got := envValue(t, root, "SORTIE_TRACKER_PROJECT"); got != "owner/from-boot" {
@@ -265,7 +267,7 @@ func TestAReplacedLoopReadsTheConfigOnDisk(t *testing.T) {
 	}
 
 	mustWrite(t, cfgPath, "repo: owner/from-apply\n")
-	if _, _, err := sup.childEnv("plan"); err != nil {
+	if _, _, _, err := sup.childEnv("plan"); err != nil {
 		t.Fatal(err)
 	}
 	if got := envValue(t, root, "SORTIE_TRACKER_PROJECT"); got != "owner/from-apply" {
@@ -306,7 +308,7 @@ func TestAReplacedLoopCarriesItsFilter(t *testing.T) {
 	mustWrite(t, filepath.Join(root, ".sortie", "config.yaml"),
 		"repo: owner/name\nfilters:\n  plan: \"label:plan\"\n")
 	sup := newTestSup(t, root, "plan")
-	_, env, err := sup.childEnv("plan")
+	_, env, _, err := sup.childEnv("plan")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -684,9 +684,9 @@ yours is older.
 ## Customizing agents and workflows
 
 The shipped default is the `pi` agent. Every `WORKFLOW.*.md` also
-documents a commented-out `claude-code` alternative (`sonnet`) — swap
-the `agent:` block for the commented one, keeping the same `max_turns`
-and timeouts. The `model:` value
+carries a `claude-code:` block (`sonnet`) next to `pi:`; the engine reads
+only the block named by `agent.kind`. To switch, set `agent.kind:
+claude-code` and `agent.command: claude`. The `model:` value
 passes through to `claude --model` unvalidated, so only use aliases
 your installed CLI accepts. The pinned engine only knows `pi` and
 `claude-code` (plus a few others); other adapters need a newer or

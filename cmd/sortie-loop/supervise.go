@@ -79,6 +79,9 @@ type loopProc struct {
 	exitCode   *int
 	configHash string
 	loopType   string
+	// runtime is the agent runtime the child was started with, empty
+	// without a pool.
+	runtime string
 }
 
 type exitEvent struct {
@@ -134,6 +137,11 @@ type supervisor struct {
 	budgetUse     map[string]budgetUsage
 	budgetPolled  map[string]time.Time
 	budgetReadErr map[string]string
+
+	machineState
+	// sessions reports whether a loop has a session running; retries do
+	// not count.
+	sessions func(port int) (active, known bool)
 }
 
 func newSupervisor(root, bin string, defs []loopDef, ports []int) *supervisor {
@@ -149,7 +157,9 @@ func newSupervisor(root, bin string, defs []loopDef, ports []int) *supervisor {
 		budgets: map[string]config.Budget{}, budgetStates: map[string]*budgetState{},
 		budgetUse: map[string]budgetUsage{}, budgetPolled: map[string]time.Time{},
 		budgetReadErr: map[string]string{},
+		sessions:      loopSessions,
 	}
+	s.initMachine()
 	for i, d := range defs {
 		s.defs[d.name] = d
 		if i < len(ports) {
@@ -167,13 +177,13 @@ func newSupervisor(root, bin string, defs []loopDef, ports []int) *supervisor {
 // supervisor rewrites config.yaml and the env file and then asks for a
 // restart, and a child launched against the settings from boot would
 // keep the old ones with nothing to show for it.
-func (s *supervisor) childEnv(name string) (envFile string, env []string, err error) {
+func (s *supervisor) childEnv(name string) (envFile string, env []string, runtime string, err error) {
 	cfg, err := config.Load(s.root)
 	if err != nil {
-		return "", nil, err
+		return "", nil, "", err
 	}
 	if envFile, err = writeEnvFile(s.root, cfg); err != nil {
-		return "", nil, err
+		return "", nil, "", err
 	}
 	// The env override replaces the workflow's query_filter, so
 	// defaultFilters must mirror each loop's label clauses (the github-pr
@@ -183,7 +193,11 @@ func (s *supervisor) childEnv(name string) (envFile string, env []string, err er
 	if filter := cfg.FilterFor(name); filter != "" {
 		env = append(env, "SORTIE_TRACKER_QUERY_FILTER="+filter)
 	}
-	return envFile, env, nil
+	agentEnv, runtime, err := s.agentEnv()
+	if err != nil {
+		return "", nil, "", err
+	}
+	return envFile, append(env, agentEnv...), runtime, nil
 }
 
 // lastEnv returns the last value set for key, as a child would see it.
@@ -204,7 +218,18 @@ func (s *supervisor) startOne(name string) error {
 	if !ok {
 		return fmt.Errorf("no loop %q", name)
 	}
-	envFile, env, err := s.childEnv(name)
+	envFile, env, runtime, err := s.childEnv(name)
+	if errors.Is(err, errNoAgent) {
+		s.mu.Lock()
+		first := !s.gateHeld[name]
+		s.gateHeld[name] = true
+		s.mu.Unlock()
+		if first {
+			fmt.Fprintf(os.Stderr, "sortie-loop: %s: no agent account available, the gate holds the loop\n", name)
+		}
+		s.republish()
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -235,12 +260,14 @@ func (s *supervisor) startOne(name string) error {
 	p := &loopProc{
 		def: def, cmd: cmd, port: port, since: time.Now(),
 		configHash: configHash(workflow, envBody, lastEnv(env, "SORTIE_TRACKER_QUERY_FILTER")), loopType: loopTypeOf(workflow),
+		runtime: runtime,
 	}
 	if prev := s.gone[name]; prev != nil {
 		p.restarts = prev.restarts + 1
 		delete(s.gone, name)
 	}
 	s.procs[name] = p
+	delete(s.gateHeld, name)
 	s.idleSince = s.clock()
 	s.mu.Unlock()
 	go func() {
@@ -257,10 +284,14 @@ func (s *supervisor) startOne(name string) error {
 	return nil
 }
 
-// startAll launches every loop in the run except the paused ones.
+// startAll launches every loop in the run except the paused ones and
+// the ones the machine gate keeps down.
 func (s *supervisor) startAll(names []string) error {
+	if err := s.machineErr(); err != nil {
+		return err
+	}
 	for _, n := range names {
-		if s.isPaused(n) {
+		if !s.startable(n) {
 			continue
 		}
 		if err := s.startOne(n); err != nil {
@@ -332,6 +363,7 @@ func (s *supervisor) reload() {
 	s.mu.Unlock()
 	s.reloadBudgets(cfg.Budgets)
 	s.reloadCleanup(cfg)
+	s.refreshMachine(s.clock(), true)
 	s.republish()
 	fmt.Fprintln(os.Stderr, "sortie-loop: reloaded config")
 }
@@ -397,6 +429,9 @@ func (s *supervisor) run() int {
 			if code, done := s.budgetStep(); done {
 				return code
 			}
+			if code, done := s.gateStep(); done {
+				return code
+			}
 			if code, done := s.sleepStep(); done {
 				return code
 			}
@@ -444,7 +479,7 @@ func (s *supervisor) onExit(ev exitEvent) (int, bool) {
 		return 1, true
 	}
 	s.republish()
-	if p.recycle && !s.isPaused(p.def.name) {
+	if p.recycle && s.startable(p.def.name) {
 		if err := s.startOne(p.def.name); err != nil {
 			fmt.Fprintln(os.Stderr, "sortie-loop:", err)
 			s.failed = true
@@ -603,12 +638,16 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 		Cleanup:              readCleanupRecord(s.root),
 		Sleep:                s.sleepStatusLocked(),
 	}
+	gate := s.gateStatusLocked()
+	doc.Gate = gate
 	add := func(p *loopProc) {
 		st := "running"
 		bs := s.budgetStatusLocked(p.def.name)
 		switch {
 		case bs != nil && bs.Paused:
 			st = "paused"
+		case s.gateHeld[p.def.name] && p.exitCode != nil:
+			st = "held"
 		case s.sleeping:
 			st = "sleeping"
 		case p.exitCode != nil:
@@ -625,6 +664,7 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 			Port: p.port, PID: pid, State: st, StartedAt: p.since.UTC(),
 			RestartCount: p.restarts, LastExitCode: p.exitCode, ConfigHash: p.configHash,
 			LogPath: childLogPath(s.root, p.def.name), Budget: bs,
+			Hold: gate.holdFor(bs),
 		})
 	}
 	for _, p := range s.procs {
@@ -638,10 +678,15 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 			continue
 		}
 		wf, _ := os.ReadFile(filepath.Join(s.root, ".sortie", "workflows", def.file))
+		bs := s.budgetStatusLocked(name)
+		st := "paused"
+		if s.gateHeld[name] && (bs == nil || !bs.Paused) {
+			st = "held"
+		}
 		doc.Workflows = append(doc.Workflows, workflowStatus{
 			Name: name, WorkflowFile: def.file, LoopType: loopTypeOf(wf), Port: s.ports[name],
-			State: "paused", StartedAt: s.startedAt.UTC(), LogPath: childLogPath(s.root, name),
-			Budget: s.budgetStatusLocked(name),
+			State: st, StartedAt: s.startedAt.UTC(), LogPath: childLogPath(s.root, name),
+			Budget: bs, Hold: gate.holdFor(bs),
 		})
 	}
 	sort.Slice(doc.Workflows, func(i, j int) bool { return doc.Workflows[i].Name < doc.Workflows[j].Name })
@@ -675,6 +720,28 @@ func (s *supervisor) shutdown() {
 	}
 }
 
+// fetchLoopState reads a loop's state API, and reports false when the
+// engine did not answer with a usable payload.
+func fetchLoopState(port int) (statePayload, bool) {
+	var p statePayload
+	if port == 0 {
+		return p, false
+	}
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/v1/state", port))
+	if err != nil {
+		return p, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return p, false
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&p); err != nil {
+		return p, false
+	}
+	return p, true
+}
+
 // loopQuiet reports whether a loop has no work in flight, and whether
 // the engine answered at all.
 //
@@ -683,21 +750,20 @@ func (s *supervisor) shutdown() {
 // is unknown, not idle, and must never be read as a loop with nothing to
 // lose.
 func loopQuiet(port int) (idle, known bool) {
-	if port == 0 {
-		return false, false
-	}
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/v1/state", port))
-	if err != nil {
-		return false, false
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return false, false
-	}
-	var p statePayload
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&p); err != nil {
+	p, ok := fetchLoopState(port)
+	if !ok {
 		return false, false
 	}
 	return len(p.Running) == 0 && len(p.Retrying) == 0 && p.Counts.Retrying == 0, true
+}
+
+// loopSessions reports whether a loop has a session running. Unlike
+// loopQuiet it ignores pending retries: the engine persists them, so
+// they resume after a restart.
+func loopSessions(port int) (active, known bool) {
+	p, ok := fetchLoopState(port)
+	if !ok {
+		return false, false
+	}
+	return len(p.Running) > 0, true
 }
