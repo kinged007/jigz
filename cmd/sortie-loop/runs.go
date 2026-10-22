@@ -385,7 +385,7 @@ func (a *app) runsCSV(w http.ResponseWriter, r *http.Request) {
 				strconv.FormatInt(s.ID, 10), csvText(s.DisplayIdentifier), csvText(s.Project), csvText(s.Workflow),
 				csvText(s.Workflow), s.Status, csvText(s.Model), s.ModelSource, csvText(s.AgentAdapter),
 				s.StartedAt, s.CompletedAt, duration(s.StartedAt, s.CompletedAt)}, tok...),
-				strconv.FormatBool(s.TokensMeasured), store.ClassifyOutcome(s.Status, s.Error).Text, csvText(s.Error)))
+				strconv.FormatBool(s.TokensMeasured), store.ClassifyOutcome(s.Status, s.Error).Class, csvText(s.Error)))
 		}
 		if len(runs) < f.Limit {
 			break

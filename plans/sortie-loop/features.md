@@ -48,7 +48,7 @@ section 6.
   exists
 - JSON API (`api.go`) — exists
 - Run data through sortie's HTTP API; SQLite only for history [2]
-- Outcome classes shared with the hub protocol [2]
+- Outcome classes of the hub protocol, mapped in one adapter (`internal/store/outcome.go`) — exists
 - Disabled-feature notices from capability detection [2]
 - Questions page with answering [3]
 - Working hours and account pool status (`gate.go`, `agents.go`) — exists

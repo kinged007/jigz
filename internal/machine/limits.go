@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-var builtinLimit = regexp.MustCompile(`(?i)usage limit|limit reached|limit exhausted|insufficient_quota|quota exceeded|out of credits`)
+var BuiltinLimit = regexp.MustCompile(`(?i)usage limit|limit reached|limit exhausted|insufficient_quota|quota exceeded|out of credits`)
 
 var (
 	resetEpoch = regexp.MustCompile(`\|(\d{9,11})\b`)
@@ -31,7 +31,7 @@ func (c *Config) DetectLimit(runtime, line string, stderr bool, now time.Time) (
 }
 
 func (c *Config) isLimit(text string) bool {
-	if builtinLimit.MatchString(text) {
+	if BuiltinLimit.MatchString(text) {
 		return true
 	}
 	for _, re := range c.Limits.patterns {

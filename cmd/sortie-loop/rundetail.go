@@ -103,7 +103,7 @@ func (a *app) runDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	d.Summary = summarize(d.Attempts, cur)
 	d.Class = d.Attempts[cur].Class
-	if d.Class.Key == "handoff" {
+	if d.Class.Key == store.OutcomeHandoffWithheld {
 		d.HandoffWhy = handoffReason(run.Error)
 	}
 	d.Timeline = attemptTimeline(timelineLabel(run.DisplayIdentifier, d.Attempts), d.Attempts, observed)

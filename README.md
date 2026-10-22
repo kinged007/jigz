@@ -716,6 +716,13 @@ identity at the agent — in the target repo or globally:
 git config --global user.name "sortie-agent"
 git config --global user.email "agent@example.com"
 ```
+The dashboard, the CSV export and the JSON API class each finished run as
+`succeeded`, `failed_agent`, `failed_workspace`, `failed_limit`, `cancelled`,
+`timeout` or `handoff_withheld`. The class comes from the run status and the
+engine's error text. A usage limit is recognised in that text when the agent
+CLI reports it, or when `agent-exec` writes its limit line and the engine
+includes it in the error. `failed_agent` covers every other failure.
+
 
 `user.name` is display-only. GitHub links the commit (and its avatar) to the
 GitHub account whose **verified email** matches the author email. One account
