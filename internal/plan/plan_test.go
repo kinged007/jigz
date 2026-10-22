@@ -2,11 +2,13 @@ package plan
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/kinged007/sortie-loop/internal/engine"
 	config "github.com/kinged007/sortie-loop/internal/fleetconfig"
 )
 
@@ -370,43 +372,69 @@ func TestLoadbearingBlockIsNeverInvented(t *testing.T) {
 	}
 }
 
+func isolateEngineEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	for _, k := range []string{"SORTIE_BIN", "SORTIE_ENGINE_REPO", "SORTIE_ENGINE_VERSION", "SORTIE_ENGINE_URL", "SORTIE_ENGINE_SHA256"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("PATH", "/nonexistent")
+}
+
 // A clean install puts the engine in <prefix>/share/sortie-loop, not on
-// PATH, because install.sh honours --prefix. A lookup that stops at PATH
-// reports "engine not found" on a perfectly complete installation, which
-// is exactly what happens the moment sortie-central is installed to
-// somewhere other than ~/.local.
-func TestSortieBinIsFoundInAPrefixShareDirectory(t *testing.T) {
+// PATH, because install.sh honours --prefix. The plan must find the same
+// file engine.Resolve finds, including the one for a configured
+// repository and version.
+func TestSortieBinIsTheEngineResolverResult(t *testing.T) {
+	isolateEngineEnv(t)
+	t.Setenv("SORTIE_ENGINE_REPO", "sortie-ai/sortie")
+	t.Setenv("SORTIE_ENGINE_VERSION", "v1.29.0")
 	prefix := t.TempDir()
 	binDir := filepath.Join(prefix, "bin")
 	share := filepath.Join(prefix, "share", "sortie-loop")
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		t.Fatal(err)
+	for _, d := range []string{binDir, share} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := os.MkdirAll(share, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// A stub that answers --dump-version the way sortie-loop does.
 	loop := filepath.Join(binDir, "sortie-loop")
-	stub := "#!/bin/sh\n[ \"$1\" = \"--dump-version\" ] && echo 1.2.3 && exit 0\nexit 0\n"
-	if err := os.WriteFile(loop, []byte(stub), 0o755); err != nil {
+	if err := os.WriteFile(loop, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	engine := filepath.Join(share, "sortie-1.2.3")
-	if err := os.WriteFile(engine, []byte("#!/bin/sh\n"), 0o755); err != nil {
+	spec, err := engine.Configured()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := spec.CachePath(share)
+	if err := os.WriteFile(want, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	other := engine.Spec{Repo: "kinged007/sortie", Tag: "v1.29.0"}
+	if err := os.WriteFile(other.CachePath(share), []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	// Neither the engine's real location nor its name is on PATH, and
-	// SORTIE_BIN is unset, so only the share-directory search can find it.
-	t.Setenv("SORTIE_BIN", "")
-	t.Setenv("PATH", "/nonexistent")
 	p := Plan{LoopBin: loop}
 	got, err := p.sortieBin()
 	if err != nil {
 		t.Fatalf("sortieBin: %v", err)
 	}
-	if got != engine {
-		t.Errorf("sortieBin = %q, want the versioned engine %q", got, engine)
+	if got != want {
+		t.Errorf("sortieBin = %q, want %q", got, want)
+	}
+	if resolved, _, err := engine.Resolve(loop); err != nil || resolved != got {
+		t.Errorf("engine.Resolve = %q, %v; want the plan's %q", resolved, err, got)
+	}
+	if viaPath, err := p.SortieBinPath(); err != nil || viaPath != got {
+		t.Errorf("SortieBinPath = %q, %v; want %q", viaPath, err, got)
+	}
+
+	t.Setenv("SORTIE_BIN", "/custom/sortie")
+	if got, _ := p.sortieBin(); got != "/custom/sortie" {
+		t.Errorf("sortieBin = %q, want SORTIE_BIN to win", got)
 	}
 }
 
@@ -681,4 +709,11 @@ func TestWithoutRuntimeBlockWarnings(t *testing.T) {
 	if len(got) != 1 || !strings.HasPrefix(got[0].Message, "extra:") {
 		t.Fatalf("warnings = %+v", got)
 	}
+}
+
+func TestMain(m *testing.M) {
+	engine.SetDownload(func(engine.Spec) (string, error) {
+		return "", errors.New("engine download disabled in unit tests")
+	})
+	os.Exit(m.Run())
 }

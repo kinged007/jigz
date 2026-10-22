@@ -279,28 +279,52 @@ against that release's `checksums.txt`, and links it onto your `PATH` as
 `sortie`, so `sortie validate` and `sortie stats` work in any shell. A
 fresh install needs no separate engine step.
 
-The pinned version is the release the shipped workflows were written
-against. Read it with `sortie-loop --dump-version`.
+The engine is a GitHub release, chosen by a repository (`owner/name`) and a
+version tag (`vX.Y.Z`). The defaults are `kinged007/sortie` and `v1.28.1`, the
+release the shipped workflows were written against. `sortie-loop --version`
+prints the configured repository and version, and the dashboard Settings page
+shows them next to the version the engine binary reports.
 
 The engine comes from the [kinged007/sortie](https://github.com/kinged007/sortie)
-fork, not from upstream `sortie-ai/sortie`. The fork exists because the
-workflows need two things upstream does not ship: the **pi agent
-adapter**, and the **github-pr tracker**, which treats pull requests as
-work items so a review loop can watch a pull request rather than an
-issue. See [SECURITY.md](SECURITY.md) for what running a fork means.
+fork by default, not from upstream `sortie-ai/sortie`. The fork exists because
+the workflows need two things upstream does not always ship: the **pi agent
+adapter**, and the **github-pr tracker**, which treats pull requests as work
+items so a review loop can watch a pull request rather than an issue. A
+repository you configure must carry both. See [SECURITY.md](SECURITY.md) for
+what running a fork means.
 
-To use a different build of the same engine, set `SORTIE_ENGINE_REPO`
-and, if its version differs, `SORTIE_ENGINE_VERSION`. To bring your own
-binary, set `SORTIE_BIN`. The engine version is pinned rather than
-resolved to "latest" on purpose: the workflows are written against
-specific engine behaviour, and an engine that changes under them breaks
-loops in ways that are hard to trace.
+The repository and version are read in this order, first match wins:
+
+1. `SORTIE_BIN`: use this binary. No repository or version applies.
+2. The environment variables `SORTIE_ENGINE_REPO` and `SORTIE_ENGINE_VERSION`.
+3. The `engine:` block of `machine.yaml` (see
+   [Working hours and agent accounts](#working-hours-and-agent-accounts)).
+4. The defaults.
+
+Each of the repository and the version is resolved on its own. A release
+needs the assets `sortie_<version>_<os>_<arch>.tar.gz` (Linux and macOS,
+`amd64` and `arm64`) and `checksums.txt`; the download is verified against it.
+An invalid value is an error.
+
+The setup command, the loops, `validate`, the dashboard and the supervisor
+all resolve the engine the same way: `SORTIE_BIN`, then the engine installed
+for the configured repository and version in `$XDG_DATA_HOME/sortie-loop` (or
+`~/.local/share/sortie-loop`) or in `<prefix>/share/sortie-loop` beside the
+`sortie-loop` binary, then a verified download into the first of those. The
+installed file is named `sortie-<owner>+<name>-<version>`, so the same version
+from two repositories is stored separately. If the download fails, a `sortie`
+beside the `sortie-loop` binary or on `PATH` is used with a warning, and its
+version is not checked.
+
+The version is fixed rather than resolved to "latest" on purpose: the
+workflows are written against specific engine behaviour, and an engine that
+changes under them breaks loops in ways that are hard to trace.
 
 | Variable | Effect |
 |---|---|
 | `SORTIE_BIN` | use this engine binary |
-| `SORTIE_ENGINE_REPO` | fetch the engine from this repository's releases |
-| `SORTIE_ENGINE_VERSION` | fetch this version instead of the pin |
+| `SORTIE_ENGINE_REPO` | fetch the engine from this repository's releases (`owner/name`) |
+| `SORTIE_ENGINE_VERSION` | fetch this version (`vX.Y.Z`) instead of the configured one |
 | `SORTIE_ENGINE_URL` | fetch one archive from this URL (with `SORTIE_ENGINE_SHA256` to verify it) |
 
 ### GitHub token
@@ -656,7 +680,15 @@ pool:
 limits:
   default_reset: 1h           # used when the CLI message has no reset time
   patterns: []                # extra case-insensitive regexes
+engine:
+  repo: kinged007/sortie      # owner/name of the engine's GitHub repository
+  version: v1.28.1            # release tag, vX.Y.Z
 ```
+
+The `engine` block selects the engine release and is optional; both fields
+default to the values shown. `SORTIE_ENGINE_REPO` and `SORTIE_ENGINE_VERSION`
+override it (see [The engine](#the-engine)). A problem in the hours or pool
+settings does not stop the engine from being resolved.
 
 Without windows the hours are always open. `env` values expand a leading `~/`
 and `$VAR` or `${VAR}`. The file can hold API keys, so keep it readable by you
@@ -683,6 +715,13 @@ starts, the engine posts no failure comment, and it retries after about 10
 seconds with the next available entry. A limit reached in the middle of a turn
 fails that engine session: the engine posts a "Sortie session failed" comment on
 the issue and retries the same way.
+
+The dashboard, the CSV export and the JSON API class each finished run as
+`succeeded`, `failed_agent`, `failed_workspace`, `failed_limit`, `cancelled`,
+`timeout` or `handoff_withheld`. The class comes from the run status and the
+engine's error text. A usage limit is recognised in that text when the agent
+CLI reports it, or when `agent-exec` writes its limit line and the engine
+includes it in the error. `failed_agent` covers every other failure.
 
 Known limitation: with `max_concurrent_agents` above 1, a loop can claim new
 work between the window close and the moment it is stopped.
@@ -716,13 +755,6 @@ identity at the agent — in the target repo or globally:
 git config --global user.name "sortie-agent"
 git config --global user.email "agent@example.com"
 ```
-The dashboard, the CSV export and the JSON API class each finished run as
-`succeeded`, `failed_agent`, `failed_workspace`, `failed_limit`, `cancelled`,
-`timeout` or `handoff_withheld`. The class comes from the run status and the
-engine's error text. A usage limit is recognised in that text when the agent
-CLI reports it, or when `agent-exec` writes its limit line and the engine
-includes it in the error. `failed_agent` covers every other failure.
-
 
 `user.name` is display-only. GitHub links the commit (and its avatar) to the
 GitHub account whose **verified email** matches the author email. One account

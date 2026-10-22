@@ -1,16 +1,19 @@
 package supervise
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/kinged007/sortie-loop/internal/engine"
 	config "github.com/kinged007/sortie-loop/internal/fleetconfig"
 	"github.com/kinged007/sortie-loop/internal/plan"
 )
@@ -822,4 +825,38 @@ func signalReceived(t *testing.T, rec string) syscall.Signal {
 	}
 	t.Fatal("the child recorded a signal this test does not send")
 	return 0
+}
+
+func TestMain(m *testing.M) {
+	engine.SetDownload(func(engine.Spec) (string, error) {
+		return "", errors.New("engine download disabled in unit tests")
+	})
+	os.Exit(m.Run())
+}
+
+// The child loop is pinned to the engine the engine package resolves for the
+// configured repository and version.
+func TestRunLoopPinsTheResolvedEngine(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("SORTIE_BIN", "")
+	t.Setenv("SORTIE_ENGINE_REPO", "sortie-ai/sortie")
+	t.Setenv("SORTIE_ENGINE_VERSION", "v1.29.0")
+	spec, err := engine.Configured()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(engine.DataDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := spec.CachePath(engine.DataDir())
+	if err := os.WriteFile(want, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := New(plan.Plan{})
+	cmd := s.runLoop(t.TempDir(), nil)
+	if !slices.Contains(cmd.Env, "SORTIE_BIN="+want) {
+		t.Errorf("child env lacks SORTIE_BIN=%s", want)
+	}
 }

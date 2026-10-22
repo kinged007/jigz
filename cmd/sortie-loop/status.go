@@ -20,7 +20,7 @@ const (
 
 // testedSchemaVersions lists the workflow DB schema_migrations versions
 // this release was tested against: the latest version of the engine
-// pinned by engineTag in version.go.
+// pinned by engine.DefaultTag.
 var testedSchemaVersions = []int{rollup.EngineSchema}
 
 // statusDoc is the machine-readable state of one supervisor, written to

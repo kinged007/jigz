@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kinged007/sortie-loop/internal/engine"
 	"gopkg.in/yaml.v3"
 )
 
@@ -88,7 +89,7 @@ func TestReleaseTargetsAreSupported(t *testing.T) {
 	}
 	for _, goos := range g.Builds[0].Goos {
 		for _, goarch := range g.Builds[0].Goarch {
-			if _, err := engineAssetName(goos, goarch, "0.0.0"); err != nil {
+			if _, err := engine.AssetName(goos, goarch, "0.0.0"); err != nil {
 				t.Errorf("releases %s/%s but the engine resolver rejects it: %v", goos, goarch, err)
 			}
 		}

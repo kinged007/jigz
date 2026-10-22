@@ -31,9 +31,11 @@ docs rewrite in the same commit make a bisect useless.
 The engine is the [kinged007/sortie](https://github.com/kinged007/sortie)
 fork, not `sortie-ai/sortie`. See [SECURITY.md](SECURITY.md) for why.
 Changes to the engine belong in that repository, not here; this repository
-only pins a version.
+only sets the default repository and version. Users can select another
+repository or version in `machine.yaml` or with `SORTIE_ENGINE_REPO` and
+`SORTIE_ENGINE_VERSION`.
 
-Bumping `engineTag` in `cmd/sortie-loop/version.go` is the whole change,
+Bumping `DefaultTag` in `internal/engine/engine.go` is the whole change,
 but it is not free: the workflows are written against known engine
 behaviour, so a bump needs `sortie validate` run against the new engine
 with the shipped workflows. `go test ./...` covers that when an engine is

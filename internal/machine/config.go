@@ -37,8 +37,74 @@ type Config struct {
 	Hours  Hours   `yaml:"hours"`
 	Pool   []Entry `yaml:"pool"`
 	Limits Limits  `yaml:"limits"`
+	Engine Engine  `yaml:"engine"`
 	// Warnings are non-fatal findings from Load, for example file permissions.
 	Warnings []string `yaml:"-"`
+}
+
+// Engine selects the sortie engine release: a GitHub repository and a
+// release tag. Empty fields mean the built-in defaults.
+type Engine struct {
+	Repo    string `yaml:"repo"`
+	Version string `yaml:"version"`
+}
+
+var (
+	engineRepoRe    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$`)
+	engineVersionRe = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
+)
+
+// ValidateEngineRepo checks an engine repository of the form owner/name.
+func ValidateEngineRepo(repo string) error {
+	if !engineRepoRe.MatchString(repo) || strings.HasSuffix(repo, "/.") || strings.HasSuffix(repo, "/..") {
+		return fmt.Errorf("engine repository %q is not of the form owner/name", repo)
+	}
+	return nil
+}
+
+// ValidateEngineVersion checks an engine release tag of the form vX.Y.Z.
+func ValidateEngineVersion(version string) error {
+	if !engineVersionRe.MatchString(version) {
+		return fmt.Errorf("engine version %q is not of the form vX.Y.Z", version)
+	}
+	return nil
+}
+
+func (e Engine) validate() error {
+	if e.Repo != "" {
+		if err := ValidateEngineRepo(e.Repo); err != nil {
+			return fmt.Errorf("engine.repo: %w", err)
+		}
+	}
+	if e.Version != "" {
+		if err := ValidateEngineVersion(e.Version); err != nil {
+			return fmt.Errorf("engine.version: %w", err)
+		}
+	}
+	return nil
+}
+
+// LoadEngine reads only the engine block of the machine file, so a problem in
+// the hours or pool settings does not stop the engine from being resolved.
+// A missing file gives the zero Engine.
+func LoadEngine(path string) (Engine, error) {
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return Engine{}, nil
+	}
+	if err != nil {
+		return Engine{}, err
+	}
+	var doc struct {
+		Engine Engine `yaml:"engine"`
+	}
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		return Engine{}, fmt.Errorf("%s: %w", path, err)
+	}
+	if err := doc.Engine.validate(); err != nil {
+		return Engine{}, fmt.Errorf("%s: %w", path, err)
+	}
+	return doc.Engine, nil
 }
 
 // Hours is a set of weekly windows. No windows means always open.
@@ -120,6 +186,9 @@ func Load(path string) (*Config, error) {
 }
 
 func (c *Config) validate() error {
+	if err := c.Engine.validate(); err != nil {
+		return err
+	}
 	if err := c.Hours.validate("hours"); err != nil {
 		return err
 	}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kinged007/sortie-loop/internal/edit"
+	"github.com/kinged007/sortie-loop/internal/engine"
 	fleetconfig "github.com/kinged007/sortie-loop/internal/fleetconfig"
 	"github.com/kinged007/sortie-loop/internal/rollup"
 	"github.com/kinged007/sortie-loop/internal/store"
@@ -59,11 +60,11 @@ func (a *app) toolVersions() []pair {
 	a.verOnce.Do(func() {
 		p := a.sup.Plan()
 		a.versions = []pair{{"sortie-loop", buildVersion()}}
-		engine := "not found"
+		reported := "not found"
 		if bin, err := p.SortieBinPath(); err == nil {
-			engine = firstLine(bin, "--version")
+			reported = firstLine(bin, "--version")
 		}
-		a.versions = append(a.versions, pair{"engine", engine}, pair{"supported database schema", schemaList(rollup.SupportedSchemas)})
+		a.versions = append(a.versions, pair{"engine", reported}, pair{"engine release", engine.Current().String()}, pair{"supported database schema", schemaList(rollup.SupportedSchemas)})
 	})
 	return a.versions
 }

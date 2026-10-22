@@ -31,9 +31,9 @@ The shipped workflows need two pieces the upstream engine does not
 ship: the **pi agent adapter** and the **github-pr tracker** (which
 treats pull requests as work items). They are provided by the
 [kinged007/sortie](https://github.com/kinged007/sortie) fork, so
-installing `sortie-loop` means running a fork. `SORTIE_ENGINE_REPO`
-points the installer at a different build of the same engine; whatever
-it points at must still carry both adapters. Building the engine from
+installing `sortie-loop` means running a fork. The `engine:`
+block of `machine.yaml` and `SORTIE_ENGINE_REPO` select a different
+repository; whatever it points at must still carry both adapters. Building the engine from
 source is the way to read the code you are about to execute.
 
 ## Token scope

@@ -19,9 +19,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 
+	"github.com/kinged007/sortie-loop/internal/engine"
 	config "github.com/kinged007/sortie-loop/internal/fleetconfig"
 	"github.com/kinged007/sortie-loop/internal/machine"
 	"gopkg.in/yaml.v3"
@@ -397,144 +397,15 @@ func (p Plan) LoopBinary() string {
 // pinned to it.
 func (p Plan) SortieBinPath() (string, error) { return p.sortieBin() }
 
-// sortieBin resolves the engine in the same order sortie-loop resolves
-// it: an explicit path, the environment, the version-named copy under
-// share/sortie-loop, beside the loop binary, then PATH. The share
-// directory comes before the last two because the engine lives there
-// rather than on PATH: sortie-loop downloads it under share/sortie-loop
-// and links it into place during setup, so a machine where the
-// installers ran and PATH was never extended still has a perfectly good
-// engine that a PATH-only lookup cannot see.
+// sortieBin is the explicit engine path when one is set, otherwise the
+// engine sortie-loop itself resolves (engine.Resolve), with the share
+// directory of the driven loop binary searched as well.
 func (p Plan) sortieBin() (string, error) {
 	if p.SortieBin != "" {
 		return p.SortieBin, nil
 	}
-	if v := os.Getenv("SORTIE_BIN"); v != "" {
-		return v, nil
-	}
-	// The version-pinned copy the installer downloaded, before any
-	// symlink. A symlink beside the binaries may point anywhere: sortie-loop
-	// builds that symlink from whatever its own lookup found, which is a
-	// PATH hit when one exists, so a machine with several engines can end
-	// up with the prefix's sortie running a binary the prefix never
-	// installed. Pinning the file itself makes the engine the loops run the
-	// one the workflows were validated against.
-	if bin := p.versionedSortie(); bin != "" {
-		return bin, nil
-	}
-	if self, err := os.Executable(); err == nil {
-		cand := filepath.Join(filepath.Dir(self), "sortie")
-		if fileExists(cand) {
-			return cand, nil
-		}
-	}
-	if bin, err := exec.LookPath("sortie"); err == nil {
-		return bin, nil
-	}
-	return "", fmt.Errorf("sortie engine not found; looked for SORTIE_BIN, %s, sortie beside %s and on PATH. "+
-		"Rerun sortie-central's install.sh, or set SORTIE_BIN to the engine", p.sortieShareGlob(), sortieSearchDirs())
-}
-
-// sortieShareGlob names the places the installer may have put the
-// version-named engine, for the error message.
-func (p Plan) sortieShareGlob() string {
-	dirs := p.shareDirs()
-	if len(dirs) == 0 {
-		return "the sortie-loop share directory"
-	}
-	return strings.Join(dirs, " or ") + " (sortie-<version>)"
-}
-
-// versionedSortie looks for the version-pinned engine the installer
-// downloaded. The version is asked of sortie-loop rather than hardcoded,
-// so it cannot drift from the workflows that binary was released for.
-//
-// Both prefix locations are searched. sortie-loop's own lookup only
-// knows ~/.local, so an install made with --prefix elsewhere leaves the
-// engine in <prefix>/share and the default path empty; deriving the
-// directory from the binaries actually in use is what makes a custom
-// prefix work.
-func (p Plan) versionedSortie() string {
-	want := ""
-	if v, err := exec.Command(p.LoopBinary(), "--dump-version").Output(); err == nil {
-		want = strings.TrimSpace(string(v))
-	}
-	for _, dir := range p.shareDirs() {
-		if want != "" {
-			if cand := filepath.Join(dir, "sortie-"+want); fileExists(cand) {
-				return cand
-			}
-		}
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			if !strings.HasPrefix(e.Name(), "sortie-") {
-				continue
-			}
-			if cand := filepath.Join(dir, e.Name()); fileExists(cand) {
-				return cand
-			}
-		}
-	}
-	return ""
-}
-
-// shareDirs are the directories the installer may have put the
-// version-named engine in: next to the binaries actually in use, and the
-// default under the home directory.
-func (p Plan) shareDirs() []string {
-	var dirs []string
-	add := func(bin string) {
-		if bin == "" {
-			return
-		}
-		abs, err := filepath.Abs(bin)
-		if err != nil {
-			return
-		}
-		d := filepath.Join(filepath.Dir(filepath.Dir(abs)), "share", "sortie-loop")
-		if !slices.Contains(dirs, d) {
-			dirs = append(dirs, d)
-		}
-	}
-	if self, err := os.Executable(); err == nil {
-		add(self)
-	}
-	add(p.LoopBinary())
-	if home := homeDir(); home != "" {
-		d := filepath.Join(home, ".local", "share", "sortie-loop")
-		if !slices.Contains(dirs, d) {
-			dirs = append(dirs, d)
-		}
-	}
-	return dirs
-}
-
-func sortieSearchDirs() string {
-	if self, err := os.Executable(); err == nil {
-		return filepath.Dir(self)
-	}
-	return "the directory holding sortie-central"
-}
-
-// homeDir mirrors sortie-loop's, which prefers $HOME over the database
-// lookup so a container running as root finds the same prefix the
-// installer wrote.
-func homeDir() string {
-	if h := os.Getenv("HOME"); h != "" {
-		return h
-	}
-	if h, err := os.UserHomeDir(); err == nil {
-		return h
-	}
-	return ""
-}
-
-func fileExists(p string) bool {
-	st, err := os.Stat(p)
-	return err == nil && !st.IsDir()
+	bin, _, err := engine.Resolve(p.LoopBinary())
+	return bin, err
 }
 
 // configFile is what central writes into each repository's .sortie/.
@@ -817,4 +688,9 @@ func TrackerKind(r config.Resolved, workflow string) string {
 		return ""
 	}
 	return doc.Tracker.Kind
+}
+
+func fileExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir()
 }

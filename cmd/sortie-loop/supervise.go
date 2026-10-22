@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/kinged007/sortie-loop/internal/config"
+	"github.com/kinged007/sortie-loop/internal/engine"
 )
 
 // Control signals. A loop is stopped by signalling the process that owns
@@ -626,7 +627,7 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 	doc := statusDoc{
 		SchemaVersion:        statusSchemaVersion,
 		Version:              version,
-		EngineVersion:        engineVersion(),
+		EngineVersion:        engine.Current().Version(),
 		TestedSchemaVersions: testedSchemaVersions,
 		PID:                  os.Getpid(),
 		Repo:                 s.root,

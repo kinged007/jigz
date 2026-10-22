@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/kinged007/sortie-loop/internal/engine"
 )
 
 func startedSup(t *testing.T, script string) (*supervisor, string) {
@@ -45,7 +47,7 @@ func TestStatusAfterStart(t *testing.T) {
 	_, root := startedSup(t, "while true; do sleep 1; done\n")
 	doc := readStatus(t, root)
 	if doc.SchemaVersion != 1 || doc.State != "running" || doc.PID != os.Getpid() ||
-		doc.Repo != root || doc.RepoName != "owner/name" || doc.EngineVersion != engineVersion() ||
+		doc.Repo != root || doc.RepoName != "owner/name" || doc.EngineVersion != engine.Current().Version() ||
 		doc.Version != version || doc.StartedAt.IsZero() {
 		t.Errorf("unexpected top-level status: %+v", doc)
 	}

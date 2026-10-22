@@ -15,8 +15,8 @@ section 6.
   `internal/fleetconfig`) — exists; ignored in connected mode
 - Query filters with milestone and assignee scope (`config.go`) — exists
 - `validate [--json]` (`validate.go`) — exists
-- Engine resolution, pinned download with checksum (`engine.go`) — exists
-- Configurable engine repository and pin; upstream supported [2]
+- Engine resolution, download with checksum (`internal/engine`), one resolver for the CLI, plan, supervisor and dashboard — exists
+- Configurable engine repository and version (`engine:` in machine.yaml, `SORTIE_ENGINE_REPO`, `SORTIE_ENGINE_VERSION`); upstream supported — exists
 - Capability detection (engine version, tracker and agent kinds) [2]
 
 ## 2. Supervision

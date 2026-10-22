@@ -25,6 +25,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/kinged007/sortie-loop/internal/config"
+	"github.com/kinged007/sortie-loop/internal/engine"
 	"github.com/kinged007/sortie-loop/internal/fakegithub"
 	"github.com/kinged007/sortie-loop/internal/machine"
 	"github.com/kinged007/sortie-loop/internal/rollup"
@@ -66,7 +67,7 @@ import (
 // engine. A missing engine fails the test.
 func TestAcceptance(t *testing.T) {
 	start := time.Now()
-	engine := acceptanceEngine(t)
+	engineBin := acceptanceEngine(t)
 	loopBin := buildLoop(t)
 
 	const (
@@ -108,7 +109,7 @@ func TestAcceptance(t *testing.T) {
 		"XDG_DATA_HOME=" + filepath.Join(home, ".local", "share"),
 		"XDG_CONFIG_HOME=" + filepath.Join(home, ".config"),
 		"XDG_STATE_HOME=" + filepath.Join(home, ".local", "state"),
-		"SORTIE_BIN=" + engine,
+		"SORTIE_BIN=" + engineBin,
 		"SORTIE_LOOP_ONLY=issues",
 	}
 	cmd.Env = env
@@ -262,7 +263,7 @@ func TestAcceptance(t *testing.T) {
 		if !slices.Contains(rollup.SupportedSchemas, schema) {
 			t.Errorf("engine database is at schema %d, which the dashboard does not read (supported %v)", schema, rollup.SupportedSchemas)
 		}
-		if engineVersion() == strings.TrimPrefix(engineTag, "v") && schema != rollup.EngineSchema {
+		if engine.Current().Tag == engine.DefaultTag && schema != rollup.EngineSchema {
 			t.Errorf("the pinned engine wrote schema %d, want %d", schema, rollup.EngineSchema)
 		}
 
@@ -462,19 +463,23 @@ func labelNames(ls []config.Label) []string {
 	return out
 }
 
-// acceptanceEngine returns the pinned engine binary or fails the test.
+// acceptanceEngine returns the configured engine binary or fails the test.
 func acceptanceEngine(t *testing.T) string {
 	t.Helper()
+	spec, err := engine.Configured()
+	if err != nil {
+		t.Fatal(err)
+	}
 	var bin string
 	switch {
 	case os.Getenv("SORTIE_BIN") != "":
 		bin = os.Getenv("SORTIE_BIN")
-	case installedSortieBin() != "":
-		bin = installedSortieBin()
+	case engine.Installed(engine.ShareDirs(), spec) != "":
+		bin = engine.Installed(engine.ShareDirs(), spec)
 	default:
-		p, err := fetchEngine()
+		p, err := engine.Fetch(spec)
 		if err != nil {
-			t.Fatalf("pinned engine %s is not installed and could not be downloaded: %v", engineVersion(), err)
+			t.Fatalf("engine %s is not installed and could not be downloaded: %v", spec, err)
 		}
 		bin = p
 	}
@@ -483,8 +488,8 @@ func acceptanceEngine(t *testing.T) string {
 		t.Fatalf("%s --version: %v", bin, err)
 	}
 	f := strings.Fields(string(out))
-	if len(f) < 2 || f[1] != engineVersion() {
-		t.Fatalf("%s reports %q, want engine %s", bin, strings.TrimSpace(string(out)), engineVersion())
+	if len(f) < 2 || f[1] != spec.Version() {
+		t.Fatalf("%s reports %q, want engine %s", bin, strings.TrimSpace(string(out)), spec.Version())
 	}
 	t.Logf("engine %s", bin)
 	return bin

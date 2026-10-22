@@ -405,3 +405,35 @@ func TestExpandedEnv(t *testing.T) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
+
+func TestLoadEngineBlock(t *testing.T) {
+	dir := t.TempDir()
+	write := func(body string) string {
+		p := filepath.Join(dir, "machine.yaml")
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	c, err := Load(write("engine:\n  repo: sortie-ai/sortie\n  version: v1.29.0\n"))
+	if err != nil || c.Engine != (Engine{Repo: "sortie-ai/sortie", Version: "v1.29.0"}) {
+		t.Fatalf("Load = %+v, %v", c, err)
+	}
+	for body, want := range map[string]string{
+		"engine:\n  repo: sortie\n":         "engine.repo",
+		"engine:\n  repo: a/b/c\n":          "engine.repo",
+		"engine:\n  version: 1.29.0\n":      "engine.version",
+		"engine:\n  version: v1.29\n":       "engine.version",
+		"engine:\n  version: v1.29.0-rc1\n": "engine.version",
+	} {
+		if _, err := Load(write(body)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("Load(%q) err = %v, want %s", body, err, want)
+		}
+		if _, err := LoadEngine(write(body)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("LoadEngine(%q) err = %v, want %s", body, err, want)
+		}
+	}
+	if e, err := LoadEngine(filepath.Join(dir, "absent.yaml")); err != nil || e != (Engine{}) {
+		t.Errorf("LoadEngine(missing) = %+v, %v", e, err)
+	}
+}

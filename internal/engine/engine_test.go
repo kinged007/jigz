@@ -1,4 +1,4 @@
-package main
+package engine
 
 import (
 	"archive/tar"
@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -17,31 +18,18 @@ import (
 )
 
 func TestEngineAssetName(t *testing.T) {
-	got, err := engineAssetName("darwin", "arm64", "1.24.0-pi.github-pr.1")
+	got, err := AssetName("darwin", "arm64", "1.24.0-pi.github-pr.1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := "sortie_1.24.0-pi.github-pr.1_darwin_arm64.tar.gz"; got != want {
 		t.Errorf("asset = %q, want %q", got, want)
 	}
-	_, err = engineAssetName("windows", "amd64", "1.0.0")
+	_, err = AssetName("windows", "amd64", "1.0.0")
 	if err == nil {
 		t.Error("windows has no tar.gz asset and should be rejected")
 	} else if !strings.Contains(err.Error(), "windows/amd64") {
 		t.Errorf("error should name the unsupported target, got %v", err)
-	}
-}
-
-// The asset and cache names use the tag without its leading v, because
-// that is the form GoReleaser writes into asset names.
-func TestEngineVersion(t *testing.T) {
-	t.Setenv("SORTIE_ENGINE_VERSION", "")
-	if got, want := engineVersion(), strings.TrimPrefix(engineTag, "v"); got != want {
-		t.Errorf("version = %q, want %q", got, want)
-	}
-	t.Setenv("SORTIE_ENGINE_VERSION", "v9.9.9")
-	if got := engineVersion(); got != "9.9.9" {
-		t.Errorf("override = %q, want 9.9.9", got)
 	}
 }
 
@@ -104,7 +92,7 @@ func TestFetchVerifiedRejectsWrongDigest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("matching digest rejected: %v", err)
 	}
-	// A verified download is the caller's to keep and delete; fetchEngine
+	// A verified download is the caller's to keep and delete; fetch
 	// removes it once the engine is extracted.
 	os.Remove(got)
 
@@ -180,14 +168,14 @@ func TestExtractEngineIgnoresForeignEntries(t *testing.T) {
 
 // The whole path a user with no engine takes: empty cache, resolve the
 // asset, fetch, verify, extract, land executable.
-func TestFetchEngineEndToEnd(t *testing.T) {
+func TestFetchEndToEnd(t *testing.T) {
 	engine := []byte("#!/bin/sh\necho engine\n")
 	archive := tarGz(t, map[string][]byte{
 		"LICENSE": []byte("Apache-2.0"),
 		"sortie":  engine,
 	})
 	sum := sha256.Sum256(archive)
-	asset, err := engineAssetName(runtime.GOOS, runtime.GOARCH, "1.0.0")
+	asset, err := AssetName(runtime.GOOS, runtime.GOARCH, "1.0.0")
 	if err != nil {
 		t.Skipf("no engine release for this platform: %v", err)
 	}
@@ -205,17 +193,16 @@ func TestFetchEngineEndToEnd(t *testing.T) {
 	releaseBase = func(_, _ string) string { return srv.URL + "/owner/engine/v1.0.0" }
 	defer func() { releaseBase = orig }()
 
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	t.Setenv("SORTIE_ENGINE_VERSION", "1.0.0")
-	t.Setenv("SORTIE_ENGINE_REPO", "owner/engine")
+	isolate(t)
+	spec := Spec{Repo: "owner/engine", Tag: "v1.0.0"}
 	t.Setenv("SORTIE_ENGINE_URL", "")
 	t.Setenv("SORTIE_ENGINE_SHA256", "")
 
-	got, err := fetchEngine()
+	got, err := Fetch(spec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := engineCachePath("1.0.0"); got != want {
+	if want := spec.CachePath(DataDir()); got != want {
 		t.Errorf("path = %q, want %q", got, want)
 	}
 	body, err := os.ReadFile(got)
@@ -229,7 +216,7 @@ func TestFetchEngineEndToEnd(t *testing.T) {
 	// A second call must be served from the cache, so a server that now
 	// fails must not change the answer.
 	srv.Close()
-	again, err := fetchEngine()
+	again, err := Fetch(spec)
 	if err != nil {
 		t.Fatalf("cached engine was refetched: %v", err)
 	}
@@ -248,13 +235,13 @@ func TestDownloadEngineURLOverride(t *testing.T) {
 
 	t.Setenv("SORTIE_ENGINE_URL", srv.URL+"/custom.tar.gz")
 	t.Setenv("SORTIE_ENGINE_SHA256", strings.Repeat("a", 64))
-	if _, err := downloadEngine("1.0.0"); err == nil {
+	if _, err := downloadEngine(Spec{Repo: "owner/engine", Tag: "v1.0.0"}); err == nil {
 		t.Fatal("digest mismatch should be reported")
 	}
 
 	sum := sha256.Sum256(body)
 	t.Setenv("SORTIE_ENGINE_SHA256", hex.EncodeToString(sum[:]))
-	path, err := downloadEngine("1.0.0")
+	path, err := downloadEngine(Spec{Repo: "owner/engine", Tag: "v1.0.0"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,4 +249,22 @@ func TestDownloadEngineURLOverride(t *testing.T) {
 	if raw, err := os.ReadFile(path); err != nil || !bytes.Equal(raw, body) {
 		t.Errorf("downloaded %q, %v; want %q", raw, err, body)
 	}
+}
+
+// isolate points every directory the engine package reads at a temp dir and
+// clears the engine environment.
+func isolate(t *testing.T) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	for _, k := range []string{"SORTIE_BIN", "SORTIE_ENGINE_REPO", "SORTIE_ENGINE_VERSION", "SORTIE_ENGINE_URL", "SORTIE_ENGINE_SHA256"} {
+		t.Setenv(k, "")
+	}
+}
+
+func TestMain(m *testing.M) {
+	SetDownload(func(Spec) (string, error) { return "", errors.New("engine download disabled in unit tests") })
+	os.Exit(m.Run())
 }

@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -149,7 +148,7 @@ func TestPageRendersRegisteredRepo(t *testing.T) {
 // cascade central validates against does not exist here, so an empty
 // tracker key from that environment must not turn a real workflow red.
 func TestValidateWorkflowUsesTheReposEnv(t *testing.T) {
-	stubEngineDownload(t, func() (string, error) { return "", errors.New("offline") })
+	isolateEngineEnv(t)
 	if _, err := resolveSortieBin(); err != nil {
 		t.Skip("no sortie binary on PATH")
 	}

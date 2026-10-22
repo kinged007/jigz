@@ -1,4 +1,4 @@
-package main
+package engine
 
 import (
 	"archive/tar"
@@ -17,17 +17,18 @@ import (
 	"time"
 )
 
-// The engine is the sortie binary this tool drives. The fork below is
+// The engine is the sortie binary this tool drives. The default fork is
 // required: upstream sortie-ai/sortie ships neither the pi agent adapter
-// nor the github-pr tracker, and the shipped workflows depend on both —
-// the pi adapter because the agents run in a terminal, the github-pr
-// tracker because the review and merge loops watch pull requests rather
-// than issues. SORTIE_ENGINE_REPO points at a different build of the
-// same engine; whatever it points at must still carry both adapters.
+// nor the github-pr tracker in every release, and the shipped workflows
+// depend on both. A repository set in machine.yaml or SORTIE_ENGINE_REPO must
+// still carry both adapters.
 
 const (
-	defaultEngineRepo = "kinged007/sortie"
-	engineBinary      = "sortie"
+	DefaultRepo = "kinged007/sortie"
+	// DefaultTag is the engine release the workflows are written for. The
+	// version in asset and cache names is the tag without its leading "v".
+	DefaultTag = "v1.28.1"
+	Binary     = "sortie"
 	// maxEngineBytes caps what a release archive may expand to, so a
 	// corrupt or hostile download cannot fill the disk.
 	maxEngineBytes = 512 << 20
@@ -41,41 +42,31 @@ var engineHTTP = &http.Client{Timeout: engineHTTPTimeout}
 // Windows releases ship a .zip, which nothing here unpacks.
 var supportedTargets = []string{"darwin/amd64", "darwin/arm64", "linux/amd64", "linux/arm64"}
 
-// engineVersion is the pinned engine version: the release tag without its
-// leading "v", which is the form GoReleaser puts in asset names.
-func engineVersion() string {
-	if v := os.Getenv("SORTIE_ENGINE_VERSION"); v != "" {
-		return strings.TrimPrefix(v, "v")
-	}
-	return strings.TrimPrefix(engineTag, "v")
-}
-
-func engineRepo() string {
-	if v := os.Getenv("SORTIE_ENGINE_REPO"); v != "" {
-		return strings.TrimSuffix(v, "/")
-	}
-	return defaultEngineRepo
-}
-
-// engineAssetName is the release asset holding the engine for one target.
-func engineAssetName(goos, goarch, version string) (string, error) {
+// AssetName is the release asset holding the engine for one target.
+func AssetName(goos, goarch, version string) (string, error) {
 	target := goos + "/" + goarch
 	if !slices.Contains(supportedTargets, target) {
 		return "", fmt.Errorf("no engine release for %s (supported: %s)", target, strings.Join(supportedTargets, ", "))
 	}
-	return fmt.Sprintf("%s_%s_%s_%s.tar.gz", engineBinary, version, goos, goarch), nil
+	return fmt.Sprintf("%s_%s_%s_%s.tar.gz", Binary, version, goos, goarch), nil
 }
 
-// engineCachePath holds one file per version, so pinning a new engine
-// cannot disturb a loop still running the old one.
-func engineCachePath(version string) string {
-	return filepath.Join(engineDataDir(), engineBinary+"-"+version)
+// CachePath is the file holding the engine for one repository and
+// version. The repository is part of the name, so a fork and upstream at
+// the same version do not share a file, and a new pin cannot disturb a
+// loop still running the old one. "+" cannot occur in a GitHub owner or
+// repository name, so two repositories never produce the same name.
+func (s Spec) CachePath(dir string) string {
+	return filepath.Join(dir, s.CacheName())
 }
 
-// engineDataDir is $XDG_DATA_HOME/sortie-loop, or ~/.local/share/sortie-loop.
-// The default is the directory install.sh populates, so either installer
-// reuses the other's download.
-func engineDataDir() string {
+// CacheName is the file name of the engine in a share directory.
+func (s Spec) CacheName() string {
+	return Binary + "-" + strings.Replace(s.Repo, "/", "+", 1) + "-" + s.Version()
+}
+
+// DataDir is $XDG_DATA_HOME/sortie-loop, or ~/.local/share/sortie-loop.
+func DataDir() string {
 	if d := os.Getenv("XDG_DATA_HOME"); d != "" {
 		return filepath.Join(d, "sortie-loop")
 	}
@@ -88,32 +79,31 @@ var releaseBase = func(repo, version string) string {
 	return fmt.Sprintf("https://github.com/%s/releases/download/v%s", repo, version)
 }
 
-// ensureEngine returns a path to the pinned engine, downloading it when it
-// is not cached. A freshly installed engine is also linked onto PATH, so a
+// Ensure returns a path to the engine for spec, downloading it when it is
+// not cached. A freshly installed engine is also linked onto PATH, so a
 // bare `sortie` works in any new shell.
-func ensureEngine() (string, error) {
-	bin, err := fetchEngine()
+func Ensure(spec Spec) (string, error) {
+	bin, err := Fetch(spec)
 	if err != nil {
-		return "", fmt.Errorf("%w%s", err, engineReleaseHint(err))
+		return "", fmt.Errorf("%w%s", err, releaseHint(spec, err))
 	}
-	linkEngineOnPath(bin)
+	LinkOnPath(bin)
 	return bin, nil
 }
 
-// fetchEngine returns a path to the engine for the pinned version,
-// downloading it when the cache is empty. A cached file is trusted: it
-// was verified when written and the directory is the user's own, so
-// re-verifying would cost a network round trip on every start.
-func fetchEngine() (string, error) {
-	version := engineVersion()
-	dest := engineCachePath(version)
+// Fetch returns a path to the engine for spec, downloading it when the
+// cache is empty. A cached file is trusted: it was verified when written and
+// the directory is the user's own, so re-verifying would cost a network round
+// trip on every start.
+func Fetch(spec Spec) (string, error) {
+	dest := spec.CachePath(DataDir())
 	if fi, err := os.Stat(dest); err == nil && fi.Mode().IsRegular() && fi.Mode().Perm()&0o111 != 0 {
 		return dest, nil
 	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return "", err
 	}
-	archive, err := downloadEngine(version)
+	archive, err := downloadEngine(spec)
 	if err != nil {
 		return "", err
 	}
@@ -123,15 +113,15 @@ func fetchEngine() (string, error) {
 
 // downloadEngine fetches the release archive into a temp file, verified
 // against the release's checksums.txt, and returns the archive path.
-func downloadEngine(version string) (string, error) {
+func downloadEngine(spec Spec) (string, error) {
 	url := os.Getenv("SORTIE_ENGINE_URL")
 	want := strings.ToLower(os.Getenv("SORTIE_ENGINE_SHA256"))
 	if url == "" {
-		asset, err := engineAssetName(runtime.GOOS, runtime.GOARCH, version)
+		asset, err := AssetName(runtime.GOOS, runtime.GOARCH, spec.Version())
 		if err != nil {
 			return "", err
 		}
-		base := releaseBase(engineRepo(), version)
+		base := releaseBase(spec.Repo, spec.Version())
 		sum, err := releaseChecksum(base, asset)
 		if err != nil {
 			return "", err
@@ -143,17 +133,17 @@ func downloadEngine(version string) (string, error) {
 	return fetchVerified(url, want)
 }
 
-// engineReleaseHint turns a missing checksums.txt into something the user
+// releaseHint turns a missing checksums.txt into something the user
 // can act on. A release published by hand — one bare binary named
 // sortie-linux-amd64 and nothing else — is the shape the fork currently
 // has, and "404 Not Found" alone sends people looking for a network
 // problem that is not there.
-func engineReleaseHint(err error) string {
-	repo, version := engineRepo(), engineVersion()
+func releaseHint(spec Spec, err error) string {
+	repo, version := spec.Repo, spec.Version()
 	if !strings.Contains(err.Error(), "checksums.txt") {
 		return ""
 	}
-	asset, aerr := engineAssetName(runtime.GOOS, runtime.GOARCH, version)
+	asset, aerr := AssetName(runtime.GOOS, runtime.GOARCH, version)
 	if aerr != nil {
 		asset = "sortie_" + version + "_" + runtime.GOOS + "_" + runtime.GOARCH + ".tar.gz"
 	}
@@ -266,9 +256,6 @@ func extractEngine(archivePath, dest string) error {
 	return os.Rename(out.Name(), dest)
 }
 
-// copyEngineEntry finds the engine in the archive and copies it to w.
-// Reading stops at the first match, so the licence and readme entries
-// that share the archive are never decompressed.
 // engineEntry reports whether a tar header names the engine binary.
 // GoReleaser produces two shapes depending on its archive config: a flat
 // archive with `sortie` at the root, and one wrapped in a per-platform
@@ -280,19 +267,22 @@ func extractEngine(archivePath, dest string) error {
 // locates the file rather than establishing trust; it does not need to be
 // strict enough to reject every name a real release would never use.
 func engineEntry(name string) bool {
-	if name == engineBinary {
+	if name == Binary {
 		return true
 	}
 	dir, file, ok := strings.Cut(name, "/")
-	return ok && file == engineBinary && dir != "" && dir != "." && dir != ".." &&
+	return ok && file == Binary && dir != "" && dir != "." && dir != ".." &&
 		!strings.ContainsAny(dir, `/\`)
 }
 
+// copyEngineEntry finds the engine in the archive and copies it to w.
+// Reading stops at the first match, so the licence and readme entries
+// that share the archive are never decompressed.
 func copyEngineEntry(tr *tar.Reader, w io.Writer) error {
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
-			return fmt.Errorf("archive holds no %q", engineBinary)
+			return fmt.Errorf("archive holds no %q", Binary)
 		}
 		if err != nil {
 			return fmt.Errorf("read archive: %w", err)
@@ -308,15 +298,15 @@ func copyEngineEntry(tr *tar.Reader, w io.Writer) error {
 	}
 }
 
-// linkEngineOnPath exposes the engine under its plain name in a
+// LinkOnPath exposes the engine under its plain name in a
 // directory on the user's PATH, so `sortie validate` and `sortie stats`
 // work in any new shell without an alias or the version in the path. It
 // prefers the directory holding the sortie-loop binary when that
 // directory is on PATH — the `go install` layout, where one PATH entry
 // covers both tools — and falls back to ~/.local/bin.
-func linkEngineOnPath(src string) {
-	dir, onPath := engineBindir()
-	if linkEngineAt(src, dir) == "" {
+func LinkOnPath(src string) {
+	dir, onPath := bindir()
+	if LinkAt(src, dir) == "" {
 		return
 	}
 	if !onPath {
@@ -324,12 +314,12 @@ func linkEngineOnPath(src string) {
 	}
 }
 
-// linkEngineAt links src into dir under the engine's plain name and
+// LinkAt links src into dir under the engine's plain name and
 // returns the link path, or "" when dir cannot be used. Every failure is
 // reported and then ignored: the engine is already usable by absolute
 // path, and a working loop matters more than a convenient command name.
-func linkEngineAt(src, dir string) string {
-	link := filepath.Join(dir, engineBinary)
+func LinkAt(src, dir string) string {
+	link := filepath.Join(dir, Binary)
 	if cur, err := os.Readlink(link); err == nil {
 		if cur == src {
 			return link
@@ -337,7 +327,7 @@ func linkEngineAt(src, dir string) string {
 		// Only a link into our own cache is ours to refresh. A link
 		// anywhere else is the user's, and replacing it silently would
 		// break a hand-built engine they point it at.
-		if !strings.HasPrefix(cur, engineDataDir()+string(filepath.Separator)) {
+		if !strings.HasPrefix(cur, DataDir()+string(filepath.Separator)) {
 			fmt.Fprintf(os.Stderr, "sortie-loop: warning: %s points at %s, which sortie-loop did not install; left alone (the engine runs from %s)\n", link, cur, src)
 			return ""
 		}
@@ -365,9 +355,9 @@ func linkEngineAt(src, dir string) string {
 	return link
 }
 
-// engineBindir is where the engine is linked, and whether that directory
+// bindir is where the engine is linked, and whether that directory
 // is already on PATH.
-func engineBindir() (dir string, onPath bool) {
+func bindir() (dir string, onPath bool) {
 	local := filepath.Join(homeDir(), ".local", "bin")
 	if self, err := os.Executable(); err == nil {
 		if d := filepath.Dir(self); dirOnPath(d) {

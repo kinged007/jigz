@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/kinged007/sortie-loop/internal/config"
+	"github.com/kinged007/sortie-loop/internal/engine"
 )
 
 // cmdline is the parsed command line.
@@ -175,12 +176,16 @@ func run() (code int) {
 	if err != nil {
 		fatal(err)
 	}
-	if c.dumpVersion {
-		fmt.Println(engineVersion())
-		return 0
-	}
-	if c.showVersion {
-		fmt.Printf("sortie-loop %s (engine %s)\n", version, engineVersion())
+	if c.dumpVersion || c.showVersion {
+		spec, err := engine.Configured()
+		if err != nil {
+			fatal(err)
+		}
+		if c.dumpVersion {
+			fmt.Println(spec.Version())
+		} else {
+			fmt.Printf("sortie-loop %s (engine %s %s)\n", version, spec.Repo, spec.Tag)
+		}
 		return 0
 	}
 	if c.setup {
