@@ -92,8 +92,8 @@ Known problems found during planning:
 
 | Feature | Needed for | Path to upstream |
 | ------- | ---------- | ---------------- |
-| `tracker.kind: github-pr` | PR workflow (review, review-fix, merge of any PR by label) | propose the tracker upstream (standalone package, about 700 lines) |
-| `agent.kind: pi` | `pi` with measured tokens | use upstream `agent-client-protocol` with the `pi-acp` adapter; tokens are then unmeasured, which affects budgets |
+| `tracker.kind: github-pr` | PR workflow (review, review-fix, merge of any PR by label) | upstream PR in progress (standalone package, about 700 lines) |
+| `agent.kind: pi` | `pi` with measured tokens | upstream PR in progress; until it is released, the alternative is upstream `agent-client-protocol` with the `pi-acp` adapter, where tokens are unmeasured, which affects budgets |
 
 Without the fork, the issue workflow runs with `claude-code`, `codex`, or
 `opencode`, and the PR workflow is disabled.
@@ -252,7 +252,9 @@ it needs no model and no real GitHub.
   one adapter.
 - Configurable engine repository and pin; upstream releases run the issue
   workflow with `claude-code`, `codex`, or `opencode`.
-- Upstream PRs proposing the `pi` adapter and the `github-pr` tracker.
+- Upstream PRs for the `pi` adapter and the `github-pr` tracker: in
+  progress. Until both are merged and released upstream, the fork
+  `kinged007/sortie` stays the default engine.
 
 ### Phase 3: Questions (5.3)
 

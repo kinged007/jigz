@@ -39,6 +39,7 @@ Read, in order:
   docs or the CLI help.
 - Engine: the fork `kinged007/sortie` stays the default until upstream
   `sortie-ai/sortie` has the `pi` adapter and the `github-pr` tracker.
+  The upstream PRs for both are in progress.
 - New tools or dependencies, and CI workflow changes, need the user's
   approval first.
 - Global rules in `~/.claude/AGENT_ORCHESTRATION.md`: the main agent
@@ -137,6 +138,9 @@ In order of the roadmap:
 2. Phase 1 release: the roadmap says each phase ends with a release and
    release notes. Neither is done. Ask the user before releasing.
 3. Phase 2: engine independence (roadmap section 6).
+   The upstream PRs for the `pi` adapter and the `github-pr` tracker are
+   in progress and owned by the user; the rest of Phase 2 does not wait
+   for them.
 
 Phase 1 against the roadmap (section 6, Phase 1):
 
