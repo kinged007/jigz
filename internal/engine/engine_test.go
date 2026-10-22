@@ -195,8 +195,8 @@ func TestFetchEndToEnd(t *testing.T) {
 
 	isolate(t)
 	spec := Spec{Repo: "owner/engine", Tag: "v1.0.0"}
-	t.Setenv("SORTIE_ENGINE_URL", "")
-	t.Setenv("SORTIE_ENGINE_SHA256", "")
+	t.Setenv("JIG_ENGINE_URL", "")
+	t.Setenv("JIG_ENGINE_SHA256", "")
 
 	got, err := Fetch(spec)
 	if err != nil {
@@ -233,14 +233,14 @@ func TestDownloadEngineURLOverride(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	t.Setenv("SORTIE_ENGINE_URL", srv.URL+"/custom.tar.gz")
-	t.Setenv("SORTIE_ENGINE_SHA256", strings.Repeat("a", 64))
+	t.Setenv("JIG_ENGINE_URL", srv.URL+"/custom.tar.gz")
+	t.Setenv("JIG_ENGINE_SHA256", strings.Repeat("a", 64))
 	if _, err := downloadEngine(Spec{Repo: "owner/engine", Tag: "v1.0.0"}); err == nil {
 		t.Fatal("digest mismatch should be reported")
 	}
 
 	sum := sha256.Sum256(body)
-	t.Setenv("SORTIE_ENGINE_SHA256", hex.EncodeToString(sum[:]))
+	t.Setenv("JIG_ENGINE_SHA256", hex.EncodeToString(sum[:]))
 	path, err := downloadEngine(Spec{Repo: "owner/engine", Tag: "v1.0.0"})
 	if err != nil {
 		t.Fatal(err)
@@ -259,7 +259,7 @@ func isolate(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	for _, k := range []string{"SORTIE_BIN", "SORTIE_ENGINE_REPO", "SORTIE_ENGINE_VERSION", "SORTIE_ENGINE_URL", "SORTIE_ENGINE_SHA256"} {
+	for _, k := range []string{"JIG_ENGINE_BIN", "JIG_ENGINE_REPO", "JIG_ENGINE_VERSION", "JIG_ENGINE_URL", "JIG_ENGINE_SHA256"} {
 		t.Setenv(k, "")
 	}
 }

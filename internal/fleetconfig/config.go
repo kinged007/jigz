@@ -1,11 +1,11 @@
-// Package config resolves sortie-central's settings from its YAML file:
+// Package config resolves Jigz's settings from its YAML file:
 // which repositories run, which of each repository's workflows start,
 // and the agent settings they run with.
 //
 // Every optional knob is a pointer so "not configured" stays distinct
 // from "configured to the zero value". An unset knob is left out of
 // the generated per-repository files and the child environment
-// entirely, so sortie-loop and the sortie engine apply their own
+// entirely, so Jigz and the engine apply their own
 // shipped default rather than one restated here. This package
 // deliberately holds no defaults of its own: a default belongs to the
 // thing it defaults, and restating it here is how the two drift.
@@ -22,11 +22,13 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/kinged007/jigz/internal/dirs"
 )
 
-// FileName is the config file sortie-central looks for in the working
+// FileName is the config file Jigz looks for in the working
 // directory when no path is given.
-const FileName = "sortie-central.yaml"
+const FileName = "jigz.yaml"
 
 // Agent holds the agent settings one repository's loops run with. A
 // nil field is unset and inherits from Defaults, or from the engine's
@@ -67,7 +69,7 @@ type Defaults struct {
 
 // Repo is one managed repository.
 type Repo struct {
-	// Repo is the tracker identity, owner/name. Unlike sortie-loop's
+	// Repo is the tracker identity, owner/name. Unlike Jigz's
 	// per-repo config it is required here: the state directory is not a
 	// git checkout, so there is no origin remote to detect it from.
 	Repo string `yaml:"repo"`
@@ -88,7 +90,7 @@ type Repo struct {
 	// never written to a file.
 	TokenEnv string `yaml:"token_env"`
 	// Assignee and Milestone scope the tracker query, empty to leave
-	// sortie-loop's own handling in place.
+	// Jigz's own handling in place.
 	Assignee  *string           `yaml:"assignee"`
 	Milestone string            `yaml:"milestone"`
 	Filters   map[string]string `yaml:"filters"`
@@ -267,7 +269,7 @@ func (g GitHub) validate() *FieldError {
 	return nil
 }
 
-// Config is a loaded central config.
+// Config is a loaded Jigz config.
 type Config struct {
 	Access   Access   `yaml:"access"`
 	GitHub   GitHub   `yaml:"github"`
@@ -278,17 +280,17 @@ type Config struct {
 }
 
 // Resolved is one repository's settings with the defaults cascade
-// applied: what to run, where, and what environment its sortie-loop
+// applied: what to run, where, and what environment its Jigz
 // child needs.
 type Resolved struct {
 	Repo Repo
 	// Dir is where this repository's .sortie/ goes.
 	Dir string
 	// Workflows is the resolved loop set. Empty means every installed
-	// workflow, passed through as an unset SORTIE_LOOP_ONLY.
+	// workflow, passed through as an unset JIG_ONLY.
 	Workflows []string
 	// Milestone and Assignee are the cascade-resolved tracker scope.
-	// Assignee nil means "leave it to sortie-loop".
+	// Assignee nil means "leave it to Jigz".
 	Milestone string
 	Assignee  *string
 	// TokenEnv is the cascade-resolved environment variable holding the
@@ -358,7 +360,7 @@ func Load(path string) (*Config, error) {
 		// A per-workflow override for a workflow that is not selected
 		// would never be applied, and the value would look configured
 		// while changing nothing. Only checked against an explicit
-		// workflow list: central does not know the installed set.
+		// workflow list: Jigz does not know the installed set.
 		if len(r.Workflows) > 0 {
 			selected := map[string]bool{}
 			for _, w := range r.Workflows {
@@ -374,7 +376,7 @@ func Load(path string) (*Config, error) {
 	return &c, nil
 }
 
-// validate rejects a repository central cannot run. These are checked
+// validate rejects a repository Jigz cannot run. These are checked
 // at load time so a typo in a config that supervises live issue
 // backlogs surfaces immediately rather than at the first claim.
 func (r *Repo) validate() error {
@@ -390,10 +392,10 @@ func (r *Repo) validate() error {
 			return fmt.Errorf("%s: empty workflow name", slug)
 		}
 	}
-	// Workflow names are not checked against a known set: central does
+	// Workflow names are not checked against a known set: Jigz does
 	// not ship the workflows, so it cannot know their names, and a
-	// stale list here would reject a name sortie-loop still supports.
-	// sortie-loop fails loudly on an unknown name at start.
+	// stale list here would reject a name Jigz still supports.
+	// Jigz fails loudly on an unknown name at start.
 	return nil
 }
 
@@ -417,11 +419,11 @@ func (c *Config) Dir(r Repo) (string, error) {
 func (c *Config) stateDir() (string, error) {
 	p := c.StateDir
 	if p == "" {
-		home, err := os.UserHomeDir()
+		home, err := dirs.State()
 		if err != nil {
 			return "", fmt.Errorf("state_dir unset and no home directory: %w", err)
 		}
-		p = filepath.Join(home, ".local", "state", "sortie-central")
+		p = home
 	}
 	abs, err := filepath.Abs(expandHome(p))
 	if err != nil {
@@ -483,7 +485,7 @@ func Enabled(all []Resolved) []Resolved {
 
 // modelVar is the variable an unmodified workflow's front matter is
 // pointed at for its model.
-const modelVar = "SORTIE_CENTRAL_MODEL"
+const modelVar = "JIG_MODEL"
 
 // ModelVar returns the environment variable one workflow's front matter
 // should reference for its model. A workflow that overrides the model
@@ -517,11 +519,11 @@ func (r Resolved) Token() string {
 // ValidateEnv returns the environment for a direct `sortie validate` of
 // this repository's workflow files, on top of Env.
 //
-// The child process is sortie-loop, which derives the tracker project,
+// The child process is Jigz, which derives the tracker project,
 // token, clone URL and workspace root from its own config at launch.
 // Validation calls the engine directly and so has to supply them
 // itself: without them the workflow's $SORTIE_TRACKER_PROJECT and
-// $SORTIE_LOOP_WORKSPACES references expand to empty, and validation
+// $JIG_WORKSPACES references expand to empty, and validation
 // rejects a repository that would run correctly under the child.
 func (r Resolved) ValidateEnv() ([]string, error) {
 	env, err := r.Env()
@@ -531,13 +533,12 @@ func (r Resolved) ValidateEnv() ([]string, error) {
 	return append(env,
 		"SORTIE_TRACKER_PROJECT="+r.Repo.Repo,
 		"SORTIE_TRACKER_API_KEY="+r.Token(),
-		"SORTIE_LOOP_CLONE_URL=https://github.com/"+r.Repo.Repo+".git",
-		"SORTIE_LOOP_WORKSPACES="+filepath.Join(r.Dir, ".sortie", "workspaces"),
+		"JIG_WORKSPACES="+filepath.Join(r.Dir, ".sortie", "workspaces"),
 	), nil
 }
 
 // Env returns the environment additions for one repository's
-// sortie-loop child. The child passes its own environment on to every
+// Jigz child. The child passes its own environment on to every
 // loop it starts, so these reach the engine too. An unset knob
 // contributes nothing and leaves the engine's default alone.
 //
@@ -558,7 +559,7 @@ func (r Resolved) Env() ([]string, error) {
 		}
 	}
 	if len(r.Workflows) > 0 {
-		env["SORTIE_LOOP_ONLY"] = strings.Join(r.Workflows, ",")
+		env["JIG_ONLY"] = strings.Join(r.Workflows, ",")
 	}
 	// model has no engine entry, so it never travels as an override: the
 	// workflow file names a variable and the engine expands it. The
@@ -576,9 +577,9 @@ func (r Resolved) Env() ([]string, error) {
 		if tok == "" {
 			return nil, fmt.Errorf("%s: token_env %s is unset or empty", r.Repo.Repo, name)
 		}
-		// The highest-precedence override in sortie-loop's config, so
+		// The highest-precedence override in Jigz's config, so
 		// the token stays in the environment and out of every file.
-		env["SORTIE_LOOP_TOKEN"] = tok
+		env["JIG_TOKEN"] = tok
 	}
 	keys := make([]string, 0, len(env))
 	for k := range env {

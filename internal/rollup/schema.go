@@ -46,7 +46,7 @@ func SchemaOf(tag string) (int, bool) {
 	return 0, false
 }
 
-// requiredColumns is every table and column central reads. A supported
+// requiredColumns is every table and column Jigz reads. A supported
 // version that lacks one hides only what depends on that table.
 var requiredColumns = map[string][]string{
 	"run_history": {
@@ -90,7 +90,7 @@ type Schema struct {
 	usable map[string]bool
 }
 
-// Has reports whether a table can be read with the columns central uses.
+// Has reports whether a table can be read with the columns Jigz uses.
 func (s Schema) Has(table string) bool { return s.usable[table] }
 
 // OpenReadOnly opens a workflow database that another process is writing.
@@ -104,7 +104,7 @@ func OpenReadOnly(path string) (*sql.DB, error) {
 }
 
 // InspectSchema checks schema_migrations against the accepted range and
-// the columns of every table central reads.
+// the columns of every table Jigz reads.
 func InspectSchema(db *sql.DB) Schema {
 	version := 0
 	if tableExists(db, "schema_migrations") {

@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	config "github.com/kinged007/sortie-loop/internal/fleetconfig"
-	"github.com/kinged007/sortie-loop/internal/github"
-	"github.com/kinged007/sortie-loop/internal/store"
+	config "github.com/kinged007/jigz/internal/fleetconfig"
+	"github.com/kinged007/jigz/internal/github"
+	"github.com/kinged007/jigz/internal/store"
 )
 
 // DefaultCallBudget is the most GitHub requests one project gets per pass.
@@ -52,7 +52,7 @@ func (s EnrichStatus) Text() string {
 	return "error: " + s.Err
 }
 
-// Enricher fills github_cache for the runs central has stored: branch,
+// Enricher fills github_cache for the runs Jigz has stored: branch,
 // pull request and its opened, merged and closed times. It only reads from
 // GitHub. Fill the exported fields before calling Run or Once.
 type Enricher struct {

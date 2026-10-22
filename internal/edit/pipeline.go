@@ -15,13 +15,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kinged007/sortie-loop/internal/store"
+	"github.com/kinged007/jigz/internal/store"
 )
 
 // KeepBackups is how many backups of one file are kept.
 const KeepBackups = 20
 
-// Target is one config file. Scope is "central" or the project slug.
+// Target is one config file. Scope is "jigz" or the project slug.
 type Target struct {
 	Scope string
 	Name  string

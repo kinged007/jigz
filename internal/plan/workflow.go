@@ -29,7 +29,7 @@ type Workflow struct {
 	// Model is the model set in the block named after the agent kind.
 	Model string
 	// Knobs holds the agent settings the file sets, keyed like the
-	// central config knobs (max_turns, polling_interval_ms, ...).
+	// Jigz config knobs (max_turns, polling_interval_ms, ...).
 	Knobs map[string]string
 	// Template is dispatch.default.template.
 	Template string

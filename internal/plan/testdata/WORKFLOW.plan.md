@@ -4,7 +4,7 @@ tracker:
   api_key: $SORTIE_TRACKER_API_KEY
   project: $SORTIE_TRACKER_PROJECT
   query_filter: "label:agent:plan,in-progress -label:agent:build -label:needs-human"
-  # Assignee scope is appended by sortie-loop config at launch, not here.
+  # Assignee scope is appended by Jigz config at launch, not here.
   # ponytail: `todo` must stay first. Open issues carrying no state label
   # derive active_states[0] as their state, so without a leading non-target
   # entry the dispatch-time in-progress transition is a silent no-op and
@@ -34,7 +34,7 @@ polling:
 db_path: .sortie-plan.db
 
 workspace:
-  root: $SORTIE_LOOP_WORKSPACES/plan
+  root: $JIG_WORKSPACES/plan
   retention_days: 30
 
 # ponytail: plan-gating is enforced by the build loop's query_filter

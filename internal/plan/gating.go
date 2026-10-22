@@ -3,7 +3,7 @@ package plan
 import (
 	"strings"
 
-	"github.com/kinged007/sortie-loop/internal/engine"
+	"github.com/kinged007/jigz/internal/engine"
 )
 
 // LoopGate is what an engine's capabilities decide for one workflow file.

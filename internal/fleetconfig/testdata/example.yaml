@@ -1,11 +1,11 @@
-# sortie-central configuration. Copy to sortie-central.yaml and edit.
+# Jigz configuration. Copy to jigz.yaml and edit.
 #
-# Anything left out keeps sortie-loop's own default: sortie-central
-# restates no defaults of its own, because a default belongs to the
-# thing it defaults and a copy here is how the two drift.
+# Anything left out keeps Jigz's own default: this file restates no
+# defaults of its own, because a default belongs to the thing it
+# defaults and a copy here is how the two drift.
 
 # Where each repository's .sortie/ lives. Empty means
-# ~/.local/state/sortie-central. No checkout is made: this directory
+# ~/.local/state/jigz. No checkout is made: this directory
 # holds loop configuration and run state, and the agent clones the
 # repository itself into the workspaces where it works.
 state_dir: ""
@@ -13,7 +13,7 @@ state_dir: ""
 # Optional enrichment of run history from the GitHub REST API: branch,
 # pull request link, the Journey card of an issue run, and PRs opened and
 # merged per day. Read only, and off
-# by default; with it off central makes no GitHub request. Each project's
+# by default; with it off Jigz makes no GitHub request. Each project's
 # own token (token_env) is used for its own calls. Applied on reload.
 github:
   enrich: false
@@ -31,7 +31,7 @@ defaults:
   # One variable for the whole fleet. A repository may name its own.
   token_env: GH_TOKEN
   # Only issues assigned to the token owner are picked up. "" shares the
-  # backlog. This is sortie-loop's own default when omitted here.
+  # backlog. This is Jigz's own default when omitted here.
   assignee: "@me"
   agent:
     max_concurrent_agents: 1
@@ -49,7 +49,7 @@ repos:
     polling_interval_ms: 30000
 
   # The minimum: no overrides at all, so every shipped workflow runs
-  # with sortie-loop's defaults.
+  # with Jigz's defaults.
   - repo: owner/beta
 
   # A team that keeps its loop config in git: point path at a real

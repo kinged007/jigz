@@ -1,6 +1,6 @@
 // Package store is the dashboard history database, <state_dir>/history.db.
 // Workflow databases hold runs but no time series, and their rows go away
-// when a workflow is cleaned up, so central keeps its own copy.
+// when a workflow is cleaned up, so Jigz keeps its own copy.
 package store
 
 import (

@@ -29,7 +29,6 @@ type Config struct {
 	Dir       string // repo root (sortie dir is Dir/.sortie)
 	SortieBin string // resolved sortie binary path
 	EnvFile   string // path to generated env file passed via --env-file
-	CloneURL  string // https clone URL derived from Repo
 	Tracker   string // tracker project, always == Repo
 	// Filters overrides the default per-loop query filters by loop name
 	// (the WORKFLOW.*.md stem). Unknown loops get defaultFilter; known
@@ -272,7 +271,7 @@ func retentionDays(workflow []byte) (int, bool) {
 	return 0, false
 }
 
-// Label is one GitHub label managed by `sortie-loop setup`.
+// Label is one GitHub label managed by `jig setup`.
 type Label struct {
 	Name        string `yaml:"name"`
 	Color       string `yaml:"color"`
@@ -308,7 +307,7 @@ var DefaultLabels = []Label{
 
 // Load reads .sortie/config.yaml under dir (repo root), applies environment
 // overrides, and derives git-based defaults. The config file must exist:
-// a fresh checkout needs `sortie-loop setup` first, and running without
+// a fresh checkout needs `jig setup` first, and running without
 // it would silently fall back to defaults (wrong labels, no milestone)
 // and dispatch on items the operator never scoped.
 func Load(dir string) (*Config, error) {
@@ -318,7 +317,7 @@ func Load(dir string) (*Config, error) {
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, ".sortie", "config.yaml"))
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("no .sortie/config.yaml in %s (run `sortie-loop setup` first)", dir)
+		return nil, fmt.Errorf("no .sortie/config.yaml in %s (run `jig setup` first)", dir)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
@@ -369,13 +368,13 @@ func Load(dir string) (*Config, error) {
 	if c.Labels == nil {
 		c.Labels = DefaultLabels
 	}
-	if v := os.Getenv("SORTIE_LOOP_REPO"); v != "" {
+	if v := os.Getenv("JIG_REPO"); v != "" {
 		c.Repo = v
 	}
-	if v := os.Getenv("SORTIE_LOOP_TOKEN"); v != "" {
+	if v := os.Getenv("JIG_TOKEN"); v != "" {
 		c.Token = v
 	}
-	if v := os.Getenv("SORTIE_LOOP_MILESTONE"); v != "" {
+	if v := os.Getenv("JIG_MILESTONE"); v != "" {
 		c.Milestone = v
 	}
 	if v := os.Getenv("GH_MILESTONE"); v != "" && c.Milestone == "" {
@@ -390,7 +389,7 @@ func Load(dir string) (*Config, error) {
 	}
 	c.Repo = NormalizeRepo(c.Repo)
 	if c.Repo == "" || !strings.Contains(c.Repo, "/") {
-		return nil, fmt.Errorf("expected owner/name, got %q (set repo: in .sortie/config.yaml or SORTIE_LOOP_REPO)", c.Repo)
+		return nil, fmt.Errorf("expected owner/name, got %q (set repo: in .sortie/config.yaml or JIG_REPO)", c.Repo)
 	}
 	if c.Token == "" {
 		if v := os.Getenv("GITHUB_TOKEN"); v != "" {
@@ -400,7 +399,6 @@ func Load(dir string) (*Config, error) {
 		}
 	}
 	c.Tracker = c.Repo
-	c.CloneURL = "https://github.com/" + c.Repo + ".git"
 	c.Workspaces = filepath.Join(dir, ".sortie", "workspaces")
 	return c, nil
 }
@@ -449,7 +447,7 @@ func (c *Config) FilterFor(name string) string {
 }
 
 func (c *Config) assignee() string {
-	if v, ok := os.LookupEnv("SORTIE_LOOP_ASSIGNEE"); ok {
+	if v, ok := os.LookupEnv("JIG_ASSIGNEE"); ok {
 		return v
 	}
 	if c.Assignee != nil {
@@ -458,15 +456,14 @@ func (c *Config) assignee() string {
 	return "@me"
 }
 
-// Env returns the SORTIE_* environment for one sortie subprocess.
+// Env returns the environment for one engine subprocess.
 // The token travels as SORTIE_TRACKER_API_KEY so it overrides
-// tracker.api_key through sortie's curated env layer.
+// tracker.api_key through the engine's curated env layer.
 func (c *Config) Env() []string {
 	return []string{
 		"SORTIE_TRACKER_PROJECT=" + c.Tracker,
 		"SORTIE_TRACKER_API_KEY=" + c.Token,
-		"SORTIE_LOOP_CLONE_URL=" + c.CloneURL,
-		"SORTIE_LOOP_WORKSPACES=" + c.Workspaces,
+		"JIG_WORKSPACES=" + c.Workspaces,
 	}
 }
 
@@ -478,7 +475,7 @@ func (c *Config) CheckToken() error {
 	if c.Token != "" {
 		return nil
 	}
-	return errors.New("no GitHub token found. Set one of SORTIE_LOOP_TOKEN, token: in .sortie/config.yaml, GITHUB_TOKEN, or GH_TOKEN (see the GitHub token section of the README)")
+	return errors.New("no GitHub token found. Set one of JIG_TOKEN, token: in .sortie/config.yaml, GITHUB_TOKEN, or GH_TOKEN (see the GitHub token section of the README)")
 }
 
 func withScope(base, assignee string) string {
@@ -505,7 +502,7 @@ func withMilestone(base, milestone string) string {
 func detectRepo(dir string) (string, error) {
 	out, err := exec.Command("git", "-C", dir, "remote", "get-url", "origin").Output()
 	if err != nil {
-		return "", errors.New("cannot detect repo from git remote (not a git checkout or no origin remote? set repo: in .sortie/config.yaml or SORTIE_LOOP_REPO)")
+		return "", errors.New("cannot detect repo from git remote (not a git checkout or no origin remote? set repo: in .sortie/config.yaml or JIG_REPO)")
 	}
 	return NormalizeRepo(strings.TrimSpace(string(out))), nil
 }

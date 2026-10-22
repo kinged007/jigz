@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	machine "github.com/kinged007/sortie-loop/internal/host"
-	"github.com/kinged007/sortie-loop/internal/loopsrc"
-	"github.com/kinged007/sortie-loop/internal/rollup"
-	"github.com/kinged007/sortie-loop/internal/store"
+	machine "github.com/kinged007/jigz/internal/host"
+	"github.com/kinged007/jigz/internal/loopsrc"
+	"github.com/kinged007/jigz/internal/rollup"
+	"github.com/kinged007/jigz/internal/store"
 )
 
 type fakeSource struct{ loops []rollup.Loop }

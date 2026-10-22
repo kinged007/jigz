@@ -7,7 +7,7 @@ import (
 )
 
 // Scope returns the mapping an agent or project editor works on, inside
-// the central config's root: "defaults", a project slug, or
+// the Jigz config's root: "defaults", a project slug, or
 // "<slug>/<workflow>" for a workflow override. With create unset a scope
 // that does not exist yet is nil; a missing project is nil either way.
 func Scope(root *yaml.Node, scope string, create bool) *yaml.Node {

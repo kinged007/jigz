@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kinged007/sortie-loop/internal/loopsrc"
-	"github.com/kinged007/sortie-loop/internal/rollup"
-	"github.com/kinged007/sortie-loop/internal/store"
+	"github.com/kinged007/jigz/internal/loopsrc"
+	"github.com/kinged007/jigz/internal/rollup"
+	"github.com/kinged007/jigz/internal/store"
 )
 
 func repoWithDBs(t *testing.T, files map[string]string, dbs ...string) string {

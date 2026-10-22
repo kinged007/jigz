@@ -1,6 +1,6 @@
-// Package plan turns a resolved central config into the on-disk state
+// Package plan turns a resolved Jigz config into the on-disk state
 // one repository needs: its .sortie/config.yaml, its installed
-// workflows, and the environment its sortie-loop child runs with.
+// workflows, and the environment its Jigz child runs with.
 //
 // Validation is layered, and each layer is reported rather than
 // swallowed. The config layer is Load, which fails before anything is
@@ -21,9 +21,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kinged007/sortie-loop/internal/engine"
-	config "github.com/kinged007/sortie-loop/internal/fleetconfig"
-	"github.com/kinged007/sortie-loop/internal/machine"
+	"github.com/kinged007/jigz/internal/engine"
+	config "github.com/kinged007/jigz/internal/fleetconfig"
+	"github.com/kinged007/jigz/internal/machine"
 	"gopkg.in/yaml.v3"
 )
 
@@ -122,24 +122,24 @@ func (p Plan) ApplySettings(r config.Resolved) error {
 
 // modelRef is the variable the model line points at, so the model reaches
 // the adapter as a value rather than a literal. No shipped workflow
-// mentions it, so a line naming one is unambiguously central's.
-const modelRef = "$SORTIE_CENTRAL_MODEL"
+// mentions it, so a line naming one is unambiguously Jigz's.
+const modelRef = "$JIG_MODEL"
 
 // modelUnset is what every shipped workflow carries for a model that is
 // not configured, so restoring it makes removing a model reversible.
 //
 // ponytail: a hand-edited model line is lost when the model is removed,
-// because central cannot tell its own value from an operator's.
+// because Jigz cannot tell its own value from an operator's.
 const modelUnset = `""`
 
-// pruneModelRefs undoes the model line central wrote, for when the model
+// pruneModelRefs undoes the model line Jigz wrote, for when the model
 // is no longer configured. Left behind, it fails validation twice over:
 // the reference dangles because the variable is no longer generated, and
-// an adapter block central created is a top-level key the engine does not
+// an adapter block Jigz created is a top-level key the engine does not
 // recognise once the agent kind is no longer that adapter.
 //
-// A block whose only content is central's own line, and whose name is not
-// the default adapter's, is one central created: the shipped workflows
+// A block whose only content is Jigz's own line, and whose name is not
+// the default adapter's, is one Jigz created: the shipped workflows
 // carry a block for their own adapter and no other. It is dropped, because
 // an emptied block would still be an unrecognised top-level key. The
 // default adapter's block is shipped and is kept, as is any block holding
@@ -220,7 +220,7 @@ const (
 )
 
 // classify decides what a front-matter line is, for the purpose of
-// working out whether a block is central's.
+// working out whether a block is Jigz's.
 func classify(line string) lineClass {
 	t := strings.TrimSpace(line)
 	switch {
@@ -364,33 +364,33 @@ type Diagnostics struct {
 // it twice leaves the same bytes, so it is safe to re-run on every
 // start and from the UI's apply action.
 type Plan struct {
-	// LoopBin is the sortie-loop binary. Empty resolves it from PATH.
+	// LoopBin is the jig binary. Empty resolves it from PATH.
 	LoopBin string
-	// SortieBin is the sortie engine. Empty resolves it from PATH.
+	// SortieBin is the engine binary. Empty resolves it from PATH.
 	SortieBin string
 }
 
-// LoopBinary returns the sortie-loop binary to drive: the explicit
-// setting, then SORTIE_LOOP_BIN, then a binary beside this one, then
+// LoopBinary returns the jig binary to drive: the explicit
+// setting, then JIG_BIN, then a binary beside this one, then
 // PATH.
 func (p Plan) LoopBinary() string {
 	if p.LoopBin != "" {
 		return p.LoopBin
 	}
-	if v := os.Getenv("SORTIE_LOOP_BIN"); v != "" {
+	if v := os.Getenv("JIG_BIN"); v != "" {
 		return v
 	}
 	// A binary installed next to this one, which is what the installers
 	// produce. Resolving by name alone would fail for anyone who ran
-	// sortie-central by absolute path from a shell whose PATH does not
+	// jig by absolute path from a shell whose PATH does not
 	// include the prefix.
 	if self, err := os.Executable(); err == nil {
-		cand := filepath.Join(filepath.Dir(self), "sortie-loop")
+		cand := filepath.Join(filepath.Dir(self), "jig")
 		if fileExists(cand) {
 			return cand
 		}
 	}
-	return "sortie-loop"
+	return "jig"
 }
 
 // SortieBinPath exposes the resolved engine so a child process can be
@@ -398,7 +398,7 @@ func (p Plan) LoopBinary() string {
 func (p Plan) SortieBinPath() (string, error) { return p.sortieBin() }
 
 // sortieBin is the explicit engine path when one is set, otherwise the
-// engine sortie-loop itself resolves (engine.Resolve), with the share
+// engine Jigz itself resolves (engine.Resolve), with the share
 // directory of the driven loop binary searched as well.
 func (p Plan) sortieBin() (string, error) {
 	if p.SortieBin != "" {
@@ -408,9 +408,9 @@ func (p Plan) sortieBin() (string, error) {
 	return bin, err
 }
 
-// configFile is what central writes into each repository's .sortie/.
-// Only settings central actually holds are emitted, so every key left
-// out keeps sortie-loop's own default: this file is an overlay, not a
+// configFile is what Jigz writes into each repository's .sortie/.
+// Only settings Jigz actually holds are emitted, so every key left
+// out keeps Jigz's own default: this file is an overlay, not a
 // replacement. Labels are never written for the same reason — an
 // absent labels: key makes setup use its shipped list.
 type configFile struct {
@@ -422,7 +422,7 @@ type configFile struct {
 
 // Apply writes one repository's config.yaml. It is written through a
 // temporary file and renamed, so a crash mid-write cannot leave a
-// half-written config that sortie-loop would fail to parse on the next
+// half-written config that Jigz would fail to parse on the next
 // start.
 func Apply(r config.Resolved) error {
 	dir := filepath.Join(r.Dir, ".sortie")
@@ -438,8 +438,8 @@ func Apply(r config.Resolved) error {
 	if err != nil {
 		return err
 	}
-	header := "# Written by sortie-central. Edit sortie-central.yaml instead;\n" +
-		"# this file is regenerated. Keys left out keep sortie-loop's defaults.\n"
+	header := "# Written by Jigz. Edit jigz.yaml instead;\n" +
+		"# this file is regenerated. Keys left out keep Jigz's defaults.\n"
 	final := filepath.Join(dir, "config.yaml")
 	tmp, err := os.CreateTemp(dir, "config.yaml.*")
 	if err != nil {
@@ -460,8 +460,8 @@ func Apply(r config.Resolved) error {
 }
 
 // marshalOverlay encodes the overlay with the two-space indent
-// yaml.v3 uses in its own output, so a file central writes looks like
-// the one sortie-loop setup writes. The file can be committed when a
+// yaml.v3 uses in its own output, so a file Jigz writes looks like
+// the one jig setup writes. The file can be committed when a
 // repository points path: at a real checkout, and a human reads it.
 func marshalOverlay(v configFile) ([]byte, error) {
 	var buf bytes.Buffer
@@ -477,17 +477,17 @@ func marshalOverlay(v configFile) ([]byte, error) {
 }
 
 // Setup installs the workflows, labels, .gitignore, and PM prompt by
-// driving `sortie-loop setup`, which already owns all of that.
+// driving `jig setup`, which already owns all of that.
 //
 // Stdin is left empty so setup never blocks on its overwrite prompt: a
-// non-interactive stdin declines, which keeps a file central has
+// non-interactive stdin declines, which keeps a file Jigz has
 // deliberately patched instead of restoring the shipped copy. Setup is
 // additive on labels and never deletes one, so running it per start is
 // safe.
 func (p Plan) Setup(r config.Resolved) error {
 	out, err := p.RunSetup(r)
 	if err != nil {
-		return fmt.Errorf("%s: sortie-loop setup: %w: %s", r.Repo.Repo, err, lastLine(out))
+		return fmt.Errorf("%s: jig setup: %w: %s", r.Repo.Repo, err, lastLine(out))
 	}
 	return nil
 }
@@ -500,7 +500,7 @@ func (p Plan) RunSetup(r config.Resolved) (string, error) {
 		return "", err
 	}
 	cmd := exec.Command(p.LoopBinary(), "setup", r.Dir)
-	cmd.Env = append(append(os.Environ(), env...), "SORTIE_LOOP_REPO="+r.Repo.Repo)
+	cmd.Env = append(append(os.Environ(), env...), "JIG_REPO="+r.Repo.Repo)
 	var out strings.Builder
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err = cmd.Run()

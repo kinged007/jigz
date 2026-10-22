@@ -1,13 +1,13 @@
-// Package loopsrc is where central gets the live state of the loops. A
+// Package loopsrc is where Jigz gets the live state of the loops. A
 // page shows a control or a field only when the source reports the
-// capability for it, so nothing waits on a sortie-loop release.
+// capability for it, so nothing waits on a Jigz release.
 package loopsrc
 
 import (
 	"context"
 	"time"
 
-	"github.com/kinged007/sortie-loop/internal/rollup"
+	"github.com/kinged007/jigz/internal/rollup"
 )
 
 // Capabilities says what a source can report or do beyond the basics
@@ -23,15 +23,15 @@ type Capabilities struct {
 }
 
 // Source reads the fleet. Starting and stopping stay with
-// internal/supervise, which signals the sortie-loop child.
+// internal/supervise, which signals the Jigz child.
 type Source interface {
 	Name() string
 	Capabilities() Capabilities
 	Fleet() rollup.Fleet
 }
 
-// Legacy reads the shared sortie-loop registry and each loop's
-// /api/v1/state, which is all a sortie-loop without a status document
+// Legacy reads the shared Jigz registry and each loop's
+// /api/v1/state, which is all a Jigz without a status document
 // offers.
 type Legacy struct {
 	Reader rollup.Reader
@@ -42,7 +42,7 @@ func (Legacy) Capabilities() Capabilities { return Capabilities{} }
 func (l Legacy) Fleet() rollup.Fleet      { return l.Reader.Collect() }
 
 // Operator is a source that reads status documents and drives the
-// sortie-loop commands. Pages use it through a type assertion, and show
+// Jigz commands. Pages use it through a type assertion, and show
 // a control only where ProjectCapabilities says the project supports it.
 type Operator interface {
 	Source

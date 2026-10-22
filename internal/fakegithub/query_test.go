@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kinged007/sortie-loop/internal/config"
+	"github.com/kinged007/jigz/internal/config"
 )
 
 func TestParseQueryShippedFilters(t *testing.T) {

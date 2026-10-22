@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/kinged007/sortie-loop/internal/machine"
+	"github.com/kinged007/jigz/internal/machine"
 )
 
 // Spec names one engine release: a GitHub repository and a release tag.
@@ -24,8 +24,8 @@ func (s Spec) Version() string { return strings.TrimPrefix(s.Tag, "v") }
 
 func (s Spec) String() string { return s.Repo + " " + s.Tag }
 
-// Configured returns the engine release to use. SORTIE_ENGINE_REPO and
-// SORTIE_ENGINE_VERSION win over the engine block of machine.yaml, which
+// Configured returns the engine release to use. JIG_ENGINE_REPO and
+// JIG_ENGINE_VERSION win over the engine block of machine.yaml, which
 // wins over the defaults. Every value is validated.
 func Configured() (Spec, error) {
 	var file machine.Engine
@@ -41,16 +41,16 @@ func Configured() (Spec, error) {
 	if file.Version != "" {
 		spec.Tag = file.Version
 	}
-	if v := os.Getenv("SORTIE_ENGINE_REPO"); v != "" {
+	if v := os.Getenv("JIG_ENGINE_REPO"); v != "" {
 		spec.Repo = strings.TrimSuffix(v, "/")
 		if err := machine.ValidateEngineRepo(spec.Repo); err != nil {
-			return Spec{}, fmt.Errorf("SORTIE_ENGINE_REPO: %w", err)
+			return Spec{}, fmt.Errorf("JIG_ENGINE_REPO: %w", err)
 		}
 	}
-	if v := os.Getenv("SORTIE_ENGINE_VERSION"); v != "" {
+	if v := os.Getenv("JIG_ENGINE_VERSION"); v != "" {
 		spec.Tag = "v" + strings.TrimPrefix(v, "v")
 		if err := machine.ValidateEngineVersion(spec.Tag); err != nil {
-			return Spec{}, fmt.Errorf("SORTIE_ENGINE_VERSION: %w", err)
+			return Spec{}, fmt.Errorf("JIG_ENGINE_VERSION: %w", err)
 		}
 	}
 	return spec, nil
@@ -65,7 +65,7 @@ func Current() Spec {
 }
 
 // ShareDirs are the directories the engine may be installed in: the data
-// directory, and <prefix>/share/sortie-loop for the running binary and each
+// directory, and <prefix>/share/jigz for the running binary and each
 // of bins, where prefix is the directory above the binary's directory.
 func ShareDirs(bins ...string) []string {
 	dirs := []string{DataDir()}
@@ -77,7 +77,7 @@ func ShareDirs(bins ...string) []string {
 		if bin == "" || err != nil {
 			continue
 		}
-		d := filepath.Join(filepath.Dir(filepath.Dir(abs)), "share", "sortie-loop")
+		d := filepath.Join(filepath.Dir(filepath.Dir(abs)), "share", "jigz")
 		if !slices.Contains(dirs, d) {
 			dirs = append(dirs, d)
 		}
@@ -141,7 +141,7 @@ func downloadOnce(spec Spec) (string, error) {
 	return path, err
 }
 
-// Resolve finds the engine for the configured release: SORTIE_BIN, then the
+// Resolve finds the engine for the configured release: JIG_ENGINE_BIN, then the
 // engine installed in a share directory, then a verified download. bins are
 // extra binaries whose share directory is searched, in addition to the
 // running binary's. unpinned is true when the result is a `sortie` found
@@ -153,7 +153,7 @@ func Resolve(bins ...string) (bin string, unpinned bool, err error) {
 
 // ResolveIn is Resolve over an explicit share-directory list.
 func ResolveIn(dirs []string) (bin string, unpinned bool, err error) {
-	if v := os.Getenv("SORTIE_BIN"); v != "" {
+	if v := os.Getenv("JIG_ENGINE_BIN"); v != "" {
 		return v, false, nil
 	}
 	spec, err := Configured()
@@ -173,12 +173,12 @@ func ResolveIn(dirs []string) (bin string, unpinned bool, err error) {
 		warned[spec] = true
 		downloadMu.Unlock()
 		if first {
-			fmt.Fprintf(os.Stderr, "sortie-loop: warning: using %s, whose version is not checked and may not be the configured %s: could not download the engine: %v\n",
+			fmt.Fprintf(os.Stderr, "jig: warning: using %s, whose version is not checked and may not be the configured %s: could not download the engine: %v\n",
 				p, spec, dlErr)
 		}
 		return p, true, nil
 	}
-	return "", false, fmt.Errorf("sortie binary not found (looked for SORTIE_BIN, ./sortie, PATH, and %s in %s); download sortie %s from https://github.com/%s/releases and set SORTIE_BIN; could not download the engine: %w",
+	return "", false, fmt.Errorf("engine binary not found (looked for JIG_ENGINE_BIN, the engine beside this program, PATH, and %s in %s); download the engine release %s from https://github.com/%s/releases and set JIG_ENGINE_BIN; could not download the engine: %w",
 		spec.CacheName(), strings.Join(dirs, ", "), spec.Tag, spec.Repo, dlErr)
 }
 

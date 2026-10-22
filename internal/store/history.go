@@ -49,7 +49,7 @@ func (s *Store) CountSamples() (int, error) {
 	return n, err
 }
 
-// Event is a state change central saw in a workflow database.
+// Event is a state change Jigz saw in a workflow database.
 type Event struct {
 	TS       string `json:"ts"`
 	Project  string `json:"project"`

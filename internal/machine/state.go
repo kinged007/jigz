@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/kinged007/jigz/internal/dirs"
 )
 
 // EntryState is the recorded state of one pool entry.
@@ -23,18 +25,14 @@ type State map[string]EntryState
 
 const maxReason = 200
 
-// StatePath returns <state dir>/sortie-loop/pool.json, with the state dir
+// StatePath returns <state dir>/jigz/pool.json, with the state dir
 // taken from XDG_STATE_HOME or ~/.local/state.
 func StatePath() (string, error) {
-	dir := os.Getenv("XDG_STATE_HOME")
-	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		dir = filepath.Join(home, ".local", "state")
+	dir, err := dirs.State()
+	if err != nil {
+		return "", err
 	}
-	return filepath.Join(dir, "sortie-loop", "pool.json"), nil
+	return filepath.Join(dir, "pool.json"), nil
 }
 
 // LoadState reads the state file. A missing file gives an empty State.

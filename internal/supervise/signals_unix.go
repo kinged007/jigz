@@ -7,7 +7,7 @@ import (
 	"syscall"
 )
 
-// Control signals for a child sortie-loop. The child owns its loops and
+// Control signals for a child Jigz. The child owns its loops and
 // is the only thing watching them, so a stop that must wait for work to
 // finish is requested by signalling it rather than by deciding here.
 //
@@ -27,7 +27,7 @@ const idleSignals = true
 // a group-directed signal from the child or its descendants cannot
 // reach the supervisor.
 //
-// Without it a child inherits the supervisor's group, and sortie-loop
+// Without it a child inherits the supervisor's group, and Jigz
 // and the engine both tear down by signalling a process group. Stopping
 // one repository then signalled a group containing every sibling and the
 // supervisor itself: the whole fleet died instead of one loop. Each

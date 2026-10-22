@@ -4,7 +4,7 @@ tracker:
   api_key: $SORTIE_TRACKER_API_KEY
   project: $SORTIE_TRACKER_PROJECT
   # Strictly: PRs assigned to the token owner carrying agent:review
-  # (assignee scope is appended by sortie-loop config at launch). A
+  # (assignee scope is appended by Jigz config at launch). A
   # non-empty query_filter is sent to GitHub search, which applies the label
   # and exclusion clauses; active_states below still decides which labels
   # make a PR a candidate. `in-progress` lets the same loop pick a
@@ -33,13 +33,13 @@ polling:
 db_path: .sortie-review.db
 
 workspace:
-  root: $SORTIE_LOOP_WORKSPACES/review
+  root: $JIG_WORKSPACES/review
   retention_days: 30
 
 hooks:
   after_create: |
     git init -q . 2>/dev/null || true
-    git fetch --depth 1 origin "pull/$SORTIE_ISSUE_IDENTIFIER/head:pr-$SORTIE_ISSUE_IDENTIFIER" 2>/dev/null || git fetch --depth 1 "$SORTIE_LOOP_CLONE_URL" "pull/$SORTIE_ISSUE_IDENTIFIER/head:pr-$SORTIE_ISSUE_IDENTIFIER"
+    git fetch --depth 1 origin "pull/$SORTIE_ISSUE_IDENTIFIER/head:pr-$SORTIE_ISSUE_IDENTIFIER" 2>/dev/null || git fetch --depth 1 "$JIG_CLONE_URL" "pull/$SORTIE_ISSUE_IDENTIFIER/head:pr-$SORTIE_ISSUE_IDENTIFIER"
     git checkout -q "pr-$SORTIE_ISSUE_IDENTIFIER"
   timeout_ms: 60000
 

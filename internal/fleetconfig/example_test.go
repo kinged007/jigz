@@ -26,14 +26,14 @@ func TestExampleConfigLoadsAndDocumentsPerWorkflow(t *testing.T) {
 	if _, ok := env["SORTIE_AGENT_MAX_CONCURRENT_AGENTS"]; ok {
 		t.Error("an overridden knob is in the environment, where it would silently beat the override")
 	}
-	if got := env["SORTIE_LOOP_ONLY"]; got != "plan,build,review" {
-		t.Errorf("SORTIE_LOOP_ONLY = %q", got)
+	if got := env["JIG_ONLY"]; got != "plan,build,review" {
+		t.Errorf("JIG_ONLY = %q", got)
 	}
-	if env["SORTIE_CENTRAL_MODEL"] != "gpt-5" {
-		t.Errorf("SORTIE_CENTRAL_MODEL = %q, want gpt-5", env["SORTIE_CENTRAL_MODEL"])
+	if env["JIG_MODEL"] != "gpt-5" {
+		t.Errorf("JIG_MODEL = %q, want gpt-5", env["JIG_MODEL"])
 	}
-	if env["SORTIE_CENTRAL_MODEL_REVIEW"] != "opus" {
-		t.Errorf("SORTIE_CENTRAL_MODEL_REVIEW = %q, want opus", env["SORTIE_CENTRAL_MODEL_REVIEW"])
+	if env["JIG_MODEL_REVIEW"] != "opus" {
+		t.Errorf("JIG_MODEL_REVIEW = %q, want opus", env["JIG_MODEL_REVIEW"])
 	}
 	// The overridden workflow is heavier; the other two keep the
 	// repository value.
@@ -48,10 +48,10 @@ func TestExampleConfigLoadsAndDocumentsPerWorkflow(t *testing.T) {
 	}
 	// review names its own model variable because one file can name
 	// only one; build shares the repository's.
-	if got := r.ModelVar("review"); got != "SORTIE_CENTRAL_MODEL_REVIEW" {
+	if got := r.ModelVar("review"); got != "JIG_MODEL_REVIEW" {
 		t.Errorf("ModelVar(review) = %q", got)
 	}
-	if got := r.ModelVar("build"); got != "SORTIE_CENTRAL_MODEL" {
+	if got := r.ModelVar("build"); got != "JIG_MODEL" {
 		t.Errorf("ModelVar(build) = %q, want the shared variable", got)
 	}
 }

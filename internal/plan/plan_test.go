@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kinged007/sortie-loop/internal/engine"
-	config "github.com/kinged007/sortie-loop/internal/fleetconfig"
+	"github.com/kinged007/jigz/internal/engine"
+	config "github.com/kinged007/jigz/internal/fleetconfig"
 )
 
 func resolved(t *testing.T, dir string, mutate ...func(*config.Resolved)) config.Resolved {
@@ -37,8 +37,8 @@ func workflows(t *testing.T, dir string, names ...string) {
 	}
 }
 
-// config.yaml is an overlay: only keys central holds may appear, so
-// everything else keeps sortie-loop's default.
+// config.yaml is an overlay: only keys Jigz holds may appear, so
+// everything else keeps Jigz's default.
 func TestApplyWritesOnlyConfiguredKeys(t *testing.T) {
 	dir := t.TempDir()
 	r := resolved(t, dir)
@@ -91,9 +91,9 @@ func TestApplyIsIdempotent(t *testing.T) {
 
 // The token must not reach disk from any path.
 func TestApplyNeverWritesAToken(t *testing.T) {
-	t.Setenv("SORTIE_TEST_TOKEN", "ghp_secret")
+	t.Setenv("JIG_TEST_TOKEN", "ghp_secret")
 	dir := t.TempDir()
-	r := resolved(t, dir, func(r *config.Resolved) { r.Repo.TokenEnv = "SORTIE_TEST_TOKEN" })
+	r := resolved(t, dir, func(r *config.Resolved) { r.Repo.TokenEnv = "JIG_TEST_TOKEN" })
 	if err := Apply(r); err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ body text
 `
 
 func TestPatchBlockRewritesOnlyTheTargetedLine(t *testing.T) {
-	got, changed, err := patchBlock([]byte(realWorkflow), "pi", "model", "$SORTIE_CENTRAL_MODEL", false)
+	got, changed, err := patchBlock([]byte(realWorkflow), "pi", "model", "$JIG_MODEL", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestPatchBlockRewritesOnlyTheTargetedLine(t *testing.T) {
 		t.Error("changed = false on a file that needed a patch")
 	}
 	out := string(got)
-	if !strings.Contains(out, "  model: $SORTIE_CENTRAL_MODEL") {
+	if !strings.Contains(out, "  model: $JIG_MODEL") {
 		t.Errorf("model line not rewritten:\n%s", out)
 	}
 	// The other adapter's model must be untouched, the comment kept, and
@@ -141,7 +141,7 @@ func TestPatchBlockRewritesOnlyTheTargetedLine(t *testing.T) {
 		t.Errorf("front matter fence or body changed:\n%s", out)
 	}
 	// Idempotent: a second pass must be a no-op.
-	again, changed, err := patchBlock(got, "pi", "model", "$SORTIE_CENTRAL_MODEL", false)
+	again, changed, err := patchBlock(got, "pi", "model", "$JIG_MODEL", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestPatchBlockInsertsAnAbsentKey(t *testing.T) {
 }
 
 // No agent or workflow settings at all means no edit, so the workflow
-// stays exactly as sortie-loop installed it.
+// stays exactly as Jigz installed it.
 func TestApplySettingsSkipsWhenUnset(t *testing.T) {
 	dir := t.TempDir()
 	workflows(t, dir, "build")
@@ -226,7 +226,7 @@ func TestApplySettingsWritesTheModelLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(filepath.Join(dir, ".sortie", "workflows", "WORKFLOW.build.md"))
-	if !strings.Contains(string(raw), "  model: $SORTIE_CENTRAL_MODEL") {
+	if !strings.Contains(string(raw), "  model: $JIG_MODEL") {
 		t.Errorf("model line not written:\n%s", raw)
 	}
 }
@@ -256,10 +256,10 @@ func TestApplySettingsWritesPerWorkflowKnobs(t *testing.T) {
 		return string(raw)
 	}
 	plan, build := read("plan"), read("build")
-	if !strings.Contains(plan, "  model: $SORTIE_CENTRAL_MODEL\n") {
+	if !strings.Contains(plan, "  model: $JIG_MODEL\n") {
 		t.Errorf("plan model line:\n%s", plan)
 	}
-	if !strings.Contains(build, "  model: $SORTIE_CENTRAL_MODEL_BUILD\n") {
+	if !strings.Contains(build, "  model: $JIG_MODEL_BUILD\n") {
 		t.Errorf("build model line:\n%s", build)
 	}
 	// plan takes the repository value, written to its file because
@@ -339,7 +339,7 @@ func TestAdapterBlockIsCreatedForANonDefaultKind(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(filepath.Join(dir, ".sortie", "workflows", "WORKFLOW.build.md"))
-	if !strings.Contains(string(raw), "codex:\n  model: $SORTIE_CENTRAL_MODEL\n") {
+	if !strings.Contains(string(raw), "codex:\n  model: $JIG_MODEL\n") {
 		t.Errorf("codex adapter block not created:\n%s", raw)
 	}
 	// The pi block is left alone: the engine only reads the active
@@ -378,29 +378,29 @@ func isolateEngineEnv(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	for _, k := range []string{"SORTIE_BIN", "SORTIE_ENGINE_REPO", "SORTIE_ENGINE_VERSION", "SORTIE_ENGINE_URL", "SORTIE_ENGINE_SHA256"} {
+	for _, k := range []string{"JIG_ENGINE_BIN", "JIG_ENGINE_REPO", "JIG_ENGINE_VERSION", "JIG_ENGINE_URL", "JIG_ENGINE_SHA256"} {
 		t.Setenv(k, "")
 	}
 	t.Setenv("PATH", "/nonexistent")
 }
 
-// A clean install puts the engine in <prefix>/share/sortie-loop, not on
+// A clean install puts the engine in <prefix>/share/jigz, not on
 // PATH, because install.sh honours --prefix. The plan must find the same
 // file engine.Resolve finds, including the one for a configured
 // repository and version.
 func TestSortieBinIsTheEngineResolverResult(t *testing.T) {
 	isolateEngineEnv(t)
-	t.Setenv("SORTIE_ENGINE_REPO", "sortie-ai/sortie")
-	t.Setenv("SORTIE_ENGINE_VERSION", "v1.29.0")
+	t.Setenv("JIG_ENGINE_REPO", "sortie-ai/sortie")
+	t.Setenv("JIG_ENGINE_VERSION", "v1.29.0")
 	prefix := t.TempDir()
 	binDir := filepath.Join(prefix, "bin")
-	share := filepath.Join(prefix, "share", "sortie-loop")
+	share := filepath.Join(prefix, "share", "jigz")
 	for _, d := range []string{binDir, share} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	loop := filepath.Join(binDir, "sortie-loop")
+	loop := filepath.Join(binDir, "jig")
 	if err := os.WriteFile(loop, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -432,35 +432,35 @@ func TestSortieBinIsTheEngineResolverResult(t *testing.T) {
 		t.Errorf("SortieBinPath = %q, %v; want %q", viaPath, err, got)
 	}
 
-	t.Setenv("SORTIE_BIN", "/custom/sortie")
+	t.Setenv("JIG_ENGINE_BIN", "/custom/sortie")
 	if got, _ := p.sortieBin(); got != "/custom/sortie" {
-		t.Errorf("sortieBin = %q, want SORTIE_BIN to win", got)
+		t.Errorf("sortieBin = %q, want JIG_ENGINE_BIN to win", got)
 	}
 }
 
-// A sortie-loop installed beside this binary has to be found without
-// PATH, or running sortie-central by absolute path fails.
+// A jig installed beside this binary has to be found without
+// PATH, or running jig by absolute path fails.
 func TestLoopBinaryPrefersASiblingOverPATH(t *testing.T) {
 	prefix := t.TempDir()
-	loop := filepath.Join(prefix, "sortie-loop")
+	loop := filepath.Join(prefix, "jig")
 	if err := os.WriteFile(loop, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("SORTIE_LOOP_BIN", "")
+	t.Setenv("JIG_BIN", "")
 	t.Setenv("PATH", "/nonexistent")
 	if got := (Plan{LoopBin: loop}).LoopBinary(); got != loop {
 		t.Errorf("LoopBinary = %q, want the explicit %q", got, loop)
 	}
 	// With nothing beside it, it falls back to PATH lookup by name.
-	if got := (Plan{}).LoopBinary(); got != "sortie-loop" {
+	if got := (Plan{}).LoopBinary(); got != "jig" {
 		t.Errorf("LoopBinary = %q, want the bare name for PATH lookup", got)
 	}
 }
 
 // Setting a model and then removing it must leave the shipped file byte
-// for byte. Central patches in place and never restores, so anything it
-// writes has to be removable: a dangling $SORTIE_CENTRAL_MODEL is an
-// unresolved reference, and an adapter block central created is a
+// for byte. Jigz patches in place and never restores, so anything it
+// writes has to be removable: a dangling $JIG_MODEL is an
+// unresolved reference, and an adapter block Jigz created is a
 // top-level key the engine rejects, and either one stops the loop.
 func TestRemovingAModelRestoresTheShippedFile(t *testing.T) {
 	for _, kind := range []string{"codex", "claude-code", "pi"} {
@@ -468,8 +468,8 @@ func TestRemovingAModelRestoresTheShippedFile(t *testing.T) {
 			dir := t.TempDir()
 			workflows(t, dir, "plan")
 			path := filepath.Join(dir, ".sortie", "workflows", "WORKFLOW.plan.md")
-			// The baseline is the file as central leaves it with no
-			// model, not the untouched shipped copy: central always writes
+			// The baseline is the file as Jigz leaves it with no
+			// model, not the untouched shipped copy: Jigz always writes
 			// the loop bind address, so that line is not part of what this
 			// test is about.
 			if err := (Plan{}).ApplySettings(resolved(t, dir)); err != nil {
@@ -526,14 +526,14 @@ func TestNoReferenceSurvivesAnUnsetModel(t *testing.T) {
 	if strings.Contains(string(got), modelRef) {
 		t.Errorf("a reference to %s survived:\n%s", modelRef, got)
 	}
-	// The adapter block central created has to go with it: an emptied
+	// The adapter block Jigz created has to go with it: an emptied
 	// block is still a key the engine does not know.
 	if strings.Contains(string(got), "\ncodex:") {
-		t.Errorf("the codex block central created survived:\n%s", got)
+		t.Errorf("the codex block Jigz created survived:\n%s", got)
 	}
 }
 
-// A block the operator wrote is not central's to delete, so only the
+// A block the operator wrote is not Jigz's to delete, so only the
 // reference is reverted.
 func TestAHandWrittenAdapterBlockIsKept(t *testing.T) {
 	dir := t.TempDir()
@@ -556,7 +556,7 @@ func TestAHandWrittenAdapterBlockIsKept(t *testing.T) {
 	}
 	got, _ := os.ReadFile(path)
 	if !strings.Contains(string(got), "reasoning_effort") {
-		t.Errorf("central deleted an adapter block it did not write:\n%s", got)
+		t.Errorf("Jigz deleted an adapter block it did not write:\n%s", got)
 	}
 	if strings.Contains(string(got), modelRef) {
 		t.Errorf("the reference survived:\n%s", got)
@@ -634,12 +634,12 @@ func TestValidateFileReportsTheEnginesCheckPaths(t *testing.T) {
 	}
 }
 
-// fakeSetup is a sortie-loop that records the environment it was given.
+// fakeSetup is a jig that records the environment it was given.
 func fakeSetup(t *testing.T) (bin, record string) {
 	t.Helper()
 	d := t.TempDir()
 	record = filepath.Join(d, "env")
-	bin = filepath.Join(d, "sortie-loop")
+	bin = filepath.Join(d, "jig")
 	script := "#!/bin/sh\nenv > '" + record + "'\n"
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -658,14 +658,14 @@ func TestSetupPassesTheProjectsOwnToken(t *testing.T) {
 	}
 	raw, _ := os.ReadFile(record)
 	env := string(raw)
-	if !strings.Contains(env, "\nSORTIE_LOOP_TOKEN=token-of-a\n") && !strings.HasPrefix(env, "SORTIE_LOOP_TOKEN=token-of-a\n") {
-		t.Error("SORTIE_LOOP_TOKEN is not the project's token")
+	if !strings.Contains(env, "\nJIG_TOKEN=token-of-a\n") && !strings.HasPrefix(env, "JIG_TOKEN=token-of-a\n") {
+		t.Error("JIG_TOKEN is not the project's token")
 	}
-	if strings.Contains(env, "SORTIE_LOOP_TOKEN=token-of-b") {
+	if strings.Contains(env, "JIG_TOKEN=token-of-b") {
 		t.Error("another project's token was passed as the loop token")
 	}
-	if !strings.Contains(env, "SORTIE_LOOP_REPO=owner/alpha") {
-		t.Error("SORTIE_LOOP_REPO is missing")
+	if !strings.Contains(env, "JIG_REPO=owner/alpha") {
+		t.Error("JIG_REPO is missing")
 	}
 }
 
@@ -676,8 +676,8 @@ func TestSetupWithoutTokenEnvKeepsTheFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(record)
-	if strings.Contains(string(raw), "SORTIE_LOOP_TOKEN=") {
-		t.Error("SORTIE_LOOP_TOKEN is set without a token_env")
+	if strings.Contains(string(raw), "JIG_TOKEN=") {
+		t.Error("JIG_TOKEN is set without a token_env")
 	}
 	if !strings.Contains(string(raw), "GITHUB_TOKEN=fallback-token") {
 		t.Error("the GITHUB_TOKEN fallback is gone")

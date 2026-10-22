@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/kinged007/sortie-loop/internal/store"
+	"github.com/kinged007/jigz/internal/store"
 )
 
 func TestSessionFieldsAreStored(t *testing.T) {

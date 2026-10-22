@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kinged007/sortie-loop/internal/machine"
+	"github.com/kinged007/jigz/internal/machine"
 )
 
 func writeMachine(t *testing.T, body string) {
@@ -71,16 +71,16 @@ func TestConfiguredPrecedence(t *testing.T) {
 	}
 
 	writeMachine(t, "engine:\n  repo: file/engine\n  version: v2.0.0\n")
-	t.Setenv("SORTIE_ENGINE_REPO", "env/engine/")
-	t.Setenv("SORTIE_ENGINE_VERSION", "3.1.4")
+	t.Setenv("JIG_ENGINE_REPO", "env/engine/")
+	t.Setenv("JIG_ENGINE_VERSION", "3.1.4")
 	if got, err := Configured(); err != nil || got != (Spec{"env/engine", "v3.1.4"}) {
 		t.Errorf("env = %v, %v; want env/engine v3.1.4", got, err)
 	}
 
-	t.Setenv("SORTIE_BIN", "/custom/sortie")
+	t.Setenv("JIG_ENGINE_BIN", "/custom/sortie")
 	bin, unpinned, err := ResolveIn(nil)
 	if err != nil || bin != "/custom/sortie" || unpinned {
-		t.Errorf("SORTIE_BIN = %q %v %v; want it to win over everything", bin, unpinned, err)
+		t.Errorf("JIG_ENGINE_BIN = %q %v %v; want it to win over everything", bin, unpinned, err)
 	}
 }
 
@@ -88,10 +88,10 @@ func TestConfiguredValidation(t *testing.T) {
 	cases := []struct {
 		name, yaml, repo, version, want string
 	}{
-		{name: "env repo", repo: "no-slash", want: "SORTIE_ENGINE_REPO"},
-		{name: "env repo traversal", repo: "owner/..", want: "SORTIE_ENGINE_REPO"},
-		{name: "env version", version: "1.2", want: "SORTIE_ENGINE_VERSION"},
-		{name: "env prerelease", version: "v1.2.3-rc1", want: "SORTIE_ENGINE_VERSION"},
+		{name: "env repo", repo: "no-slash", want: "JIG_ENGINE_REPO"},
+		{name: "env repo traversal", repo: "owner/..", want: "JIG_ENGINE_REPO"},
+		{name: "env version", version: "1.2", want: "JIG_ENGINE_VERSION"},
+		{name: "env prerelease", version: "v1.2.3-rc1", want: "JIG_ENGINE_VERSION"},
 		{name: "file repo", yaml: "engine:\n  repo: a/b/c\n", want: "engine.repo"},
 		{name: "file version", yaml: "engine:\n  version: latest\n", want: "engine.version"},
 	}
@@ -101,8 +101,8 @@ func TestConfiguredValidation(t *testing.T) {
 			if tc.yaml != "" {
 				writeMachine(t, tc.yaml)
 			}
-			t.Setenv("SORTIE_ENGINE_REPO", tc.repo)
-			t.Setenv("SORTIE_ENGINE_VERSION", tc.version)
+			t.Setenv("JIG_ENGINE_REPO", tc.repo)
+			t.Setenv("JIG_ENGINE_VERSION", tc.version)
 			_, err := Configured()
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want it to name %s", err, tc.want)
@@ -194,8 +194,8 @@ func TestResolveDownloadBeatsPATH(t *testing.T) {
 
 func TestResolveDownloadsTheConfiguredRelease(t *testing.T) {
 	isolate(t)
-	t.Setenv("SORTIE_ENGINE_REPO", "sortie-ai/sortie")
-	t.Setenv("SORTIE_ENGINE_VERSION", "v1.29.0")
+	t.Setenv("JIG_ENGINE_REPO", "sortie-ai/sortie")
+	t.Setenv("JIG_ENGINE_VERSION", "v1.29.0")
 	var asked []Spec
 	stubDownload(t, func(s Spec) (string, error) { asked = append(asked, s); return "/dl/sortie", nil })
 	for range 2 {
@@ -242,7 +242,7 @@ func TestResolveErrorsWithoutFallback(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error with no engine anywhere")
 	}
-	for _, want := range []string{"network down", "SORTIE_BIN", Current().CacheName()} {
+	for _, want := range []string{"network down", "JIG_ENGINE_BIN", Current().CacheName()} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not contain %q", err, want)
 		}
@@ -252,11 +252,11 @@ func TestResolveErrorsWithoutFallback(t *testing.T) {
 func TestShareDirsAddsPrefixOfEachBinary(t *testing.T) {
 	isolate(t)
 	prefix := t.TempDir()
-	dirs := ShareDirs(filepath.Join(prefix, "bin", "sortie-loop"))
+	dirs := ShareDirs(filepath.Join(prefix, "bin", "jig"))
 	if dirs[0] != DataDir() {
 		t.Errorf("first dir = %q, want the data dir", dirs[0])
 	}
-	want := filepath.Join(prefix, "share", "sortie-loop")
+	want := filepath.Join(prefix, "share", "jigz")
 	if dirs[len(dirs)-1] != want {
 		t.Errorf("dirs = %v, want %q last", dirs, want)
 	}

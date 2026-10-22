@@ -228,7 +228,7 @@ func TestPruneBackupsKeepsTheNewestOfOneFile(t *testing.T) {
 	defer s.Close()
 	for i := 0; i < 5; i++ {
 		for _, path := range []string{"/a", "/b"} {
-			if _, err := s.AddBackup(time.Now(), Backup{Scope: "central", Path: path, BackupPath: path + string(rune('0'+i))}); err != nil {
+			if _, err := s.AddBackup(time.Now(), Backup{Scope: "jigz", Path: path, BackupPath: path + string(rune('0'+i))}); err != nil {
 				t.Fatal(err)
 			}
 		}

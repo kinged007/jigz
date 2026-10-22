@@ -36,7 +36,7 @@ func Detect(bin string) Gate { return NewGate(Probe(bin), Current()) }
 func NewGate(c Capabilities, spec Spec) Gate {
 	label := "engine"
 	if c.Known() {
-		if os.Getenv("SORTIE_BIN") != "" {
+		if os.Getenv("JIG_ENGINE_BIN") != "" {
 			label += " v" + c.Version
 		} else {
 			label += " " + spec.Repo + " v" + c.Version

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	config "github.com/kinged007/sortie-loop/internal/fleetconfig"
-	"github.com/kinged007/sortie-loop/internal/store"
+	config "github.com/kinged007/jigz/internal/fleetconfig"
+	"github.com/kinged007/jigz/internal/store"
 )
 
 // fakeGitHub answers the pulls and timeline endpoints from maps and

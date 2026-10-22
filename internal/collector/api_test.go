@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kinged007/sortie-loop/internal/rollup"
-	"github.com/kinged007/sortie-loop/internal/store"
+	"github.com/kinged007/jigz/internal/rollup"
+	"github.com/kinged007/jigz/internal/store"
 )
 
 type fakeEngine struct {

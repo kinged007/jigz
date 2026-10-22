@@ -6,12 +6,12 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kinged007/sortie-loop/internal/rollup"
+	"github.com/kinged007/jigz/internal/rollup"
 )
 
 // Discover lists the workflow databases on disk for each project, whether
 // or not its loops are running. It reads files only and never contacts a
-// loop. A workflow gets the database sortie-loop would open for it; a
+// loop. A workflow gets the database Jigz would open for it; a
 // database shared by several workflows is listed once, under the first
 // of them by name. A .sortie-<name>.db that no workflow file points at is
 // listed under <name>.

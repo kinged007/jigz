@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kinged007/sortie-loop/internal/engine"
-	config "github.com/kinged007/sortie-loop/internal/fleetconfig"
-	"github.com/kinged007/sortie-loop/internal/plan"
+	"github.com/kinged007/jigz/internal/engine"
+	config "github.com/kinged007/jigz/internal/fleetconfig"
+	"github.com/kinged007/jigz/internal/plan"
 )
 
 // sleeper returns a spawn that runs a shell command, so a test can
@@ -119,7 +119,7 @@ func TestStartRunsChildWithTheChildEnvironment(t *testing.T) {
 // A child that dies is reported against its own repository, with its
 // reason, and does not disturb anything else.
 func TestChildFailureIsAttributedToItsRepository(t *testing.T) {
-	s := newTest(t, `echo "sortie-loop: no WORKFLOW.*.md named triage" >&2; exit 1`)
+	s := newTest(t, `echo "jig: no WORKFLOW.*.md named triage" >&2; exit 1`)
 	r := res("owner/broken")
 	register(s, r)
 	if err := s.Start(r.Repo.Repo); err != nil {
@@ -242,7 +242,7 @@ func TestStopAllTerminatesEveryChild(t *testing.T) {
 // milliseconds to start, and an early SIGTERM would kill it outright
 // and make this test pass for the wrong reason.
 func TestStubbornHelper(t *testing.T) {
-	if os.Getenv("SORTIE_TEST_STUBBORN") != "1" {
+	if os.Getenv("JIG_TEST_STUBBORN") != "1" {
 		t.Skip("helper; only runs when re-executed as a child")
 	}
 	signal.Ignore(syscall.SIGTERM)
@@ -284,7 +284,7 @@ func TestStopKillsAChildThatIgnoresSIGTERM(t *testing.T) {
 	s.grace = grace
 	s.spawn = func(dir string, env []string) *exec.Cmd {
 		cmd := exec.Command(os.Args[0], "-test.run=TestStubbornHelper")
-		cmd.Env = append(os.Environ(), "SORTIE_TEST_STUBBORN=1")
+		cmd.Env = append(os.Environ(), "JIG_TEST_STUBBORN=1")
 		return cmd
 	}
 	r := res("owner/stubborn")
@@ -454,14 +454,14 @@ func TestStartAllSkipsInvalidRepositories(t *testing.T) {
 	}
 }
 
-// A real sortie-loop child shares the supervisor's process group unless
-// central puts it in its own. When it does, the child's teardown, which
+// A real Jigz child shares the supervisor's process group unless
+// Jigz puts it in its own. When it does, the child's teardown, which
 // signals its process group, reaches every sibling and the supervisor
 // itself: stopping one repository killed the whole fleet. This
 // reproduces that shape exactly.
 func TestStoppingOneRepositoryLeavesTheFleetAlive(t *testing.T) {
 	// The child answers SIGTERM by signalling its whole process group,
-	// which is what sortie-loop's teardown does.
+	// which is what Jigz's teardown does.
 	const groupSignaller = `trap 'kill -TERM -$$' TERM; while :; do sleep 0.2; done`
 	s := newTest(t, groupSignaller)
 	defer s.StopAll()
@@ -690,7 +690,7 @@ func TestAgentsOmitsAnUnsetKind(t *testing.T) {
 	}
 }
 
-// Central does not decide when a loop stops any more: the sortie-loop
+// Jigz does not decide when a loop stops any more: the Jigz
 // run owns its loops and is what watches them, so the request travels as
 // the signal that run listens for. Getting the signal wrong would either
 // stop a repo mid-run or leave it waiting that nothing watches.
@@ -840,9 +840,9 @@ func TestRunLoopPinsTheResolvedEngine(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("SORTIE_BIN", "")
-	t.Setenv("SORTIE_ENGINE_REPO", "sortie-ai/sortie")
-	t.Setenv("SORTIE_ENGINE_VERSION", "v1.29.0")
+	t.Setenv("JIG_ENGINE_BIN", "")
+	t.Setenv("JIG_ENGINE_REPO", "sortie-ai/sortie")
+	t.Setenv("JIG_ENGINE_VERSION", "v1.29.0")
 	spec, err := engine.Configured()
 	if err != nil {
 		t.Fatal(err)
@@ -856,7 +856,7 @@ func TestRunLoopPinsTheResolvedEngine(t *testing.T) {
 	}
 	s := New(plan.Plan{})
 	cmd := s.runLoop(t.TempDir(), nil)
-	if !slices.Contains(cmd.Env, "SORTIE_BIN="+want) {
-		t.Errorf("child env lacks SORTIE_BIN=%s", want)
+	if !slices.Contains(cmd.Env, "JIG_ENGINE_BIN="+want) {
+		t.Errorf("child env lacks JIG_ENGINE_BIN=%s", want)
 	}
 }

@@ -69,8 +69,8 @@ func TestClassifyOutcome(t *testing.T) {
 
 		{"usage limit turn raw", "failed", "agent turn 2: agent: turn_failed: Claude AI usage limit reached|1760000000", OutcomeFailedLimit},
 		{"usage limit turn sentence", "failed", "The agent reported that turn 2 failed: Claude AI usage limit reached|1760000000.", OutcomeFailedLimit},
-		{"usage limit port exit raw", "failed", "agent turn 1: agent: port_exit: runtime exited before responding: exit status 1: sortie-loop agent-exec: work hit a usage limit; exhausted until 2026-01-02T03:04:05Z", OutcomeFailedLimit},
-		{"usage limit port exit sentence", "failed", "The agent process ended unexpectedly: sortie-loop agent-exec: work hit a usage limit; exhausted until 2026-01-02T03:04:05Z.", OutcomeFailedLimit},
+		{"usage limit port exit raw", "failed", "agent turn 1: agent: port_exit: runtime exited before responding: exit status 1: jig agent-exec: work hit a usage limit; exhausted until 2026-01-02T03:04:05Z", OutcomeFailedLimit},
+		{"usage limit port exit sentence", "failed", "The agent process ended unexpectedly: jig agent-exec: work hit a usage limit; exhausted until 2026-01-02T03:04:05Z.", OutcomeFailedLimit},
 		{"usage limit credential raw", "failed", "agent session start: agent: credential_unverified: the agent runtime refused its credential: out of credits", OutcomeFailedLimit},
 		{"usage limit credential sentence", "failed", "The agent could not confirm its credential before the first turn: the agent runtime refused its credential: out of credits.", OutcomeFailedLimit},
 	} {

@@ -116,8 +116,8 @@ func TestEnvOmitsUnsetAndSetsConfigured(t *testing.T) {
 	// Unset knobs must be absent, not empty: an empty value is a value
 	// the engine would coerce, and absent is what leaves its default.
 	for _, k := range []string{
-		"SORTIE_AGENT_KIND", "SORTIE_AGENT_COMMAND", "SORTIE_CENTRAL_MODEL",
-		"SORTIE_POLLING_INTERVAL_MS", "SORTIE_LOOP_ONLY", "SORTIE_LOOP_TOKEN",
+		"SORTIE_AGENT_KIND", "SORTIE_AGENT_COMMAND", "JIG_MODEL",
+		"SORTIE_POLLING_INTERVAL_MS", "JIG_ONLY", "JIG_TOKEN",
 	} {
 		if v, ok := alpha[k]; ok {
 			t.Errorf("alpha env sets %s=%q with nothing configured", k, v)
@@ -128,9 +128,9 @@ func TestEnvOmitsUnsetAndSetsConfigured(t *testing.T) {
 	for k, want := range map[string]string{
 		"SORTIE_AGENT_MAX_CONCURRENT_AGENTS": "4",
 		"SORTIE_AGENT_MAX_TURNS":             "10",
-		"SORTIE_CENTRAL_MODEL":               "gpt-5",
+		"JIG_MODEL":                          "gpt-5",
 		"SORTIE_POLLING_INTERVAL_MS":         "30000",
-		"SORTIE_LOOP_ONLY":                   "plan,build",
+		"JIG_ONLY":                           "plan,build",
 	} {
 		if beta[k] != want {
 			t.Errorf("beta %s = %q, want %q", k, beta[k], want)
@@ -164,20 +164,20 @@ repos:
 }
 
 func TestTokenEnv(t *testing.T) {
-	t.Setenv("SORTIE_TEST_TOKEN", "ghp_secret")
+	t.Setenv("JIG_TEST_TOKEN", "ghp_secret")
 	c, err := Load(write(t, `
 repos:
   - repo: owner/a
-    token_env: SORTIE_TEST_TOKEN
+    token_env: JIG_TEST_TOKEN
   - repo: owner/b
-    token_env: SORTIE_TEST_ABSENT
+    token_env: JIG_TEST_ABSENT
 `))
 	if err != nil {
 		t.Fatal(err)
 	}
 	all, _ := c.Resolve()
-	if got := envMap(t, mustEnv(t, all[0]))["SORTIE_LOOP_TOKEN"]; got != "ghp_secret" {
-		t.Errorf("SORTIE_LOOP_TOKEN = %q, want the resolved secret", got)
+	if got := envMap(t, mustEnv(t, all[0]))["JIG_TOKEN"]; got != "ghp_secret" {
+		t.Errorf("JIG_TOKEN = %q, want the resolved secret", got)
 	}
 	// A named variable that is not set is a startup failure, not a
 	// silently unauthenticated loop that polls and claims nothing.
@@ -189,14 +189,14 @@ repos:
 // The token must never reach a file, so it belongs in the child
 // environment only.
 func TestTokenIsNeverInConfig(t *testing.T) {
-	t.Setenv("SORTIE_TEST_TOKEN", "ghp_secret")
-	c, err := Load(write(t, "repos:\n  - repo: owner/a\n    token_env: SORTIE_TEST_TOKEN\n"))
+	t.Setenv("JIG_TEST_TOKEN", "ghp_secret")
+	c, err := Load(write(t, "repos:\n  - repo: owner/a\n    token_env: JIG_TEST_TOKEN\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	all, _ := c.Resolve()
 	for _, p := range mustEnv(t, all[0]) {
-		if !strings.HasPrefix(p, "SORTIE_LOOP_TOKEN=") && strings.Contains(p, "ghp_secret") {
+		if !strings.HasPrefix(p, "JIG_TOKEN=") && strings.Contains(p, "ghp_secret") {
 			t.Errorf("secret leaked into env entry %q", p)
 		}
 	}
@@ -407,10 +407,10 @@ repos:
 	all, _ := c.Resolve()
 	r := all[0]
 	env := envMap(t, mustEnv(t, r))
-	if v := env["SORTIE_CENTRAL_MODEL_BUILD"]; v != "opus" {
-		t.Errorf("SORTIE_CENTRAL_MODEL_BUILD = %q, want opus", v)
+	if v := env["JIG_MODEL_BUILD"]; v != "opus" {
+		t.Errorf("JIG_MODEL_BUILD = %q, want opus", v)
 	}
-	if _, ok := env["SORTIE_CENTRAL_MODEL"]; ok {
+	if _, ok := env["JIG_MODEL"]; ok {
 		t.Error("a repository model variable was set with no repository model")
 	}
 	if len(r.FileSettings("plan")) != 0 {
@@ -419,10 +419,10 @@ repos:
 	if got := r.FileSettings("build")["model"]; got != "opus" {
 		t.Errorf("build model = %q, want opus", got)
 	}
-	if got := r.ModelVar("build"); got != "SORTIE_CENTRAL_MODEL_BUILD" {
+	if got := r.ModelVar("build"); got != "JIG_MODEL_BUILD" {
 		t.Errorf("ModelVar(build) = %q", got)
 	}
-	if got := r.ModelVar("plan"); got != "SORTIE_CENTRAL_MODEL" {
+	if got := r.ModelVar("plan"); got != "JIG_MODEL" {
 		t.Errorf("ModelVar(plan) = %q", got)
 	}
 }
@@ -443,11 +443,11 @@ repos:
 `))
 	all, _ := c.Resolve()
 	env := envMap(t, mustEnv(t, all[0]))
-	if env["SORTIE_CENTRAL_MODEL"] != "gpt-5" {
-		t.Errorf("SORTIE_CENTRAL_MODEL = %q, want gpt-5", env["SORTIE_CENTRAL_MODEL"])
+	if env["JIG_MODEL"] != "gpt-5" {
+		t.Errorf("JIG_MODEL = %q, want gpt-5", env["JIG_MODEL"])
 	}
-	if env["SORTIE_CENTRAL_MODEL_BUILD"] != "opus" {
-		t.Errorf("SORTIE_CENTRAL_MODEL_BUILD = %q, want opus", env["SORTIE_CENTRAL_MODEL_BUILD"])
+	if env["JIG_MODEL_BUILD"] != "opus" {
+		t.Errorf("JIG_MODEL_BUILD = %q, want opus", env["JIG_MODEL_BUILD"])
 	}
 }
 
@@ -466,7 +466,7 @@ repos:
 	if err == nil || !strings.Contains(err.Error(), "not in its workflows list") {
 		t.Fatalf("Load = %v, want an error naming the unselected workflow", err)
 	}
-	// With no explicit list central cannot know what is installed, so
+	// With no explicit list Jigz cannot know what is installed, so
 	// the name is left to be resolved at start.
 	if _, err := Load(write(t, `
 repos:
@@ -480,10 +480,10 @@ repos:
 	}
 }
 
-// The child is sortie-loop, which derives the tracker project, token,
+// The child is Jigz, which derives the tracker project, token,
 // clone URL and workspace root itself. Validation calls the engine
 // directly, so without these the workflow's $SORTIE_TRACKER_PROJECT and
-// $SORTIE_LOOP_WORKSPACES expand to empty and validation rejects a
+// $JIG_WORKSPACES expand to empty and validation rejects a
 // repository that runs correctly under the child.
 func TestValidateEnvCarriesWhatTheWorkflowsReference(t *testing.T) {
 	t.Setenv("BOT_TOKEN", "ghp_secret")
@@ -508,19 +508,18 @@ repos:
 	for k, want := range map[string]string{
 		"SORTIE_TRACKER_PROJECT": "owner/alpha",
 		"SORTIE_TRACKER_API_KEY": "ghp_secret",
-		"SORTIE_LOOP_CLONE_URL":  "https://github.com/owner/alpha.git",
-		"SORTIE_LOOP_WORKSPACES": filepath.Join(r.Dir, ".sortie", "workspaces"),
-		"SORTIE_CENTRAL_MODEL":   "gpt-5.6-luna",
+		"JIG_WORKSPACES":         filepath.Join(r.Dir, ".sortie", "workspaces"),
+		"JIG_MODEL":              "gpt-5.6-luna",
 	} {
 		if env[k] != want {
 			t.Errorf("%s = %q, want %q", k, env[k], want)
 		}
 	}
-	// The child environment stays minimal: sortie-loop derives these
-	// itself, so central must not duplicate them into the child.
+	// The child environment stays minimal: Jigz derives these
+	// itself, so Jigz must not duplicate them into the child.
 	child := envMap(t, mustEnv(t, r))
 	if _, ok := child["SORTIE_TRACKER_PROJECT"]; ok {
-		t.Error("central duplicated a variable the child derives itself")
+		t.Error("Jigz duplicated a variable the child derives itself")
 	}
 }
 
@@ -566,12 +565,12 @@ func mustValidate(t *testing.T, r Resolved) []string {
 // cascade is wired to the field that is actually used.
 func TestTokenEnvInheritsFromDefaults(t *testing.T) {
 	noAmbientToken(t)
-	t.Setenv("CENTRAL_TOKEN", "central-secret")
+	t.Setenv("JIGZ_TOKEN", "jigz-secret")
 	t.Setenv("REPO_TOKEN", "repo-secret")
 
 	cfg := `
 defaults:
-  token_env: CENTRAL_TOKEN
+  token_env: JIGZ_TOKEN
 repos:
   - repo: owner/inherits
   - repo: owner/overrides
@@ -586,22 +585,22 @@ repos:
 		t.Fatalf("Resolve: %v", err)
 	}
 
-	if got := res[0].TokenEnv; got != "CENTRAL_TOKEN" {
+	if got := res[0].TokenEnv; got != "JIGZ_TOKEN" {
 		t.Errorf("inheriting repo TokenEnv = %q, want the defaults value", got)
 	}
-	if got := res[0].Token(); got != "central-secret" {
-		t.Errorf("inheriting repo token = %q, want the value of CENTRAL_TOKEN", got)
+	if got := res[0].Token(); got != "jigz-secret" {
+		t.Errorf("inheriting repo token = %q, want the value of JIGZ_TOKEN", got)
 	}
-	// The token reaches the child as SORTIE_LOOP_TOKEN, sortie-loop's
+	// The token reaches the child as JIG_TOKEN, Jigz's
 	// highest-precedence override. The named variable needs no entry:
-	// the child inherits central's own environment, which already has
+	// the child inherits Jigz's own environment, which already has
 	// it. What matters is that the secret appears in no other entry.
 	env := mustEnv(t, res[0])
-	if got := envValue(env, "SORTIE_LOOP_TOKEN"); got != "central-secret" {
-		t.Errorf("SORTIE_LOOP_TOKEN did not carry the token from CENTRAL_TOKEN")
+	if got := envValue(env, "JIG_TOKEN"); got != "jigz-secret" {
+		t.Errorf("JIG_TOKEN did not carry the token from JIGZ_TOKEN")
 	}
 	for _, e := range env {
-		if strings.Contains(e, "central-secret") && !strings.HasPrefix(e, "SORTIE_LOOP_TOKEN=") {
+		if strings.Contains(e, "jigz-secret") && !strings.HasPrefix(e, "JIG_TOKEN=") {
 			t.Errorf("the token leaked into another env entry: %s", strings.SplitN(e, "=", 2)[0])
 		}
 	}
@@ -619,7 +618,7 @@ repos:
 // fallback applies, exactly as before.
 func TestNoTokenEnvAnywhereFallsBackToGitHubToken(t *testing.T) {
 	noAmbientToken(t)
-	t.Setenv("CENTRAL_TOKEN", "unused")
+	t.Setenv("JIGZ_TOKEN", "unused")
 	t.Setenv("GITHUB_TOKEN", "github-secret")
 	c, err := Load(write(t, "repos:\n  - repo: owner/plain\n"))
 	if err != nil {
@@ -636,8 +635,8 @@ func TestNoTokenEnvAnywhereFallsBackToGitHubToken(t *testing.T) {
 		t.Errorf("token = %q, want GITHUB_TOKEN", got)
 	}
 	// No named variable, so nothing is forced into the environment.
-	if got := envValue(mustEnv(t, res[0]), "SORTIE_LOOP_TOKEN"); got != "" {
-		t.Errorf("SORTIE_LOOP_TOKEN = %q, want unset without a token_env to source it from", got)
+	if got := envValue(mustEnv(t, res[0]), "JIG_TOKEN"); got != "" {
+		t.Errorf("JIG_TOKEN = %q, want unset without a token_env to source it from", got)
 	}
 }
 

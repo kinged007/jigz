@@ -10,7 +10,7 @@ tracker:
   # poll. `-label:agent:plan` keeps a planning orphan (agent:plan +
   # in-progress) out of this loop.
   query_filter: "label:agent:build,in-progress -label:agent:plan -label:needs-human"
-  # Assignee scope is appended by sortie-loop config at launch, not here.
+  # Assignee scope is appended by Jigz config at launch, not here.
   # ponytail: `todo` must stay first. Open issues carrying no state label
   # derive active_states[0] as their state, so without a leading non-target
   # entry the dispatch-time in-progress transition is a silent no-op and
@@ -37,14 +37,14 @@ polling:
 db_path: .sortie-build.db
 
 workspace:
-  root: $SORTIE_LOOP_WORKSPACES/build
+  root: $JIG_WORKSPACES/build
   retention_days: 30
 
 hooks:
   # ponytail: hooks run with a restricted env (PATH/HOME + SORTIE_* only),
   # so the repo URL must arrive as SORTIE_-prefixed vars set by the CLI.
   after_create: |
-    git clone --depth 1 "$SORTIE_LOOP_CLONE_URL" .
+    git clone --depth 1 "$JIG_CLONE_URL" .
   before_run: |
     # Heal any git operation an earlier attempt or the agent left in flight.
     # An unresolved index makes every later checkout fail, and the retry

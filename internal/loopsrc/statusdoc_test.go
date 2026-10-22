@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kinged007/sortie-loop/internal/rollup"
+	"github.com/kinged007/jigz/internal/rollup"
 )
 
 type env struct {
@@ -202,7 +202,7 @@ func TestDBPathFromFrontMatter(t *testing.T) {
 
 func fakeLoop(t *testing.T, script string) string {
 	t.Helper()
-	p := filepath.Join(t.TempDir(), "sortie-loop")
+	p := filepath.Join(t.TempDir(), "jig")
 	if err := os.WriteFile(p, []byte("#!/bin/sh\n"+script), 0o755); err != nil {
 		t.Fatal(err)
 	}

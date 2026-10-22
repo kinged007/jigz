@@ -14,7 +14,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kinged007/sortie-loop/internal/rollup"
+	"github.com/kinged007/jigz/internal/dirs"
+	"github.com/kinged007/jigz/internal/rollup"
 )
 
 const supportedSchema = 1
@@ -23,10 +24,10 @@ var (
 	// ErrNoStatus means no status document exists for the project: the
 	// loops never ran, or exited cleanly.
 	ErrNoStatus = errors.New("no status document")
-	// ErrUnsupported means the document has a schema version central does
+	// ErrUnsupported means the document has a schema version Jigz does
 	// not read.
 	ErrUnsupported = errors.New("unsupported status schema")
-	// ErrUnknownProject means central has no repository by that name.
+	// ErrUnknownProject means Jigz has no repository by that name.
 	ErrUnknownProject = errors.New("unknown project")
 )
 
@@ -172,22 +173,22 @@ type statusDocJSON struct {
 	Gate          *GateInfo      `json:"gate"`
 }
 
-// StatusDoc reads the status document each sortie-loop supervisor
+// StatusDoc reads the status document each Jigz supervisor
 // writes, and falls back to the registry (Legacy) for a project that has
-// none or one central cannot read. It also drives the wake and cleanup
+// none or one Jigz cannot read. It also drives the wake and cleanup
 // commands.
 type StatusDoc struct {
 	// Reader supplies the legacy reading and the database and state
 	// probes.
 	Reader rollup.Reader
 	// Roots returns each project's absolute repository root by project
-	// name. The root string must equal the one sortie-loop was started
+	// name. The root string must equal the one Jigz was started
 	// with, because the status file name is a hash of it.
 	Roots func() map[string]string
 	// Dir is the status directory; empty means
-	// <user cache dir>/sortie-loop/status.
+	// <user cache dir>/jigz/status.
 	Dir string
-	// Binary is the sortie-loop binary to run for wake and cleanup.
+	// Binary is the jig binary to run for wake and cleanup.
 	Binary string
 	// WakeTimeout and CleanupTimeout bound the commands; zero uses
 	// 15s and 10m.
@@ -210,11 +211,11 @@ func (d StatusDoc) dir() (string, error) {
 	if d.Dir != "" {
 		return d.Dir, nil
 	}
-	c, err := os.UserCacheDir()
+	c, err := dirs.Cache()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(c, "sortie-loop", "status"), nil
+	return filepath.Join(c, "status"), nil
 }
 
 func (d StatusDoc) file(root, suffix string) (string, error) {
@@ -262,7 +263,7 @@ func (d StatusDoc) status(project, root string) (StatusInfo, error) {
 		return StatusInfo{}, fmt.Errorf("status document of %s: %w", project, err)
 	}
 	if doc.SchemaVersion != supportedSchema {
-		return StatusInfo{}, fmt.Errorf("%w: version %d (central reads %d)", ErrUnsupported, doc.SchemaVersion, supportedSchema)
+		return StatusInfo{}, fmt.Errorf("%w: version %d (Jigz reads %d)", ErrUnsupported, doc.SchemaVersion, supportedSchema)
 	}
 	st := StatusInfo{
 		Project: project, Version: doc.Version, EngineVersion: doc.EngineVersion, PID: doc.PID,
@@ -370,7 +371,7 @@ func (d StatusDoc) Fleet() rollup.Fleet {
 	return rollup.Assemble(append(loops, legacy.Loops...))
 }
 
-// dbPath resolves a workflow's database like sortie-loop does: the
+// dbPath resolves a workflow's database like Jigz does: the
 // db_path front-matter, relative to the workflows directory, else the
 // default file there.
 func dbPath(root, file string) string {

@@ -109,7 +109,7 @@ func TestGateUnknown(t *testing.T) {
 }
 
 func TestLabelWithSortieBin(t *testing.T) {
-	t.Setenv("SORTIE_BIN", "/x/sortie")
+	t.Setenv("JIG_ENGINE_BIN", "/x/sortie")
 	if got := NewGate(caps("1.29.0", upTrackers, upAgents), spec).Label; got != "engine v1.29.0" {
 		t.Fatalf("Label = %q", got)
 	}

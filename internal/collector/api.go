@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/kinged007/sortie-loop/internal/rollup"
-	"github.com/kinged007/sortie-loop/internal/store"
+	"github.com/kinged007/jigz/internal/rollup"
+	"github.com/kinged007/jigz/internal/store"
 )
 
 // apiTimeout bounds each request to an engine. A loop that does not answer
@@ -93,7 +93,7 @@ func (c *Collector) readAPI(l rollup.Loop, ts string) bool {
 }
 
 // copyRunsAPI stores the runs the engine has gained since the last run id
-// central holds. Pages are read newest first, following next_cursor, until
+// Jigz holds. Pages are read newest first, following next_cursor, until
 // one holds a run already stored; the runs found are stored oldest first
 // once every page has been read, so a failed read leaves no gap below the
 // last stored id.

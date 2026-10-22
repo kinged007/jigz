@@ -14,14 +14,14 @@ import (
 	"time"
 )
 
-// WakeResult is the JSON of `sortie-loop wake --json`.
+// WakeResult is the JSON of `jig wake --json`.
 type WakeResult struct {
 	Woke        bool   `json:"woke"`
 	WasSleeping bool   `json:"was_sleeping"`
 	Error       string `json:"error,omitempty"`
 }
 
-// CleanupResult is the JSON of `sortie-loop cleanup --json`.
+// CleanupResult is the JSON of `jig cleanup --json`.
 type CleanupResult struct {
 	StartedAt  time.Time `json:"started_at"`
 	DurationMs int64     `json:"duration_ms"`
@@ -73,13 +73,13 @@ func orDefault(d, def time.Duration) time.Duration {
 	return def
 }
 
-// run executes the sortie-loop binary and decodes its stdout into out
+// run executes the jig binary and decodes its stdout into out
 // even when the exit code is not zero, since failures are reported in
 // the JSON. The returned error is nil only on exit 0.
 func (d StatusDoc) run(ctx context.Context, timeout time.Duration, out any, args ...string) error {
 	bin := d.Binary
 	if bin == "" {
-		bin = "sortie-loop"
+		bin = "jig"
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -90,11 +90,11 @@ func (d StatusDoc) run(ctx context.Context, timeout time.Duration, out any, args
 	jsonErr := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), out)
 	switch {
 	case ctx.Err() != nil:
-		return fmt.Errorf("sortie-loop %s: %w", args[0], ctx.Err())
+		return fmt.Errorf("jig %s: %w", args[0], ctx.Err())
 	case runErr != nil:
-		return fmt.Errorf("sortie-loop %s: %w", args[0], runErr)
+		return fmt.Errorf("jig %s: %w", args[0], runErr)
 	case jsonErr != nil:
-		return fmt.Errorf("sortie-loop %s: unreadable output: %w", args[0], jsonErr)
+		return fmt.Errorf("jig %s: unreadable output: %w", args[0], jsonErr)
 	}
 	return nil
 }

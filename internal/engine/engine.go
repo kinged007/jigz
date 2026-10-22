@@ -15,12 +15,14 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/kinged007/jigz/internal/dirs"
 )
 
 // The engine is the sortie binary this tool drives. The default fork is
 // required: upstream sortie-ai/sortie ships neither the pi agent adapter
 // nor the github-pr tracker in every release, and the shipped workflows
-// depend on both. A repository set in machine.yaml or SORTIE_ENGINE_REPO must
+// depend on both. A repository set in machine.yaml or JIG_ENGINE_REPO must
 // still carry both adapters.
 
 const (
@@ -65,12 +67,9 @@ func (s Spec) CacheName() string {
 	return Binary + "-" + strings.Replace(s.Repo, "/", "+", 1) + "-" + s.Version()
 }
 
-// DataDir is $XDG_DATA_HOME/sortie-loop, or ~/.local/share/sortie-loop.
+// DataDir is $XDG_DATA_HOME/jigz, or ~/.local/share/jigz.
 func DataDir() string {
-	if d := os.Getenv("XDG_DATA_HOME"); d != "" {
-		return filepath.Join(d, "sortie-loop")
-	}
-	return filepath.Join(homeDir(), ".local", "share", "sortie-loop")
+	return dirs.Data()
 }
 
 // releaseBase is the download root for one engine release. It is a
@@ -114,8 +113,8 @@ func Fetch(spec Spec) (string, error) {
 // downloadEngine fetches the release archive into a temp file, verified
 // against the release's checksums.txt, and returns the archive path.
 func downloadEngine(spec Spec) (string, error) {
-	url := os.Getenv("SORTIE_ENGINE_URL")
-	want := strings.ToLower(os.Getenv("SORTIE_ENGINE_SHA256"))
+	url := os.Getenv("JIG_ENGINE_URL")
+	want := strings.ToLower(os.Getenv("JIG_ENGINE_SHA256"))
 	if url == "" {
 		asset, err := AssetName(runtime.GOOS, runtime.GOARCH, spec.Version())
 		if err != nil {
@@ -128,7 +127,7 @@ func downloadEngine(spec Spec) (string, error) {
 		}
 		url, want = base+"/"+asset, sum
 	} else if want == "" {
-		fmt.Fprintln(os.Stderr, "sortie-loop: warning: SORTIE_ENGINE_URL is set without SORTIE_ENGINE_SHA256; this download is unverified")
+		fmt.Fprintln(os.Stderr, "jig: warning: JIG_ENGINE_URL is set without JIG_ENGINE_SHA256; this download is unverified")
 	}
 	return fetchVerified(url, want)
 }
@@ -149,8 +148,8 @@ func releaseHint(spec Spec, err error) string {
 	}
 	return fmt.Sprintf(`; %s release %s has no checksums.txt, so its engine cannot be verified.
   It needs %s and checksums.txt, which a GoReleaser release produces.
-  Meanwhile: build the engine from source and point SORTIE_BIN at it, or set
-  SORTIE_ENGINE_URL and SORTIE_ENGINE_SHA256 to fetch a verified archive.`,
+  Meanwhile: build the engine from source and point JIG_ENGINE_BIN at it, or set
+  JIG_ENGINE_URL and JIG_ENGINE_SHA256 to fetch a verified archive.`,
 		repo, version, asset)
 }
 
@@ -301,7 +300,7 @@ func copyEngineEntry(tr *tar.Reader, w io.Writer) error {
 // LinkOnPath exposes the engine under its plain name in a
 // directory on the user's PATH, so `sortie validate` and `sortie stats`
 // work in any new shell without an alias or the version in the path. It
-// prefers the directory holding the sortie-loop binary when that
+// prefers the directory holding the jig binary when that
 // directory is on PATH — the `go install` layout, where one PATH entry
 // covers both tools — and falls back to ~/.local/bin.
 func LinkOnPath(src string) {
@@ -310,7 +309,7 @@ func LinkOnPath(src string) {
 		return
 	}
 	if !onPath {
-		fmt.Fprintf(os.Stderr, "sortie-loop: note: add %s to PATH to run `sortie` by name\n", dir)
+		fmt.Fprintf(os.Stderr, "jig: note: add %s to PATH to run the engine by name\n", dir)
 	}
 }
 
@@ -328,15 +327,15 @@ func LinkAt(src, dir string) string {
 		// anywhere else is the user's, and replacing it silently would
 		// break a hand-built engine they point it at.
 		if !strings.HasPrefix(cur, DataDir()+string(filepath.Separator)) {
-			fmt.Fprintf(os.Stderr, "sortie-loop: warning: %s points at %s, which sortie-loop did not install; left alone (the engine runs from %s)\n", link, cur, src)
+			fmt.Fprintf(os.Stderr, "jig: warning: %s points at %s, which Jigz did not install; left alone (the engine runs from %s)\n", link, cur, src)
 			return ""
 		}
 	} else if _, err := os.Lstat(link); err == nil {
-		fmt.Fprintf(os.Stderr, "sortie-loop: warning: %s exists and was not installed by sortie-loop; left alone (the engine runs from %s)\n", link, src)
+		fmt.Fprintf(os.Stderr, "jig: warning: %s exists and was not installed by Jigz; left alone (the engine runs from %s)\n", link, src)
 		return ""
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "sortie-loop: warning: cannot create %s: %v\n", dir, err)
+		fmt.Fprintf(os.Stderr, "jig: warning: cannot create %s: %v\n", dir, err)
 		return ""
 	}
 	// Rename a fresh symlink into place so a shell starting mid-install
@@ -344,12 +343,12 @@ func LinkAt(src, dir string) string {
 	tmp := link + ".new"
 	os.Remove(tmp)
 	if err := os.Symlink(src, tmp); err != nil {
-		fmt.Fprintf(os.Stderr, "sortie-loop: warning: cannot link %s: %v\n", link, err)
+		fmt.Fprintf(os.Stderr, "jig: warning: cannot link %s: %v\n", link, err)
 		return ""
 	}
 	if err := os.Rename(tmp, link); err != nil {
 		os.Remove(tmp)
-		fmt.Fprintf(os.Stderr, "sortie-loop: warning: cannot link %s: %v\n", link, err)
+		fmt.Fprintf(os.Stderr, "jig: warning: cannot link %s: %v\n", link, err)
 		return ""
 	}
 	return link

@@ -1,9 +1,9 @@
 package edit
 
-// Central is the fleet-wide part of sortie-central.yaml.
-type Central struct {
-	StateDir     string `f:"state_dir" label:"State directory" hint:"Where project state, central.db and backups live. Empty uses ~/.local/state/sortie-central." group:"Central"`
-	Assignee     string `f:"defaults.assignee" label:"Default assignee" hint:"@me picks issues assigned to the token owner. Empty leaves sortie-loop's own handling." group:"Defaults for every project"`
+// Jigz is the fleet-wide part of jigz.yaml.
+type Jigz struct {
+	StateDir     string `f:"state_dir" label:"State directory" hint:"Where project state, history.db and backups live. Empty uses ~/.local/state/jigz." group:"Jigz"`
+	Assignee     string `f:"defaults.assignee" label:"Default assignee" hint:"@me picks issues assigned to the token owner. Empty leaves Jigz's own handling." group:"Defaults for every project"`
 	Milestone    string `f:"defaults.milestone" label:"Default milestone" group:"Defaults for every project"`
 	TokenEnv     string `f:"defaults.token_env" label:"Token variable" hint:"The name of the environment variable holding the GitHub token, never the token itself." group:"Defaults for every project"`
 	GitHubEnrich *bool  `f:"github.enrich" label:"Enrich from GitHub" hint:"True reads pull requests from GitHub with each project's token to show branch, PR link and PRs opened and merged. Read only. Applied at once." group:"GitHub enrichment"`
@@ -15,7 +15,7 @@ type Central struct {
 // Agent is the agent settings of one scope: the defaults, one project, or
 // one workflow override. The paths are relative to that scope's mapping.
 type Agent struct {
-	Kind            string `f:"agent.kind" label:"Agent kind" hint:"The sortie agent adapter." opts:"pi,claude-code,codex,cursor" group:"Agent"`
+	Kind            string `f:"agent.kind" label:"Agent kind" hint:"The engine's agent adapter." opts:"pi,claude-code,codex,cursor" group:"Agent"`
 	Command         string `f:"agent.command" label:"Command" group:"Agent"`
 	Model           string `f:"agent.model" label:"Model" group:"Agent"`
 	MaxTurns        *int   `f:"agent.max_turns" label:"Max turns" group:"Agent"`
@@ -67,7 +67,7 @@ type Workflow struct {
 	QueryFilter    string   `f:"tracker.query_filter" label:"Query filter" hint:"The tracker search that picks the issues this workflow handles." group:"Tracker"`
 	HandoffState   string   `f:"tracker.handoff_state" label:"Handoff state" hint:"The state an issue moves to when its run succeeds." group:"States"`
 	TerminalStates []string `f:"tracker.terminal_states" label:"Terminal states" hint:"Comma separated. Issues in these states are closed." group:"States"`
-	AgentKind      string   `f:"agent.kind" label:"Agent kind" hint:"The sortie agent adapter." opts:"pi,claude-code,codex,cursor" group:"Agent"`
+	AgentKind      string   `f:"agent.kind" label:"Agent kind" hint:"The engine's agent adapter." opts:"pi,claude-code,codex,cursor" group:"Agent"`
 	Model          string   `f:"agent.model" at:"{agent.kind}.model" label:"Model" hint:"Set in the block named after the agent kind. Set the kind first." group:"Agent"`
 	MaxTurns       *int     `f:"agent.max_turns" label:"Max turns" group:"Agent"`
 	MaxConcurrent  *int     `f:"agent.max_concurrent_agents" label:"Max concurrent agents" group:"Agent"`

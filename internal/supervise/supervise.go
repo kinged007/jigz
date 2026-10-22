@@ -1,8 +1,8 @@
-// Package supervise owns the sortie-loop child processes: one per
+// Package supervise owns the Jigz child processes: one per
 // enabled repository, each started only after its generated
 // configuration has been validated.
 //
-// It is also where a child's failure is attributed. A sortie-loop
+// It is also where a child's failure is attributed. A Jigz
 // process that exits non-zero — a rejected workflow name, a missing
 // engine, a port it could not bind — is reported against the
 // repository it belonged to, with the tail of its output, and the rest
@@ -22,8 +22,8 @@ import (
 	"syscall"
 	"time"
 
-	config "github.com/kinged007/sortie-loop/internal/fleetconfig"
-	"github.com/kinged007/sortie-loop/internal/plan"
+	config "github.com/kinged007/jigz/internal/fleetconfig"
+	"github.com/kinged007/jigz/internal/plan"
 )
 
 // gracefulTimeout is how long a child gets to exit after SIGTERM before
@@ -99,7 +99,7 @@ func (e *entry) pid() int {
 type Supervisor struct {
 	plan plan.Plan
 	// spawn builds a child. Tests replace it; the default runs
-	// sortie-loop with no dashboard, because central serves the combined
+	// Jigz with no dashboard, because Jigz serves the combined
 	// view.
 	spawn func(dir string, env []string) *exec.Cmd
 
@@ -284,7 +284,7 @@ func (s *Supervisor) Start(slug string) error {
 	// straight through and Wait returns as soon as the child exits.
 	// Given a writer it copies through a pipe in a goroutine, and Wait
 	// then blocks until that pipe reaches EOF — which a surviving
-	// grandchild holding the write end prevents. sortie-loop starts one
+	// grandchild holding the write end prevents. Jigz starts one
 	// engine child per loop, so a killed supervisor would otherwise
 	// hang in Wait for as long as those grandchildren live.
 	w, closeWrite, err := capture(e.out)
@@ -358,11 +358,11 @@ func (s *Supervisor) watch(e *entry, cmd *exec.Cmd, done chan struct{}) {
 		e.state = StateFailed
 		e.err = exitReason(err)
 	default:
-		// Exited cleanly on its own. sortie-loop does this when one of
+		// Exited cleanly on its own. Jigz does this when one of
 		// its loops dies, and the rest of the fleet is expected to keep
 		// going, so this is reported rather than treated as an error.
 		e.state = StateStopped
-		e.err = "sortie-loop exited on its own"
+		e.err = "Jigz exited on its own"
 	}
 }
 
@@ -496,18 +496,18 @@ func (s *Supervisor) State(slug string) string {
 	return e.state
 }
 
-// StopWhenIdle asks one repository's sortie-loop to stop each of its loops
+// StopWhenIdle asks one repository's Jigz to stop each of its loops
 // as that loop finishes what it is working on, rather than cutting a run
 // off mid-turn. It returns at once: a run can take many more minutes, and
 // an HTTP request is not the place to wait for one.
 //
 // The decision is the child's, because the child is what watches the
-// loops. Central signals and steps back.
+// loops. Jigz signals and steps back.
 func (s *Supervisor) StopWhenIdle(slug string) error {
 	return s.signal(slug, sigStopIdle)
 }
 
-// RecycleWhenIdle asks one repository's sortie-loop to replace each of
+// RecycleWhenIdle asks one repository's Jigz to replace each of
 // its loops as that loop goes idle, picking up the workflow and settings
 // now on disk. The run stays up, so the repository keeps its pid and its
 // registry entry, and each loop is replaced at a moment of its own rather
@@ -590,13 +590,13 @@ func (s *Supervisor) StartAll() {
 // runLoop is the default child.
 func (s *Supervisor) runLoop(dir string, env []string) *exec.Cmd {
 	cmd := exec.Command(s.plan.LoopBinary(), "--no-dashboard", dir)
-	// Pin the engine for the child. sortie-loop resolves it on its own and
-	// normally reaches the same file, but central just validated the
+	// Pin the engine for the child. Jigz resolves it on its own and
+	// normally reaches the same file, but Jigz just validated the
 	// workflows against a specific binary; passing the path makes the loop
 	// use exactly that one instead of a second, independent lookup that
 	// could land somewhere else.
-	if bin, err := s.plan.SortieBinPath(); err == nil && os.Getenv("SORTIE_BIN") == "" {
-		env = append(env, "SORTIE_BIN="+bin)
+	if bin, err := s.plan.SortieBinPath(); err == nil && os.Getenv("JIG_ENGINE_BIN") == "" {
+		env = append(env, "JIG_ENGINE_BIN="+bin)
 	}
 	cmd.Env = append(os.Environ(), env...)
 	return cmd

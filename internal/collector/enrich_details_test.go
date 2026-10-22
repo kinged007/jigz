@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kinged007/sortie-loop/internal/store"
+	"github.com/kinged007/jigz/internal/store"
 )
 
 func detailPull(n int, state, merged string, commits int) string {

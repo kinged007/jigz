@@ -1,4 +1,4 @@
-// Package collector copies what central needs from the loops into
+// Package collector copies what Jigz needs from the loops into
 // history.db on a timer: finished runs, state changes, and samples.
 //
 // A loop whose engine answers is read through the engine's HTTP API. Any
@@ -17,10 +17,10 @@ import (
 	"slices"
 	"time"
 
-	machine "github.com/kinged007/sortie-loop/internal/host"
-	"github.com/kinged007/sortie-loop/internal/loopsrc"
-	"github.com/kinged007/sortie-loop/internal/rollup"
-	"github.com/kinged007/sortie-loop/internal/store"
+	machine "github.com/kinged007/jigz/internal/host"
+	"github.com/kinged007/jigz/internal/loopsrc"
+	"github.com/kinged007/jigz/internal/rollup"
+	"github.com/kinged007/jigz/internal/store"
 )
 
 // DefaultInterval is the time between passes.
@@ -52,7 +52,7 @@ type Collector struct {
 
 	// seen is the last state of each watched list per loop, keyed by loop,
 	// source and list, mapping issue id to detail. A loop with no entry
-	// yet is only recorded, so a restart of central does not report every
+	// yet is only recorded, so a restart of Jigz does not report every
 	// parked issue as new, and a switch between the API and the database
 	// does not report the differences between their wordings.
 	seen map[string]map[string]string
@@ -205,7 +205,7 @@ func readSessions(db *sql.DB) map[string]session {
 }
 
 // copyRuns stores the runs the workflow database has gained since the last
-// run id central holds. The session of an issue is overwritten by its next
+// run id Jigz holds. The session of an issue is overwritten by its next
 // attempt, so its facts are taken now, for the newest run of the issue in
 // the batch.
 func (c *Collector) copyRuns(db *sql.DB, l rollup.Loop, schema rollup.Schema) error {
@@ -263,8 +263,8 @@ func (c *Collector) copyRuns(db *sql.DB, l rollup.Loop, schema rollup.Schema) er
 	}
 }
 
-// fillRunFiles sets the workflow file on runs stored before central kept
-// it, once per loop while central runs.
+// fillRunFiles sets the workflow file on runs stored before Jigz kept
+// it, once per loop while Jigz runs.
 func (c *Collector) fillRunFiles(db *sql.DB, l rollup.Loop, last int64) error {
 	key := l.Repo + "/" + l.Loop
 	if c.filled[key] {

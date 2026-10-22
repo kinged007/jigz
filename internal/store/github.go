@@ -159,7 +159,7 @@ func (s *Store) SaveIssueLinks(project string, issue int, etag, fetchedAt string
 	return tx.Commit()
 }
 
-// RunItem is an issue or pull request number central has runs for.
+// RunItem is an issue or pull request number Jigz has runs for.
 type RunItem struct {
 	PR     bool
 	Number int
@@ -290,7 +290,7 @@ func (s *Store) JourneyRuns(project, issue string) ([]Run, error) {
 
 // PRDays counts cached pull requests opened and merged per UTC day, by
 // created_at and merged_at within [since, until). Empty bounds are open.
-// Only pull requests central found through its runs are cached, so these
+// Only pull requests Jigz found through its runs are cached, so these
 // are not counts for the whole repository.
 func (s *Store) PRDays(project, since, until string) (opened, merged map[string]int, err error) {
 	opened, merged = map[string]int{}, map[string]int{}

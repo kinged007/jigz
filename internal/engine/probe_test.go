@@ -145,12 +145,12 @@ func TestProbeErrors(t *testing.T) {
 }
 
 func TestProbeRealEngine(t *testing.T) {
-	bin := os.Getenv("SORTIE_BIN")
+	bin := os.Getenv("JIG_ENGINE_BIN")
 	if bin == "" {
 		bin, _ = exec.LookPath(Binary)
 	}
 	if bin == "" {
-		t.Skip("no sortie binary on SORTIE_BIN or PATH")
+		t.Skip("no sortie binary on JIG_ENGINE_BIN or PATH")
 	}
 	isolate(t)
 	c := Probe(bin)

@@ -1,6 +1,6 @@
 //go:build linux
 
-// Package host reads the load of the machine central is running on. An
+// Package host reads the load of the machine Jigz is running on. An
 // agent fleet is bounded by the box it runs on rather than by the code, so
 // the operator needs to see memory, CPU and disk next to the work.
 package host

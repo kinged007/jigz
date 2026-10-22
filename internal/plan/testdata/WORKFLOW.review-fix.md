@@ -6,7 +6,7 @@ tracker:
   # A non-empty query_filter is sent to GitHub search, which applies the
   # label and exclusion clauses; active_states below still decides which
   # labels make a PR a candidate. Assignee scope is appended by
-  # sortie-loop config at launch, not here. This loop shares the
+  # Jigz config at launch, not here. This loop shares the
   # agent:build trigger with the build loop: on an issue it means implement,
   # on a PR it means apply the posted review finding.
   query_filter: "label:agent:build,in-progress -label:agent:review -label:agent:merge -label:needs-human"
@@ -30,14 +30,14 @@ polling:
 db_path: .sortie-review-fix.db
 
 workspace:
-  root: $SORTIE_LOOP_WORKSPACES/review-fix
+  root: $JIG_WORKSPACES/review-fix
   retention_days: 30
 
 hooks:
   after_create: |
     git init -q . 2>/dev/null || true
     # Step 3 of the prompt pushes the fix commit back; that needs a remote.
-    git remote add origin "$SORTIE_LOOP_CLONE_URL" 2>/dev/null || true
+    git remote add origin "$JIG_CLONE_URL" 2>/dev/null || true
     git fetch --depth 1 origin "+pull/$SORTIE_ISSUE_IDENTIFIER/head:pr-$SORTIE_ISSUE_IDENTIFIER"
     git checkout -q "pr-$SORTIE_ISSUE_IDENTIFIER"
   # Workspaces created before the remote existed still have none
@@ -52,7 +52,7 @@ hooks:
     git merge --abort 2>/dev/null || true
     git cherry-pick --abort 2>/dev/null || true
     git reset --hard >/dev/null
-    git remote get-url origin >/dev/null 2>&1 || git remote add origin "$SORTIE_LOOP_CLONE_URL"
+    git remote get-url origin >/dev/null 2>&1 || git remote add origin "$JIG_CLONE_URL"
     if [ -f .git/shallow ]; then git fetch --unshallow origin 2>/dev/null || true; fi
   timeout_ms: 60000
 

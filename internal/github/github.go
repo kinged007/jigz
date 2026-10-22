@@ -1,5 +1,5 @@
 // Package github is a read-only client for the few GitHub REST endpoints
-// central uses to enrich run history. It only sends GET requests.
+// Jigz uses to enrich run history. It only sends GET requests.
 //
 // Each call names a key, the project the token belongs to, so rate limit
 // back-off applies per token. Error values never contain the token.
@@ -18,7 +18,7 @@ import (
 )
 
 // UserAgent is sent with every request, which GitHub requires.
-const UserAgent = "sortie-loop"
+const UserAgent = "Jigz"
 
 const maxBody = 8 << 20
 

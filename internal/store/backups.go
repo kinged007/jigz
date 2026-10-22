@@ -3,7 +3,7 @@ package store
 import "time"
 
 // Backup is one saved copy of a config file, taken before an edit replaced it.
-// Scope is "central" or the project slug.
+// Scope is "jigz" or the project slug.
 type Backup struct {
 	ID         int64  `json:"id"`
 	TS         string `json:"ts"`

@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kinged007/sortie-loop/internal/store"
+	"github.com/kinged007/jigz/internal/store"
 )
 
-const centralYAML = `# fleet config
+const jigzYAML = `# fleet config
 state_dir: ""
 
 defaults:
@@ -66,8 +66,8 @@ func rootOf(t *testing.T, text string) *Doc {
 }
 
 func TestUnchangedFormWritesTheSameBytes(t *testing.T) {
-	d := rootOf(t, centralYAML)
-	var c Central
+	d := rootOf(t, jigzYAML)
+	var c Jigz
 	Read(d.Root(), &c)
 	Write(d.Root(), &c)
 	var a Agent
@@ -77,14 +77,14 @@ func TestUnchangedFormWritesTheSameBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != centralYAML {
-		t.Errorf("a no-op edit changed the file:\n%s", Diff("c", centralYAML, got))
+	if got != jigzYAML {
+		t.Errorf("a no-op edit changed the file:\n%s", Diff("c", jigzYAML, got))
 	}
 }
 
 func TestEditKeepsCommentsAndOrder(t *testing.T) {
-	d := rootOf(t, centralYAML)
-	var c Central
+	d := rootOf(t, jigzYAML)
+	var c Jigz
 	Read(d.Root(), &c)
 	c.Assignee = "someone"
 	c.Milestone = "v2"
@@ -92,14 +92,14 @@ func TestEditKeepsCommentsAndOrder(t *testing.T) {
 	got, _ := d.String()
 	want := strings.NewReplacer(
 		`assignee: "@me"   # the token owner`, `assignee: "someone" # the token owner`,
-		"    max_turns: 10\n", "    max_turns: 10\n  milestone: v2\n").Replace(centralYAML)
+		"    max_turns: 10\n", "    max_turns: 10\n  milestone: v2\n").Replace(jigzYAML)
 	if got != want {
 		t.Errorf("edit result differs:\n%s", Diff("c", want, got))
 	}
 }
 
 func TestEmptyValueRemovesTheKeyAndAnEmptyParent(t *testing.T) {
-	d := rootOf(t, centralYAML)
+	d := rootOf(t, jigzYAML)
 	var a Agent
 	repo := Scope(d.Root(), "owner/alpha", false)
 	Read(repo, &a)
@@ -119,7 +119,7 @@ func TestEmptyValueRemovesTheKeyAndAnEmptyParent(t *testing.T) {
 }
 
 func TestScopeCreatesWorkflowOverrides(t *testing.T) {
-	d := rootOf(t, centralYAML)
+	d := rootOf(t, jigzYAML)
 	if Scope(d.Root(), "owner/alpha/plan", false) != nil {
 		t.Fatal("override exists before it was created")
 	}
@@ -512,7 +512,7 @@ func TestTheShippedExampleConfigRoundTripsUnchanged(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := rootOf(t, string(raw))
-	var c Central
+	var c Jigz
 	Read(d.Root(), &c)
 	Write(d.Root(), &c)
 	if got, _ := d.String(); got != string(raw) {

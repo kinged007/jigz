@@ -14,7 +14,7 @@ import (
 // passed in so the test never reaches into the real home directory.
 func TestLinkEngineAtReplacesStaleLink(t *testing.T) {
 	dir := t.TempDir()
-	// The cache location decides which links sortie-loop may refresh, so
+	// The cache location decides which links Jigz may refresh, so
 	// the test points the real one inside the temp dir.
 	t.Setenv("XDG_DATA_HOME", dir)
 	bin := DataDir()
@@ -63,7 +63,7 @@ func TestLinkEngineAtLeavesForeignBinary(t *testing.T) {
 	if err := os.WriteFile(foreign, []byte("not ours"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	src := filepath.Join(dir, "data", "sortie-loop", "sortie-1.0.0")
+	src := filepath.Join(dir, "data", "jigz", "sortie-1.0.0")
 	if err := os.MkdirAll(filepath.Dir(src), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +246,7 @@ func TestEngineReleaseHintExplainsMissingChecksums(t *testing.T) {
 	if !strings.Contains(err.Error(), "checksums.txt") {
 		t.Errorf("err does not name the missing file: %v", err)
 	}
-	if !strings.Contains(err.Error(), "SORTIE_ENGINE_URL") {
+	if !strings.Contains(err.Error(), "JIG_ENGINE_URL") {
 		t.Errorf("err offers no way forward: %v", err)
 	}
 	if !strings.Contains(err.Error(), "owner/engine") {

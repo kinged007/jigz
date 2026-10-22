@@ -63,7 +63,7 @@ func TestLoadMissingFile(t *testing.T) {
 func TestDefaultPath(t *testing.T) {
 	isolate(t)
 	p, err := DefaultPath()
-	if err != nil || p != filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "sortie-loop", "machine.yaml") {
+	if err != nil || p != filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "jigz", "machine.yaml") {
 		t.Fatalf("got %q, %v", p, err)
 	}
 }
@@ -328,7 +328,7 @@ func TestDetectLimit(t *testing.T) {
 func TestStateMissingAndUpdate(t *testing.T) {
 	isolate(t)
 	p, err := StatePath()
-	if err != nil || p != filepath.Join(os.Getenv("XDG_STATE_HOME"), "sortie-loop", "pool.json") {
+	if err != nil || p != filepath.Join(os.Getenv("XDG_STATE_HOME"), "jigz", "pool.json") {
 		t.Fatalf("path %q, %v", p, err)
 	}
 	st, err := LoadState(p)

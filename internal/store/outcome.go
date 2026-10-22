@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/kinged007/sortie-loop/internal/machine"
+	"github.com/kinged007/jigz/internal/machine"
 )
 
 // Outcome classes of a run. The keys are the hub protocol's outcome classes.

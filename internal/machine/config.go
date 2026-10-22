@@ -20,6 +20,8 @@ import (
 	_ "time/tzdata"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/kinged007/jigz/internal/dirs"
 )
 
 // Runtimes are the agent kinds a pool entry can use.
@@ -155,13 +157,13 @@ var dayNames = map[string]time.Weekday{
 	"thu": time.Thursday, "fri": time.Friday, "sat": time.Saturday,
 }
 
-// DefaultPath returns <user config dir>/sortie-loop/machine.yaml.
+// DefaultPath returns <user config dir>/jigz/machine.yaml.
 func DefaultPath() (string, error) {
-	dir, err := os.UserConfigDir()
+	dir, err := dirs.Config()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "sortie-loop", "machine.yaml"), nil
+	return filepath.Join(dir, "machine.yaml"), nil
 }
 
 // Load reads and validates the machine file. A missing file gives an empty

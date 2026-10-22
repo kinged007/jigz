@@ -6,7 +6,7 @@ tracker:
   # A non-empty query_filter is sent to GitHub search, which applies the
   # label and exclusion clauses; active_states below still decides which
   # labels make a PR a candidate. Assignee scope is appended by
-  # sortie-loop config at launch, not here. `in-progress` re-picks a merge
+  # Jigz config at launch, not here. `in-progress` re-picks a merge
   # that was interrupted; `-label:agent:review` and `-label:agent:build`
   # keep review and fix orphans out (both loops claim with in-progress).
   query_filter: "label:agent:merge,in-progress -label:agent:build -label:agent:review -label:needs-human"
@@ -30,7 +30,7 @@ polling:
 db_path: .sortie-merge.db
 
 workspace:
-  root: $SORTIE_LOOP_WORKSPACES/merge
+  root: $JIG_WORKSPACES/merge
   retention_days: 30
 
 hooks:
@@ -39,7 +39,7 @@ hooks:
     # Real remote, not ref-only fetches: Step 3 of the prompt must be able
     # to `git fetch origin <base>`; without tracking refs it sees a stale
     # or missing base and falls back to the GitHub compare API.
-    git remote add origin "$SORTIE_LOOP_CLONE_URL" 2>/dev/null || true
+    git remote add origin "$JIG_CLONE_URL" 2>/dev/null || true
     # No --depth: a shallow PR root plus a shallow base root share no
     # common ancestor, which breaks `git merge` / merge-base in Step 3.
     git fetch origin "+pull/$SORTIE_ISSUE_IDENTIFIER/head:pr-$SORTIE_ISSUE_IDENTIFIER"
@@ -56,7 +56,7 @@ hooks:
     git merge --abort 2>/dev/null || true
     git cherry-pick --abort 2>/dev/null || true
     git reset --hard >/dev/null
-    git remote get-url origin >/dev/null 2>&1 || git remote add origin "$SORTIE_LOOP_CLONE_URL"
+    git remote get-url origin >/dev/null 2>&1 || git remote add origin "$JIG_CLONE_URL"
     # Legacy workspaces are shallow from the old after_create. A shallow
     # PR graft plus a shallow base root share no merge-base, so git merge
     # fails even when the compare API would succeed. Fill in the missing

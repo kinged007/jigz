@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kinged007/sortie-loop/internal/engine"
+	"github.com/kinged007/jigz/internal/engine"
 )
 
 func gate(version, trackers, agents string) engine.Gate {

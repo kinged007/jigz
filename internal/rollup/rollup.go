@@ -1,8 +1,8 @@
 // Package rollup reads the live state of every running loop across
 // every repository.
 //
-// It reads the registry that sortie-loop writes rather than being told
-// what is running, so a repository started outside central still shows
+// It reads the registry that Jigz writes rather than being told
+// what is running, so a repository started outside Jigz still shows
 // up. A loop whose engine answers is read entirely through the engine's
 // HTTP API: /api/v1/state for live figures and /api/v1/stats for all-time
 // run counts. A loop whose engine does not answer is read from its SQLite
@@ -22,11 +22,13 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/kinged007/jigz/internal/dirs"
 )
 
 // staleAfter is how long a registry entry may go unrefreshed before it
 // is dropped, unless the process that wrote it is still alive. It
-// matches the rule sortie-loop applies when reading its own registry.
+// matches the rule Jigz applies when reading its own registry.
 const staleAfter = 5 * time.Minute
 
 // probeTimeout is short: a loop that is restarting yields no live state
@@ -116,7 +118,7 @@ type Fleet struct {
 	Failed  int       `json:"failed"`
 }
 
-// endpoint mirrors the fields sortie-loop records in its registry.
+// endpoint mirrors the fields Jigz records in its registry.
 type endpoint struct {
 	Repo     string `json:"repo"`
 	RepoName string `json:"repo_name"`
@@ -138,14 +140,14 @@ type registry struct {
 	} `json:"entries"`
 }
 
-// RegistryPath is the shared registry sortie-loop writes and every
+// RegistryPath is the shared registry Jigz writes and every
 // supervisor reads.
 func RegistryPath() (string, error) {
-	dir, err := os.UserCacheDir()
+	dir, err := dirs.Cache()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "sortie-loop", "registry.json"), nil
+	return filepath.Join(dir, "registry.json"), nil
 }
 
 // Reader collects the fleet. The zero value reads the shared registry;

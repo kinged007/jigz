@@ -1,6 +1,6 @@
 //go:build !linux
 
-// Package host reads the load of the machine central is running on. The
+// Package host reads the load of the machine Jigz is running on. The
 // figures come from /proc and sysinfo, which are Linux interfaces; on any
 // other system every reading is reported as unavailable rather than
 // approximated from something that does not mean the same thing.
