@@ -3,7 +3,7 @@
 Status: draft for discussion (2026-10-20)
 
 A review of the system plan (`plans/system/overview.md`, the hub and
-`sortie-loop` plans) against the market as of October 2026, an estimate of where the build effort goes, and the
+`jig` plans) against the market as of October 2026, an estimate of where the build effort goes, and the
 risks. Market facts come from research on 2026-10-20 and carry a source.
 Statements marked "view" are judgement.
 
@@ -109,11 +109,11 @@ Ranked by effort to build correctly, for one developer with agents.
 | Rank | Area | Why it is costly | Avoidable? | Recommendation |
 | ---- | ---- | ---------------- | ---------- | -------------- |
 | 1 | Verification (evidence, evaluator, previews, fake agent, E2E) | Needs a reproducible environment per change, seeded data, stable browser tests, and an evaluator that is strict but not flaky. Per project it repeats. | No. It is the product and the fix for the main failure. | Build first, on the hub itself, in phases 0–2. |
-| 2 | Executor and daemon (claiming, retries, cancel, workspaces, agent adapters, remote workers, sandboxes, credentials) | Distributed lifecycle with partial failure. Sortie has 3,195 commits, 43 migrations, and 38 ADRs for this. | Yes. Sortie runs the agents; `sortie-loop` becomes the daemon; the hub routes work with runner labels. | Do not build an executor. Upstream PRs for missing engine features. |
+| 2 | Executor and daemon (claiming, retries, cancel, workspaces, agent adapters, remote workers, sandboxes, credentials) | Distributed lifecycle with partial failure. Sortie has 3,195 commits, 43 migrations, and 38 ADRs for this. | Yes. Sortie runs the agents; `jig` becomes the daemon; the hub routes work with runner labels. | Do not build an executor. Upstream PRs for missing engine features. |
 | 3 | Context engineering and memory | Easy to build, hard to prove it helps; needs outcome evals to tell good from bad. | Partly. | After outcomes exist (phase 8); keep only what measurably helps. |
 | 4 | Manager agents (product, PM) making good decisions | Open-ended prompt and policy work; quality is hard to measure. | No, but its scope can be limited. | Narrow outputs (specs, tasks, sprint plans) with human approval; measure. |
 | 5 | Domain-neutral model | Cheap as naming; very costly as machinery built before a second domain exists. | Yes. | Generic names, software pack only. |
-| 6 | Dashboard UI | Never finished; each feature needs screens. | No. | Server-rendered, reuse `sortie-loop` pages and patterns. |
+| 6 | Dashboard UI | Never finished; each feature needs screens. | No. | Server-rendered, reuse `jig` pages and patterns. |
 | 7 | Extension API | A stable public API is a long-term commitment. | Yes, until there is demand. | Internal module API first. |
 | 8 | Protocol integration (MCP, A2A, ACP) | Specs still change. | Partly. | MCP server early; ACP through sortie; A2A in phase 6. |
 
@@ -122,7 +122,7 @@ Direct answers:
 - The sortie replacement is the largest avoidable cost. Building it would
   take months and add nothing users can see.
 - A separate executor daemon manager is the same cost under another name.
-  `sortie-loop` already supervises sortie; enrollment, reporting, and
+  `jig` already supervises sortie; enrollment, reporting, and
   runner-label filters make it the daemon.
 - Claiming races between machines are solved by routing, not locking:
   the assignee separates members, and the hub, as the only writer of
@@ -144,11 +144,11 @@ What the hub needs from it:
 | Need | How | Where |
 | ---- | --- | ----- |
 | Pull work | existing trackers (GitHub, GitLab, Gitea, Jira, Linear) filtered by labels, assignee, runner label | exists |
-| Run events to `sortie-loop` | `webhook` notifier and `/api/v1/events` | exists |
+| Run events to `jig` | `webhook` notifier and `/api/v1/events` | exists |
 | Cancel, pause, resume | issues #1385, #1386 | upstream PR |
 | Auth on its API | issue #1389 | upstream PR |
 | Stable API contract | issue #1443 | upstream discussion |
-| Sandboxes | hooks or a wrapper command around the agent | `sortie-loop` scripts |
+| Sandboxes | hooks or a wrapper command around the agent | `jig` scripts |
 
 Risks and mitigations:
 
@@ -202,9 +202,9 @@ Risks and mitigations:
   Keep it true where it matters: members' agent credentials always
   stay on members' machines, execution runs on members' machines by
   default (hosted runners in the backlog use the operator's own inference
-  access), `sortie-loop` and the protocol are open source, and the hub is
+  access), `jig` and the protocol are open source, and the hub is
   also available to self-host.
-- Fork dependence: `sortie-loop` must run on upstream sortie releases;
+- Fork dependence: `jig` must run on upstream sortie releases;
   fork-only features (`pi` adapter, `github-pr` tracker) are optional.
 
 ## 6. View: where agentic development is going

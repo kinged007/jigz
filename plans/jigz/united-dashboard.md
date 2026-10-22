@@ -1,15 +1,15 @@
 # United dashboard & control panel — plan
 
-Status: implemented — branch `feat/united-dashboard`, uncommitted on top of `52e9003` — the dashboard serves central's pages; `gofmt -l` empty, `go vet`/`go build`/`go test` green
+Status: implemented — branch `feat/united-dashboard`, uncommitted on top of `52e9003` — the dashboard serves the fleet dashboard's pages; `gofmt -l` empty, `go vet`/`go build`/`go test` green
 
-Recreate the `sortie-central` dashboard and control panel inside
-`sortie-loop`, so every `sortie-loop` run serves the same pages
+Recreate the fleet dashboard and control panel inside `jig`, so every
+`jig` run serves the same pages
 whether it is one repo or `—-unite` (many repos). The extra binary
 disappears; the supervisor you already run is the Fleet controller.
 
 ## 1. What exists today
 
-### sortie-loop dashboard, before this change (`dashboard.go` + `dashboard.html`, now deleted)
+### Jigz dashboard, before this change (`dashboard.go` + `dashboard.html`, now deleted)
 
 - One HTML template, 5 s `<meta http-equiv=refresh>`.
 - `dashData { Unite, Loops []loopStats, Issues []issueStats, Repos []repoRollup, All* floats, RunningN, Controls, Draining, Sleep }`.
@@ -18,7 +18,7 @@ disappears; the supervisor you already run is the Fleet controller.
 - Unite: `readRegistry()` (registry+TCP probe hybrid, ports `7678→7900`, stop after 3 empties, stale `>5m && !pidAlive` hidden, orphans as `unknown`) — `Controls=false`, read-only.
 - No system metrics, no per-repo state table, no cost, no `picked_up`, no disk, no fleet table, no “Working on right now” detail, no edit/reload, no host guard, no fragment refresh.
 
-### sortie-central dashboard (`cmd/sortie-central/dashboard.html` + `web.go` + `internal/{rollup,supervise,config,host}`)
+### Fleet dashboard (`cmd/jig/dashboard.html` + `web.go` + `internal/{rollup,supervise,config,host}`)
 
 - Two templates: `page` (full) + `live` + `status` fragments + `edit` + `confirm` (stop-all).
 - Header: `edit config` + `reread config and apply` (behind `when loops are idle` checkbox) + `stop all` (confirm page). System metrics fragment (`memory/cpu/disk` + cores + clock) polled on its own 3 s tick — CPU is delta of `/proc/stat`, first sample shows `—`.
@@ -28,12 +28,12 @@ disappears; the supervisor you already run is the Fleet controller.
 - Per-repository rollup table.
 - “Working on right now” → one row/busy agent, longest-running first: `repo/loop/issue/state/turns/tokens/agent·model/cost/picked up/running for`. Cost is `ActiveEstimatedCostUSD` split by token share (nil `→ —`, loopTokens==0 `→ 0`).
 - Control server (`web.go: hostGuard + serve`): loopback-only bind, `Host` check (loopback names always OK; specific `--host` kept; `0.0.0.0/::` = wildcard — banner + log + check off), actions routed to `supervise.Supervisor` (not signals) except `stop all`. Live refresh: `fetch('/live')` + `fetch('/status')` every 3 s, clock updated locally, gone detection (`page not answering → banner + stop tick`, title rewrite).
-- Data plane (`internal/rollup`): `Reader.Collect()` reads `~/.cache/sortie-loop/registry.json` → live `endpoint{Repo,RepoName,Loop,Port,DBPath}`, skips stale dead entries, then per-loop `GET /api/v1/state` (3 s) + RO DB (`aggregate_metrics + run_history`); `pickedUp` query (`MIN(started_at)` since last `succeeded` on `display_identifier|identifier`). Fleet = sum across loops + by-repo. Icons: 3 inlined Lucide SVGs, pinned `12px`.
+- Data plane (`internal/rollup`): `Reader.Collect()` reads `~/.cache/jigz/registry.json` → live `endpoint{Repo,RepoName,Loop,Port,DBPath}`, skips stale dead entries, then per-loop `GET /api/v1/state` (3 s) + RO DB (`aggregate_metrics + run_history`); `pickedUp` query (`MIN(started_at)` since last `succeeded` on `display_identifier|identifier`). Fleet = sum across loops + by-repo. Icons: 3 inlined Lucide SVGs, pinned `12px`.
 
-### Shared substrate already on `sortie-loop` (L1-L3)
+### Shared substrate already on `jig` (L1-L3)
 
-- Registry: `~/.cache/sortie-loop/registry.json` (`Entries[root]={RepoName,UpdatedAt,PID,Loops[]loopEndpoint{Repo,RepoName,Loop,Port,DBPath,WorkflowFile,LoopType}, Args, Version, StartedAt, StatusPath}`) under `registry.json.update.lock`, `writeFileAtomic`, `dropRegistry` on shutdown, `lockStarts` for port claim.
-- Status doc: `~/.cache/sortie-loop/status/<sha256(root)[:16]>.json` (`statusDoc{SchemaVersion:1,Version,EngineVersion,TestedSchemaVersions:[16],PID,Repo,RepoName,StartedAt,UpdatedAt,State,Workflows[]workflowStatus{Name,WorkflowFile,LoopType,Port,PID,State,StartedAt,RestartCount,LastExitCode,ConfigHash,LogPath,Budget},Cleanup,Sleep}`), `writeStatus` atomically, `liveness=(exited|running|stale)`.
+- Registry: `~/.cache/jigz/registry.json` (`Entries[root]={RepoName,UpdatedAt,PID,Loops[]loopEndpoint{Repo,RepoName,Loop,Port,DBPath,WorkflowFile,LoopType}, Args, Version, StartedAt, StatusPath}`) under `registry.json.update.lock`, `writeFileAtomic`, `dropRegistry` on shutdown, `lockStarts` for port claim.
+- Status doc: `~/.cache/jigz/status/<sha256(root)[:16]>.json` (`statusDoc{SchemaVersion:1,Version,EngineVersion,TestedSchemaVersions:[16],PID,Repo,RepoName,StartedAt,UpdatedAt,State,Workflows[]workflowStatus{Name,WorkflowFile,LoopType,Port,PID,State,StartedAt,RestartCount,LastExitCode,ConfigHash,LogPath,Budget},Cleanup,Sleep}`), `writeStatus` atomically, `liveness=(exited|running|stale)`.
 - L2 controls as files/signals: `wake` (`.wake`), `pause|resume|budget override` (`.budget.request.*` file queue, `*.budget.json` state), `cleanup` (`.cleanup.json/.lock`), `reload` (`SIGHUP`), `validate`/`status` CLI.
 - Engine live API: `GET :port/api/v1/state` `{counts{running,retrying}, active_estimated_cost_usd, running[{display_identifier,issue_identifier,state,turn_count,model_name,started_at,tokens.total_tokens}]}`. Assigned by `startLoopChild` under `lockStarts` with `waitLoopBound` (15 s, `probeLoopAPI`).
 
@@ -41,22 +41,22 @@ disappears; the supervisor you already run is the Fleet controller.
 
 One codebase, two modes, same pages:
 
-- `sortie-loop [repo-root]` serves on `127.0.0.1:7677` (or `--dashboard-port N`) the same pages in both modes. A plain run scopes the tables to its own repository; `--unite` starts, or joins, the one dashboard that spans every repository in `registry.json`.
-- All `sortie-central` controls are present, routed to the owning supervisor rather than to “self”:
+- `jig [repo-root]` serves on `127.0.0.1:7677` (or `--dashboard-port N`) the same pages in both modes. A plain run scopes the tables to its own repository; `--unite` starts, or joins, the one dashboard that spans every repository in `registry.json`.
+- All fleet dashboard controls are present, routed to the owning supervisor rather than to “self”:
   enterprisewise `—-unite`: wake, pause/resume/budget override per workflow, stop/stop-when-idle/restart per repo, reload/re-read config and apply, edit config in browser, stop-all. Per-repo dir size, per-loop log path, system load.
 - No new daemon binary. No HTTP supervisor API. No new dependency. The page stays a `html/template` that degrades to static HTML without JS. A dead repo with a fresh DB still shows history from SQLite; a repo with `—no-server` still shows its `statusDoc` (file-backed) even though it has no ports.
 
-## 3. Design rules (from `AGENTS.md` + central’s `PLAN.md`)
+## 3. Design rules (from `AGENTS.md` + the fleet dashboard’s `PLAN.md`)
 
 - No defaults duplicated — every optional field stays `*T`; omission means the engine/supervisor default. Template helpers just format, they do not invent defaults.
 - Secrets never hit a file from the dashboard — `token_env` stays env-only; edit surface is `/.sortie/config.yaml` (no `.env.loop` rewrite).
-- `sortie-loop` validates workflows; the dashboard does not maintain a hardcoded workflow list.
+- `jig` validates workflows; the dashboard does not maintain a hardcoded workflow list.
 - One code path for single and multi — `Unite` is a rendering flag, not a second server. Helpers (`commas`, `usd`, `since`, `at`, `pct`, `cpuPct`, `size`, `gib`, `agentLabel`) are shared between fragments.
 - File+DB data plane stays file+DB — dashboard reads the same registry + status docs + WAL-visible RO SQLite + engine `GET /state`. No new IPC beyond signal/file-queue already implemented.
 
 ## 4. Data shape after the overhaul
 
-### Go structs (all in `cmd/sortie-loop`)
+### Go structs (all in `cmd/jig`)
 
 ```go
 // Existing — keep, extend
@@ -72,7 +72,7 @@ type loopStats {
   DBLive bool; DBError string
 }
 
-// New — maps directly to central’s repoView + pageData
+// New — maps directly to the fleet dashboard’s repoView + pageData
 type repoView struct {
   Slug string; State string // running|stopped|failed|invalid|disabled|unknown
   Loops []string; Running int; Tokens int64; Observed int
@@ -111,16 +111,16 @@ type Loop struct { // thin mirror of rollup.Loop for template compat
 
 Sources per field:
 
-- Fleet + Loops + Per-repo rollup: `Reader.Collect()` exactly as central does (port probe → DB → HTTP, `known[port]` from registry, stale rule, sort). For single-repo we keep the fast path `sup.endpoints()` but normalize into the same shape so the template doesn’t branch.
+- Fleet + Loops + Per-repo rollup: `Reader.Collect()` exactly as the fleet dashboard does (port probe → DB → HTTP, `known[port]` from registry, stale rule, sort). For single-repo we keep the fast path `sup.endpoints()` but normalize into the same shape so the template doesn’t branch.
 - `repoView.State/Err/Diags/Output/PID/Args/StatusPath` — from `registry entry` + `statusDoc` (`liveness == running|stale|exited` → failure vs running; `doc.State` when present; `Args` + `Version` from registry; `Diags` from validate path if retained).
-- `Disk` — `dirsize` walk of `Repo` root’s `.sortie` + workspaces, sampled every 10 min on a `time.Ticker`, cached in `map[Slug]int64` guarded by mutex (exactly as central’s `sizes *probe`). Measured out-of-band, never in the render path.
+- `Disk` — `dirsize` walk of `Repo` root’s `.sortie` + workspaces, sampled every 10 min on a `time.Ticker`, cached in `map[Slug]int64` guarded by mutex (exactly as the fleet dashboard’s `sizes *probe`). Measured out-of-band, never in the render path.
 - `Sleep` + per-workflow `Budget` — `statusDoc.Sleep` and `statusDoc.Workflows[].Budget` read from each repo’s status file (not probed).
 - `Cost` — `statePayload.ActiveEstimatedCostUSD`, nil → `usd` prints `—`.
-- `PickUp` — `pickedUp(db, identifier)` query (`MIN(started_at)` since last succeeded on `display_identifier|identifier`) — same SQL as central.
-- `agentLabel` — from `statusDoc` workflow `Budget.Agent`? No; from per-repo `doc.Workflows[].Name→config Agents map` built at collect time, exactly as central’s `agents[repo/loop]`.
+- `PickUp` — `pickedUp(db, identifier)` query (`MIN(started_at)` since last succeeded on `display_identifier|identifier`) — same SQL as the fleet dashboard.
+- `agentLabel` — from `statusDoc` workflow `Budget.Agent`? No; from per-repo `doc.Workflows[].Name→config Agents map` built at collect time, exactly as the fleet dashboard’s `agents[repo/loop]`.
 - `Sys.Metrics` — `internal/host.Reader` (see §7).
 
-### Formatting helpers (central’s `web.go` — verbatim or adapted)
+### Formatting helpers (the fleet dashboard’s `web.go` — verbatim or adapted)
 
 `commas`, `usd` (nil→`—`, `≥100 → $0`, `≥1 → $0.00`, `>0 → $0.000`, else `$0.00`), `since` (two largest units), `at` (`2006-01-02 15:04 MST` local), `pct`, `cpuPct` (`-1→—`), `size` (KiB/MiB/→ GiB), `gib`, `agentLabel` (`claude-code→Claude`, `pi→Pi`, …).
 
@@ -137,8 +137,8 @@ POST /action            → start|stop|drain|restart per repo, stopall (confirm 
 
 - `GET /` renders `page` with `pageData`. Header: `edit config` (single-repo: link to own repo; unite: per-repo edit links in the repos table) + `when loops are idle` checkbox (propagated as `when_idle=1` hidden on every `POST /action`) + status metrics.
 - `GET /live` and `GET /status` render only those `{{define}}` fragments with the same `pageData` — client JS replaces `#live`/`#status` outerHTML.
-- Auth/host: bind is still `hostGuard{addrs,wildcard}.allows(Host)` exactly as central (loopback names always OK; `—-host` specific address keeps check; `0.0.0.0/::` = wildcard, banner + log). The “exposed” banner is the same `msg exposed` div. Default is `127.0.0.1`; no new flag required to start (`—-host` can be added later alongside `—-dashboard-port` without changing the default).
-- Link building: `linkBuilder{Host, Template: —-loop-url-template}` with `{host},{port},{loop},{repo}` placeholders (same as central’s `—-loop-url-template`). Dashboard port links use it; when no template, `http://{host}:{port}/`.
+- Auth/host: bind is still `hostGuard{addrs,wildcard}.allows(Host)` exactly as the fleet dashboard (loopback names always OK; `—-host` specific address keeps check; `0.0.0.0/::` = wildcard, banner + log). The “exposed” banner is the same `msg exposed` div. Default is `127.0.0.1`; no new flag required to start (`—-host` can be added later alongside `—-dashboard-port` without changing the default).
+- Link building: `linkBuilder{Host, Template: —-loop-url-template}` with `{host},{port},{loop},{repo}` placeholders (same as the fleet dashboard’s `—-loop-url-template`). Dashboard port links use it; when no template, `http://{host}:{port}/`.
 
 ## 6. Controls — routing, not reimplementation
 
@@ -163,28 +163,28 @@ All L2 commands already have request-file semantics; HTTP just writes the same f
 
 ## 7. Host metrics & disk sizing
 
-- New package `internal/host` — copy from `sortie-central/internal/host` (files: `host.go`, `host_linux.go`, `host_other.go`, `blocks*.go`, `cores*.go`, `dirsize*.go`). `host.Reader` keeps previous `/proc/stat` sample; `Read() Metrics{MemTotal,MemUsed,Cores,CPU(-1 until 2nd sample),DiskTotal,DiskUsed,DiskPath}`. Force-copied verbatim so behavior is identical (MemAvailable, `Bavail`, idle+iowait).
+- New package `internal/host` — copy from the fleet dashboard's `internal/host` (files: `host.go`, `host_linux.go`, `host_other.go`, `blocks*.go`, `cores*.go`, `dirsize*.go`). `host.Reader` keeps previous `/proc/stat` sample; `Read() Metrics{MemTotal,MemUsed,Cores,CPU(-1 until 2nd sample),DiskTotal,DiskUsed,DiskPath}`. Force-copied verbatim so behavior is identical (MemAvailable, `Bavail`, idle+iowait).
 - Disk probe is by `state_dir` (here: `filepath.Dir(registryPath())`) so the figure tracks where `.sortie` actually fills up.
-- Per-repo disk size: `dirsize(Repo+"/.sortie")` cached 10 min, like central’s `sizes *probe`. Walk ignores `.git`, does not follow symlinks.
+- Per-repo disk size: `dirsize(Repo+"/.sortie")` cached 10 min, like the fleet dashboard’s `sizes *probe`. Walk ignores `.git`, does not follow symlinks.
 
 ## 8. Template & frontend
 
-- Base: fork `dashboard.html` from `sortie-central` — render order becomes `page → bar(controls+status) → msg/err/exposed → live(fleet row → repos → loops → per-repo → active)` + `edit` + `confirm` templates in one file, driven by the helpers above.
-- Styling: keep central’s monospace layout (easier to extend) behind the same CSS vars; preserve current `sortie-loop` card look as a fallback behind a comment (do not delete until landing).
-- JS: remove `<meta http-equiv=refresh>`. Add fragment polling from central verbatim:
+- Base: fork `dashboard.html` from the fleet dashboard — render order becomes `page → bar(controls+status) → msg/err/exposed → live(fleet row → repos → loops → per-repo → active)` + `edit` + `confirm` templates in one file, driven by the helpers above.
+- Styling: keep the fleet dashboard’s monospace layout (easier to extend) behind the same CSS vars; preserve current `jig` card look as a fallback behind a comment (do not delete until landing).
+- JS: remove `<meta http-equiv=refresh>`. Add fragment polling from the fleet dashboard verbatim:
   - `timer = setInterval(tick, 3000)`; `tick()` = `fetch('/live').then(swap #live)+ local clock + fetch('/status')`.
-  - `gone()` detection: a `fetch('/live')` that never resolves means the supervisor exited (stop-all). Once: `title='sortie-central is not running'`, prepend `msg exposed` banner, `clearInterval(timer)`.
+  - `gone()` detection: a `fetch('/live')` that never resolves means the supervisor exited (stop-all). Once: `title='Jigz is not running'`, prepend `msg exposed` banner, `clearInterval(timer)`.
   - No build step; page degrades to static without JS.
 
 ## 9. Files & wiring (minimal diff, fewest files)
 
 ```
-cmd/sortie-loop/
+cmd/jig/
   app.go              → type app + fleetSupervisor (registry discovery, signals, detached start),
                         repoSizes with the 10-minute timer, projects() from the registry
   dashboard.go        → resolveRepo, statusDir, serveDashboard: builds the app, starts the
                         server and the history collector, signals self on quit
-  web.go + 20 handlers→ central's, imports rewritten to sortie-loop; /edit edits this repo's
+  web.go + 20 handlers→ the fleet dashboard's, imports rewritten to Jigz; /edit edits this repo's
                         .sortie/config.yaml
   templates/*.html    → the 16 template files, inlined icons, renamed to "Sortie Loop"
   dashboard_data.go   → openRO and fmtTokens (kept: budget reads and the status command use them)
@@ -193,7 +193,7 @@ cmd/sortie-loop/
 internal/
   host/ rollup/ loopsrc/ store/ collector/ fleetconfig/ auth/ edit/ plan/ github/ ← ported at 52e9003
   rollup/schema.go    → SupportedSchemas {18, 35}
-cmd/sortie-loop/
+cmd/jig/
   web_test.go         → hostGuard.allows, linkBuilder.Build, fragments over httptest, foreign Host
   control_test.go     → projectacts offers the right actions per state
   wake_cmd_test.go    → applyStatus marks a sleeping project and offers wake
@@ -205,7 +205,7 @@ No new module requirements. `modernc.org/sqlite` and `gopkg.in/yaml.v3` already 
 
 Phase 0 — groundwork (no UX change) — **done at `52e9003`**
 - `go vet`/`gofmt -l` baseline; `dashboard.html` snapshot kept via appended `{{define "page/live/status/edit/confirm"}}` + fallback `dashTmpl.Lookup("page")` logic.
-- `internal/host` copied verbatim from `sortie-central` (5 files), `internal/rollup`, `internal/loopsrc`, `internal/store`, `internal/collector`, `internal/fleetconfig`, `internal/auth`, `internal/edit`, `internal/plan`, `charts.go`, `templates/*.html` (16 files) landed.
+- `internal/host` copied verbatim from the fleet dashboard (5 files), `internal/rollup`, `internal/loopsrc`, `internal/store`, `internal/collector`, `internal/fleetconfig`, `internal/auth`, `internal/edit`, `internal/plan`, `charts.go`, `templates/*.html` (16 files) landed.
 - `dashboard_data.go` extended with `Cost *float64`, `PickUp`, `commas/usd/since/at/pct/cpuPct/size/gib/agentLabel/trunc/utc/liveHref` to match `dashboard.go` FuncMap; `dashboard.go` expanded to 1031 lines with `Fleet/FleetLoop/FleetRepo/activeRun/repoView/pageData/linkBuilder/hostGuard` + `collectFleet/buildRepos/pageForRequest`. `readRegistry`+`collectFleet` helpers usable by both single and unite paths — **done**, but `dashboard.go` still embeds single `dashboard.html`, not `templates/*.html` via `embed.FS`.
 
 Phase 1 — fleet rollup & live data
@@ -242,32 +242,32 @@ Each phase lands as one PR, `go fmt -l` empty, `go vet ./...`, `go test ./...` (
 
 ## 12. What to deliberately not build
 
-- Multi-host supervisor, systemd unit, history migration — same defer as central.
-- TLS/auth inside `sortie-loop` — loopback bind is the control; exposing beyond loopback without auth is the same banner central shows, not a rewrite.
+- Multi-host supervisor, systemd unit, history migration — same defer as the fleet dashboard.
+- TLS/auth inside `jig` — loopback bind is the control; exposing beyond loopback without auth is the same banner the fleet dashboard shows, not a rewrite.
 - Per-run transcript / per-event token deltas — still deferred (L8 needs engine transcripts).
 - Project-level dollar caps — `max_usd` stays ignored with warning until engine emits cost per run.
 
 ## 13. Risks & mitigations
 
 - 123-port ceiling + sparse scan gap — fleet render annotates `unknown` orphans with status file fallback so a high-port repo isn’t clipped by 3 empties.
-- PID reuse (`stale` vs `running`) — document as known ceiling (already in `plans/sortie-loop/enhancements.md: Known gaps`), do not add pidfile locking beyond existing `flock`.
-- Dashboard process owns fleet’s stop-all but not per-repo start — cold `start` spawns a detached `sortie-loop` with the recorded argv, so it does not replace the dashboard process.
+- PID reuse (`stale` vs `running`) — document as known ceiling (already in `plans/jigz/enhancements.md: Known gaps`), do not add pidfile locking beyond existing `flock`.
+- Dashboard process owns fleet’s stop-all but not per-repo start — cold `start` spawns a detached `jig` with the recorded argv, so it does not replace the dashboard process.
 
 ## 14. What is implemented
 
 ### Server and pages
 
-`cmd/sortie-loop/app.go` holds `type app`, the state every route reads: the
+`cmd/jig/app.go` holds `type app`, the state every route reads: the
 fleet supervisor shim, the loop source, the host reader, the disk-size
-cache, the history store and the editor pipeline. `cmd/sortie-loop/web.go`
-and the twenty handler files next to it are central's, with imports
-rewritten. `cmd/sortie-loop/dashboard.go` builds the app and starts the
+cache, the history store and the editor pipeline. `cmd/jig/web.go`
+and the twenty handler files next to it are the fleet dashboard's, with imports
+rewritten. `cmd/jig/dashboard.go` builds the app and starts the
 server; `dashboard.html` is gone, and `templates/*.html` (16 files, inlined
 Lucide icons) is the only markup.
 
 Routes: `GET / /live /status /projects /projects/{owner}/{name} /runs
 /runs.csv /runs/{owner}/{name}/{workflow}/{id} /runs/{owner}/{name}/{workflow}/log
-/workflows /agents /settings /edit /edit/central /edit/project/{owner}/{name}
+/workflows /agents /settings /edit /edit/jigz /edit/project/{owner}/{name}
 /edit/agent/{scope...} /edit/workflow/{owner}/{name}/{workflow} /backups
 /api/v1/{fleet,projects,runs,usage,metrics,audit}`, `POST
 /action /edit/validate /edit/apply /backups/restore /projects/new
@@ -292,22 +292,22 @@ handlers expect. `Snapshot()` prefers the local `supervisor` for this
 process's own repo and reads registry plus status documents for the rest.
 `Stop`/`StopWhenIdle`/`Restart` send `SIGTERM`/`SIGUSR1`/`SIGUSR2` to the
 registered PID, or to this process when the slug is its own. `Start` spawns
-a detached `sortie-loop` with the recorded argv. `reload` sends `SIGHUP` to
+a detached `jig` with the recorded argv. `reload` sends `SIGHUP` to
 every registered repo. `stop all` drains or stops every repo, waits, closes
 `app.quit`, and the quit goroutine signals the process, which is what makes
 `sup.run()` return and the teardown drop the registry entry.
 
-### Differences from central
+### Differences from the fleet dashboard
 
 - No login and no CSRF: the page is loopback-only unless `--host` moves it,
   and `--host 0.0.0.0`/`::` shows the exposed banner. `--host` with a
   specific address keeps the `Host` check.
 - Only the workflow file editor exists: `/edit/workflow/{owner}/{name}`.
-  The central, project and agent editors edit the fleet YAML, which
-  sortie-loop does not have, so those routes are not registered.
-- The wizard's project lifecycle is central's, so project create/remove and
+  The fleet, project and agent editors edit the fleet YAML, which
+  Jigz does not have, so those routes are not registered.
+- The wizard's project lifecycle is the fleet dashboard's, so project create/remove and
   config-file writes are reachable but write the fleet YAML shape this
-  program does not read. Use `sortie-loop setup` in the target repo.
+  program does not read. Use `jig setup` in the target repo.
 - Workflow validation runs `sortie validate` in the environment the loops
   run with (`.sortie/.env.loop`, else `config.Load(dir).Env()`), not the
   fleet cascade, which has no counterpart here.
@@ -318,12 +318,12 @@ every registered repo. `stop all` drains or stops every repo, waits, closes
   one. A database at another version reports a schema notice and its
   figures stay empty rather than wrong.
 - The history database is `history.db` in the same cache directory as the
-  registry, not `central.db`.
+  registry, not the fleet dashboard's own database.
 
 ### Verified
 
 - `gofmt -l cmd internal` empty, `go vet ./...`, `go test ./...` green.
-- `cmd/sortie-loop/web_test.go`: `hostGuard.allows` table, `linkBuilder.Build`
+- `cmd/jig/web_test.go`: `hostGuard.allows` table, `linkBuilder.Build`
   (default, IPv6, template), `/`, `/live`, `/status` over `httptest` with an
   empty registry, a registered repo with a status document rendering on
   `/`, `/live` and `/projects`, and a foreign `Host` answered with 403.
@@ -336,4 +336,4 @@ every registered repo. `stop all` drains or stops every repo, waits, closes
 
 ## 15. Definition of done
 
-- `sortie-loop —-unite` on a machine running two repos shows both in the repos table, each loop’s port links correctly, tokens survive restarts, busy agents list is longest-first with agent·model + cost share + picked-up duration, memory/cpu/disk refresh every 3 s, stop-when-idle drains one loop at a time without losing work, pause/resume/budget override act per workflow, edit saves with diff and validation, and `go test ./... && go vet ./... && gofmt -l` is clean.
+- `jig —-unite` on a machine running two repos shows both in the repos table, each loop’s port links correctly, tokens survive restarts, busy agents list is longest-first with agent·model + cost share + picked-up duration, memory/cpu/disk refresh every 3 s, stop-when-idle drains one loop at a time without losing work, pause/resume/budget override act per workflow, edit saves with diff and validation, and `go test ./... && go vet ./... && gofmt -l` is clean.

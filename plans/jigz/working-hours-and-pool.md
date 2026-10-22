@@ -5,7 +5,7 @@ Design for roadmap sections 5.1 and 5.2 (Phase 1). The settings code is in
 
 ## Machine file
 
-The optional file `<os.UserConfigDir()>/sortie-loop/machine.yaml` (Linux:
+The optional file `<os.UserConfigDir()>/jigz/machine.yaml` (Linux:
 `$XDG_CONFIG_HOME` or `~/.config`) belongs to the person on the machine and
 is shared by the loops of every repository on it. A missing file means no
 working-hours limit and no pool; loops behave as without this feature.
@@ -58,7 +58,7 @@ Rules:
 
 ## Pool state
 
-`<state dir>/sortie-loop/pool.json`, where the state dir is
+`<state dir>/jigz/pool.json`, where the state dir is
 `$XDG_STATE_HOME` or `~/.local/state`. For each entry name it stores
 `exhausted_until` (RFC 3339), `reason` (the limit message, at most 200
 characters) and `last_used`. Updates are read-modify-write under an
@@ -115,7 +115,7 @@ Per tick the supervisor computes whether the machine window is open and
   immediately.
 - When the pool is not empty, each loop's environment gets
   `SORTIE_AGENT_KIND=<runtime>` and
-  `SORTIE_AGENT_COMMAND=<absolute sortie-loop path> agent-exec <runtime>`.
+  `SORTIE_AGENT_COMMAND=<absolute jig path> agent-exec <runtime>`.
   A change of `ActiveRuntime` recycles each loop once it has no running
   session.
 - Shipped workflows carry both a `pi:` and a `claude-code:` block. The
@@ -124,7 +124,7 @@ Per tick the supervisor computes whether the machine window is open and
 
 ## agent-exec
 
-`sortie-loop agent-exec <runtime> [args...]`:
+`jig agent-exec <runtime> [args...]`:
 
 1. Pick an available entry. If there is none, print a message on stderr and
    exit 75.

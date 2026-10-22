@@ -1,25 +1,25 @@
-# sortie-loop: handoff
+# Jigz: handoff
 
-Status: 2026-10-22. Read this first in a new session working on
-`sortie-loop`. The hub is a separate stream; its plans are in `plans/hub/`
-and it has no code yet.
+Status: 2026-10-22, updated after the Jigz rename. Read this first in a new
+session working on Jigz. The hub is a separate stream; its plans are in
+`plans/hub/` and it has no code yet.
 
 ## 1. Objective
 
-Build `sortie-loop` as a free, open-source tool that is complete without
-the hub, following `plans/sortie-loop/vision-and-roadmap.md` section 6.
+Build Jigz as a free, open-source tool that is complete without
+the hub, following `plans/jigz/vision-and-roadmap.md` section 6.
 Phase 0 is done except the merge. Phases 1 and 2 are complete in code,
 tests, and docs. Neither has a release or release notes; releases are
-deferred until the user asks. The next steps are the acceptance test in CI,
-the Jigz rename, and Phase 3.
+deferred until the user asks. The rename to Jigz is done. The next steps
+are the acceptance test in CI and Phase 3.
 
 Read, in order:
 
 1. `plans/system/overview.md`: parts, product boundary (2.1), modes,
    engine policy.
-2. `plans/sortie-loop/vision-and-roadmap.md`: principles, engine
+2. `plans/jigz/vision-and-roadmap.md`: principles, engine
    requirements, planned features, roadmap.
-3. `plans/sortie-loop/features.md`: existing and planned features by area.
+3. `plans/jigz/features.md`: existing and planned features by area.
 4. `plans/system/delivery-method.md`: how work is verified.
 5. `plans/system/hub-protocol.md`: only when working on connected mode.
 
@@ -52,8 +52,8 @@ Read, in order:
 ## 3. Decisions in effect
 
 - The product boundary table in `plans/system/overview.md` 2.1 decides
-  what goes in `sortie-loop` and what goes in the hub.
-- No cross-machine unite in `sortie-loop`; the hub's fleet view covers it.
+  what goes in Jigz and what goes in the hub.
+- No cross-machine unite in Jigz; the hub's fleet view covers it.
 - Connected mode is runner mode: the hub is the only source of project
   config, and there is no local dashboard.
 - Workspace modes (SSH, sandbox) are deferred. Hosted runners are a hub
@@ -68,11 +68,23 @@ Read, in order:
   to another entry.
 - `hours.end` is a config setting with the values `finish` or `stop`. The
   default is `finish`.
-- Names: Jigz for `sortie-loop` (command `jig`; the daemon runs as
-  `jig daemon`, installed as service `jigd`). Shiftd for the hub. The rename
-  is scheduled after Phase 2 (`plans/sortie-loop/vision-and-roadmap.md`
-  section 6, "Rename to Jigz"); code still says `sortie-loop` until it is
-  done.
+- Names: Jigz is the product; the command is `jig`; the daemon runs as
+  `jig daemon`, installed as service `jigd`; the module and the repository
+  are `github.com/kinged007/jigz`; the user directories are `jigz` under
+  the XDG roots (`~/.cache/jigz`, `~/.local/share/jigz`,
+  `~/.local/state/jigz`, `~/.config/jigz`); the fleet config file is
+  `jigz.yaml`; the log file is `jig.log`; the dashboard meta name is
+  `jig-dashboard`. Shiftd for the hub. The rename is done
+  (`plans/jigz/vision-and-roadmap.md` section 6, "Rename to Jigz").
+- The engine keeps its own names: the `sortie` binary, the `SORTIE_*`
+  variables it owns, and the `.sortie/` directory in a target repository.
+  The user-facing documents do not name it; they say "the engine".
+- The state directories moved from the `sortie-loop` names to the `jigz`
+  names. `internal/dirs` moves a directory left by an earlier install into
+  place the first time it is looked up, so the registry, the run history
+  and the settings survive the upgrade. The pool state and the dashboard
+  state were two directories before the rename and are one now, so the
+  second one is merged into the first.
 - Fields with no engine API source are not shown in the dashboard:
   workspace path, prompt template, API request count, handoff counter reset,
   and review metadata.
@@ -92,22 +104,43 @@ Open decisions (do not decide them; ask):
 
 ## 4. State of the work
 
-Branch `feat/united-dashboard`, 37 commits ahead of `main`, not pushed, no
-PR open. Phase 1 (working hours, account pool, `agent-exec`, runtime
-failover, dashboard pages) is in `internal/machine`, `cmd/sortie-loop/gate.go`
-and `cmd/sortie-loop/agentexec.go`. Phase 2 commits:
+Branch `feat/rename-jigz` (renamed from `feat/united-dashboard`), 38 commits
+ahead of `main`, not pushed, no PR open. Phase 1 (working hours, account pool,
+`agent-exec`, runtime failover, dashboard pages) is in `internal/machine`,
+`cmd/jig/gate.go` and `cmd/jig/agentexec.go`. Phase 2 commits:
 
 | Commit | Change |
 | ------ | ------ |
 | `b69906d` | `internal/store/outcome.go` maps runs to the classes `succeeded`, `failed_agent`, `failed_workspace`, `failed_limit`, `cancelled`, `timeout`, `handoff_withheld`. The account-limit pattern is `machine.BuiltinLimit`. The CSV outcome column and the API `error_class.key` carry the class key. |
-| `6940822` | `internal/engine` has one resolver with a configurable repository and version: the `engine:` block in `machine.yaml`, overridden by `SORTIE_ENGINE_REPO` and `SORTIE_ENGINE_VERSION`; `SORTIE_BIN` wins. Cache files are named `sortie-<owner>+<name>-<version>`. |
+| `6940822` | `internal/engine` has one resolver with a configurable repository and version: the `engine:` block in `machine.yaml`, overridden by `JIG_ENGINE_REPO` and `JIG_ENGINE_VERSION`; `JIG_ENGINE_BIN` wins. Cache files are named `sortie-<owner>+<name>-<version>`. |
 | `250d045` | `internal/collector/api.go` reads runs from `/api/v1/runs` (paged by run id, filtered by `workflow_file`), events from `/api/v1/state`, and rollup counts from `/api/v1/stats` `by_status`. A SQLite fallback serves stopped loops; its schema range is 18 to 43, with `rollup.EngineReleases` {1.28.1: 38, 1.29.0: 43}. Store migration 8 drops `workspace`, `template_id`, `api_requests`, `handoff_reset`, and `review_metadata`. A replaced engine database with a lower newest run id re-copies that workflow's runs. |
-| `59d2ba2` | Capability detection (`internal/engine/probe.go`, `gate.go`, `internal/plan/gating.go`, `cmd/sortie-loop/capabilities.go`). The version comes from `-dumpversion`; kinds come from `validate` on a workflow with unknown kinds. Without `github-pr` the PR loop is disabled (state `disabled`, reason in `hold`). Without `pi` the shipped workflows run with `claude-code`. Engine below 1.27.0 runs no loops. An explicitly set unsupported agent is an error. Pool entries for a missing runtime are not picked. One alert is shown per disabled feature. Settings lists the kinds. The status document `engine_version` is the binary's version. |
+| `59d2ba2` | Capability detection (`internal/engine/probe.go`, `gate.go`, `internal/plan/gating.go`, `cmd/jig/capabilities.go`). The version comes from `-dumpversion`; kinds come from `validate` on a workflow with unknown kinds. Without `github-pr` the PR loop is disabled (state `disabled`, reason in `hold`). Without `pi` the shipped workflows run with `claude-code`. Engine below 1.27.0 runs no loops. An explicitly set unsupported agent is an error. Pool entries for a missing runtime are not picked. One alert is shown per disabled feature. Settings lists the kinds. The status document `engine_version` is the binary's version. |
 | `01a0ad0` | The dashboard reads parked and budget-hold alerts from `/api/v1/state` while the engine runs. Settings shows the schema range. |
 | `3accb2b` | `TestAcceptanceUpstreamEngine` runs upstream `sortie-ai/sortie` v1.29.0 selected through `machine.yaml`: the issue is handed off, the PR loop is disabled with no PR requests, `validate` passes, the alert and kinds are shown, and a run arrives through the API. The Makefile acceptance target runs both tests. |
 
 Commits `f5d9b45`, `cb566b6`, `8bc988b` (hub plans), `1d5ce19`, and
 `14919dd` (product names, rename schedule) are plan changes on the branch.
+
+The rename to Jigz is in the working tree, not committed:
+
+- The command package moved to `cmd/jig`, the module path is
+  `github.com/kinged007/jigz`, and the plans moved to `plans/jigz/`.
+- The tool-owned environment variables are `JIG_*`: `JIG_TOKEN`, `JIG_REPO`,
+  `JIG_ONLY`, `JIG_CLONE_URL`, `JIG_WORKSPACES`, `JIG_MILESTONE`,
+  `JIG_ASSIGNEE`, `JIG_BIN`, `JIG_ENGINE_REPO`, `JIG_ENGINE_VERSION`,
+  `JIG_ENGINE_URL`, `JIG_ENGINE_SHA256`, `JIG_ENGINE_BIN`, `JIG_CLEANUP_*`,
+  `JIG_MODEL`, `JIG_MODEL_BUILD`, `JIG_MODEL_REVIEW` and `JIG_TEST_*`. The
+  `SORTIE_*` variables the engine reads keep their names.
+- The shipped workflow files build the clone URL from the tracker project
+  the engine already has, because a hook only sees the variables with the
+  engine's prefix.
+- The user directories are `jigz` (`~/.cache/jigz`, `~/.local/share/jigz`,
+  `~/.local/state/jigz`, `~/.config/jigz`), and `internal/dirs` moves the
+  old `sortie-loop` directories into them on first use.
+- `grep -rni 'central' cmd internal` returns nothing, so the earlier name
+  is gone from the code as well. `sortie-loop` appears only in
+  `internal/dirs`, where it is the name of the directory the migration
+  reads.
 
 Outside this repository:
 
@@ -124,16 +157,20 @@ Outside this repository:
   working tree is the user's `feat/pi-adapter` branch: read it only with
   `git show <ref>:<path>`.
 - Upstream engine v1.29.0 is cached at
-  `~/.local/share/sortie-loop/sortie-sortie-ai+sortie-1.29.0`.
+  `~/.local/share/jigz/sortie-sortie-ai+sortie-1.29.0`.
 
 ## 5. Checks
 
-- `make verify` passes on `3accb2b`: gofmt, `go vet` (also with
+- `make verify` passed on `3accb2b`: gofmt, `go vet` (also with
   `-tags acceptance`), build, `go test ./...`, and both acceptance tests
   (`TestAcceptance` about 105 s, `TestAcceptanceUpstreamEngine` about 65 s;
   about 3 minutes in total). The acceptance tests download each engine
   (about 25 MB) on first run per machine and fail if the download fails.
-- `TestAcceptance` runs the real `sortie-loop` binary and engine v1.28.1.
+- After the rename, on the working tree of 2026-10-22: `gofmt -l cmd
+  internal` is empty, `go vet ./...` and `go test ./...` pass. The
+  acceptance tests were not run: they download both engines and take about
+  three minutes.
+- `TestAcceptance` runs the real `jig` binary and engine v1.28.1.
   Scenarios: an `agent:plan` issue is claimed and handed off;
   `needs-human` and other-assignee issues are not dispatched; the dashboard
   API reports the run; no claims outside a working-hours window and a claim
@@ -147,12 +184,11 @@ Outside this repository:
 
 ## 6. Outstanding work
 
-1. Merge `feat/united-dashboard` into `main` through a PR (the user does
+1. Merge `feat/rename-jigz` into `main` through a PR (the user does
    this, or asks for it).
 2. Add the acceptance test to CI (approved).
-3. The Jigz rename.
-4. Phase 3: Questions (roadmap section 6).
-5. Phase 1 and Phase 2 releases and release notes: deferred; only when
+3. Phase 3: Questions (roadmap section 6).
+4. Phase 1 and Phase 2 releases and release notes: deferred; only when
    the user asks.
 
 The upstream PRs for the `pi` adapter and the `github-pr` tracker are in
@@ -173,11 +209,14 @@ Known gaps from Phase 2, not scheduled:
 - A replacement engine database whose ids already exceed the stored last
   run id is not detected.
 - The PR-workflow-off alert is also shown for projects started with
-  `SORTIE_LOOP_ONLY=issues`.
+  `JIG_ONLY=issues`.
 - `fillRunFiles` (the `workflow_file` backfill) runs only on the SQLite
   path.
-- Existing installs download the default engine once more because of the
-  new cache file name; the old `sortie-<version>` files are not removed.
+- Existing installs download the default engine once more: the cache
+  directory moved from `~/.local/share/sortie-loop` to
+  `~/.local/share/jigz`, and the old `sortie-<version>` files are not
+  removed. The directory itself is moved, not copied, so the download
+  happens only for an engine that was never installed.
 
 Known gaps from Phase 1, not scheduled:
 
@@ -205,22 +244,28 @@ Known gaps from Phase 1, not scheduled:
   configurable.
 - A dashboard stopped by a signal while a `validate` child hangs may leave
   the child running. Not checked with the real engine.
-- About 113 Go lines still say "central" (the earlier name of the
-  dashboard code).
-- `plans/sortie-loop/enhancements.md` and `production-readiness.md` refer
+- The state directories are not migrated for a target repository: the
+  `.sortie/` directory in a target repo keeps its name, so an install
+  there needs no migration. The workflow files a target repository
+  installed before the rename still name the old variables, and
+  `internal/config` sets those names alongside the new ones, so the
+  loops keep running until `jig setup` refreshes the files.
+- `plans/jigz/enhancements.md` and `production-readiness.md` refer
   to `plans/pm-agent.md`, which does not exist in the repository.
 - Target repositories installed before Phase 1 have workflows without the
   `claude-code:` block; the runtime switch to claude-code needs
-  `sortie-loop setup` re-run there.
+  `jig setup` re-run there.
 
 ## 7. Processes on this machine
 
-A real `sortie-loop` instance with its `sortie` children runs on ports
-7677 to 7679, using the registry in `~/.cache/sortie-loop/`. It started
-before the engine resolution fix (`9313e3e`) and the Phase 2 changes, and
-still runs engine 1.27.0 until restarted. Do not stop it or write to its
-registry. Tests isolate `HOME` and `XDG_*` to temporary directories; keep
-doing that.
+A real instance of the old binary (`sortie-loop --host=0.0.0.0 --unite`)
+serves its dashboard on port 7677 and runs engine 1.28.1 children on 7679
+and 7680, using the registry in `~/.cache/sortie-loop/`. It predates the
+rename and keeps writing there. The first run of the renamed binary moves
+that directory to `~/.cache/jigz/`, which leaves the old instance without
+a registry; stop it when the switch happens. Do not write to its registry
+before that. Tests isolate `HOME` and `XDG_*` to temporary directories;
+keep doing that.
 
 ## 8. Lessons for routing work
 
@@ -247,12 +292,14 @@ doing that.
 
 ## 9. Next action
 
-1. Add the acceptance test to CI in `.github/workflows/ci.yml`. It needs
+1. Run `make verify`, which adds the acceptance tests to the checks that
+   already pass (`gofmt`, `go vet`, `go test ./...`). The acceptance tests
+   download both engines and take about three minutes.
+2. Add the acceptance test to CI in `.github/workflows/ci.yml`. It needs
    network to download both engines and takes about 3 minutes. Consider
-   caching the engines in `~/.local/share/sortie-loop`, keyed on
+   caching the engines in `~/.local/share/jigz`, keyed on
    repository and version. Ask the user before adding any action or tool
    beyond what the workflow already uses.
-2. The Jigz rename (roadmap section 6, "Rename to Jigz").
-3. Phase 3 (Questions) after the rename.
+3. Phase 3 (Questions).
 
 The default agent runtime in section 3 remains open.

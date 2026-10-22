@@ -1,13 +1,13 @@
-# sortie-loop: vision and roadmap
+# Jigz: vision and roadmap
 
 Status: draft for discussion (2026-10-21)
 
-Plans for `sortie-loop` as a product. Its place in the whole system is in
+Plans for Jigz as a product. Its place in the whole system is in
 `plans/system/overview.md`; its contract with the hub is
 `plans/system/hub-protocol.md`. Features by area:
-`plans/sortie-loop/features.md`. Earlier plans in this folder
+`plans/jigz/features.md`. Earlier plans in this folder
 (`enhancements.md`, `production-readiness.md`, `united-dashboard.md`,
-`central-requests-summary.md`) record work already done.
+`dashboard-requests-summary.md`) record work already done.
 
 ## 1. Goal
 
@@ -37,7 +37,7 @@ The boundary with the hub is in `plans/system/overview.md` section 2.1.
    repo configs and the unite registry are ignored. Machine settings are
    in `machine.yaml` (`internal/machine`).
 4. Agent credentials never leave the machine.
-5. One place maps engine output to `sortie-loop` types; the rest of the
+5. One place maps engine output to `jig` types; the rest of the
    code does not parse engine data.
 6. No upselling: the dashboard and docs show no gated features and do not
    promote the hub.
@@ -55,7 +55,7 @@ supervision of one sortie process per workflow, idle sleep and wake,
 budgets, cleanup, validate, status document, dashboard (operations, runs,
 usage, workflows, projects, agents, settings, alerts), form editing with
 backups, history store, JSON API, and unite for
-repositories on one machine (registry in `~/.cache/sortie-loop/`, ports
+repositories on one machine (registry in `~/.cache/jigz/`, ports
 from 7678, dashboard on 7677).
 
 The dashboard has authentication and an access warning. Phase 0 removes
@@ -130,13 +130,13 @@ Without the fork, the issue workflow runs with `claude-code`, `codex`, or
 - An ordered list of entries: runtime, account (for example a separate
   config directory per logged-in subscription, or an API key), working
   hours, cost class.
-- `sortie-loop agent-exec` is the agent command in workflows. It picks the
+- `jig agent-exec` is the agent command in workflows. It picks the
   first available entry for the runtime, runs the real CLI, detects
   usage-limit output, and marks the entry exhausted until its reset time.
   A session that fails on a limit is retried by sortie and gets the next
   entry.
 - Runtime failover: each shipped workflow carries a block per runtime; the
-  engine reads the block named by `SORTIE_AGENT_KIND`. `sortie-loop` sets
+  engine reads the block named by `SORTIE_AGENT_KIND`. `jig` sets
   that variable for each loop and recycles the loops when every entry of
   the active runtime is exhausted or outside its hours.
 - Provider terms for unattended use of subscriptions are the member's
@@ -177,7 +177,7 @@ Without the fork, the issue workflow runs with `claude-code`, `codex`, or
   config is kept and used meanwhile.
 - Agent PRs target the repository's default branch. Branch protection,
   merge rules, and promotion between branches are GitHub settings and the
-  project's own CI, not hub or `sortie-loop` config. The shipped build and
+  project's own CI, not hub or `jig` config. The shipped build and
   docs prompts resolve the default branch with
   `gh api repos/$SORTIE_TRACKER_PROJECT --jq .default_branch`; the issue
   workflow hooks read `origin/HEAD`; the merge prompt merges into the PR's
@@ -212,7 +212,7 @@ Without the fork, the issue workflow runs with `claude-code`, `codex`, or
 
 Each phase ends with a release, a green acceptance suite, and release
 notes. The acceptance suite runs real sortie with its `mock` agent kind
-and the real sortie-loop binary against an in-memory fake GitHub API, so
+and the real `jig` binary against an in-memory fake GitHub API, so
 it needs no model and no real GitHub.
 
 ### Phase 0: Finish and fix
@@ -234,7 +234,7 @@ it needs no model and no real GitHub.
   sessions.
 - Agent pool config: ordered entries with runtime, account, hours, cost
   class.
-- `sortie-loop agent-exec` wrapper: entry selection, usage-limit detection,
+- `jig agent-exec` wrapper: entry selection, usage-limit detection,
   exhausted-until tracking.
 - Runtime failover: the active runtime is set by an environment switch
   (`SORTIE_AGENT_KIND`) on the same workflow; loops are recycled on
@@ -258,20 +258,24 @@ it needs no model and no real GitHub.
 
 ### Rename to Jigz
 
-- Go module path changes to the Jigz repository path. The binary is `jig`.
+Done.
+
+- The module path is `github.com/kinged007/jigz`. The binary is `jig`.
   The daemon runs as `jig daemon`, installed as the service `jigd`
   (systemd unit `jigd.service` on Linux, launchd label `jigd` on macOS).
 - Release archive names and the install script use `jig`.
-- State directories move from `~/.cache/sortie-loop` and
-  `~/.local/share/sortie-loop`, and `machine.yaml` from the `sortie-loop`
-  user config directory, to `jigz` directories under the same roots.
-  The old paths are read and migrated on first start.
+- The state directories are `~/.cache/jigz` (registry and status
+  documents), `~/.local/share/jigz` (the engine) and `~/.local/state/jigz`
+  (the pool state); `machine.yaml` is in `~/.config/jigz`. `internal/dirs`
+  moves a directory left by an earlier install into place the first time
+  it is looked up, so the registry, the run history and the settings
+  survive the upgrade.
 - GitHub repository renamed to Jigz. GitHub redirects the old URL.
 - README and docs use the new names.
 - Engine-owned names stay: `SORTIE_*` variables, the `.sortie/` directory,
   and the `sortie` binary.
-- Acceptance: an existing install with state in the old directories keeps
-  its registry, history, and settings after upgrading.
+- Acceptance: an existing install keeps its registry, history, and
+  settings; `internal/dirs` has tests for the move and the merge.
 
 ### Phase 3: Questions (5.3)
 

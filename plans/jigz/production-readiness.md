@@ -1,6 +1,6 @@
 # Production readiness
 
-Making `sortie-loop` installable and usable by people outside this
+Making Jigz installable and usable by people outside this
 machine: legal clarity, a one-command install on macOS and Linux, signed
 releases, and a `go install` path.
 
@@ -12,19 +12,19 @@ releases, and a `go install` path.
   `sortie-ai/sortie`.** The shipped workflows need two pieces upstream
   does not ship: the **pi agent adapter** (the agents run in a terminal)
   and the **github-pr tracker** (review and merge loops watch pull
-  requests, not issues). `SORTIE_ENGINE_REPO` points the installer at a
+  requests, not issues). `JIG_ENGINE_REPO` points the installer at a
   different build of the same engine for anyone who needs one; whatever
   it points at must still carry both adapters.
 - **The engine version is pinned**, not resolved to "latest". The
   workflows are written against specific engine behaviour, so an
-  unpinned engine would change under them. `SORTIE_ENGINE_VERSION`
+  unpinned engine would change under them. `JIG_ENGINE_VERSION`
   overrides the pin.
 - **The fork's upstream divergence is tracked, not fixed here.** The fork
   sits behind `sortie-ai/sortie`; rebasing it is separate work.
 
 ## Support matrix
 
-| Target | `sortie-loop` binary | Engine release asset |
+| Target | `jig` binary | Engine release asset |
 |---|---|---|
 | linux/amd64 | builds | yes |
 | linux/arm64 | builds | yes |
@@ -63,21 +63,21 @@ checksums.
 The only code that fetched the engine lived in `install.sh`, so anyone
 arriving through `go install` — which never runs that script — hit a dead
 end telling them to rerun a script they did not have. Fetching moved
-into `cmd/sortie-loop/engine.go`.
+into `cmd/jig/engine.go`.
 
 Resolution order, first hit wins:
 
-1. `SORTIE_BIN` — absolute path to an engine binary
-2. `sortie` beside the `sortie-loop` binary
+1. `JIG_ENGINE_BIN` — absolute path to an engine binary
+2. `sortie` beside the `jig` binary
 3. `sortie` on `PATH`
 4. the cache, for the pinned `engineTag`
 5. download
 
-`SORTIE_ENGINE_URL` with `SORTIE_ENGINE_SHA256` bypasses 4 and 5 with a
+`JIG_ENGINE_URL` with `JIG_ENGINE_SHA256` bypasses 4 and 5 with a
 direct archive download.
 
-The engine lands at `$XDG_DATA_HOME/sortie-loop/sortie-<version>`
-(`~/.local/share/sortie-loop` when unset — the directory `install.sh`
+The engine lands at `$XDG_DATA_HOME/jigz/sortie-<version>`
+(`~/.local/share/jigz` when unset — the directory `install.sh`
 already populates, so either installer reuses the other's download). A
 cached file is trusted; it is verified when written, and the directory is
 the user's own. Downloads stream to a temp file, are hashed while
@@ -94,7 +94,7 @@ This changed the local filename from `sortie-1.24.0+pi.github-pr.1` to
 `sortie-1.24.0-pi.github-pr.1`; the previous file is left behind as an
 unused cache entry.
 
-`SORTIE_ENGINE_URL` without `SORTIE_ENGINE_SHA256` downloads an
+`JIG_ENGINE_URL` without `JIG_ENGINE_SHA256` downloads an
 unverified binary and says so on stderr. Windows is unsupported: the
 release ships a `.zip` and the installer reads `tar.gz`.
 
@@ -105,20 +105,20 @@ engine is linked into a directory already on `PATH` under its plain
 name, so `sortie validate` and `sortie stats` work in any new shell
 without the version in the path and without an alias.
 
-- The link goes in the directory holding the `sortie-loop` binary when
+- The link goes in the directory holding the `jig` binary when
   that directory is on `PATH` — the `go install` layout, where one `PATH`
   entry covers both tools — and otherwise in `~/.local/bin`.
 - The link is a symlink to the versioned file, refreshed whenever the
   pinned version changes, replaced atomically so a concurrent shell never
   sees it missing.
-- An existing `sortie` that `sortie-loop` did not install is left alone
+- An existing `sortie` that `jig` did not install is left alone
   and reported; the engine still works by absolute path.
 - When the chosen directory is not on `PATH`, the installer says which
   directory to add rather than failing.
 - `resolveSortieBin` finds the linked engine on the next run, so the
   install is self-reinforcing.
 
-`sortie-loop setup` installs the engine, so this works for people who
+`jig setup` installs the engine, so this works for people who
 only ever run `go install`.
 
 The symlink lives in one function that takes the target directory, so
@@ -131,7 +131,7 @@ It compiled from source, which is what made it fragile: piped through
 `curl | sh`, `$0` is `sh`, so the script inferred its source directory
 from the current working directory. Run from inside any Go module,
 `[ -f "$SRC/go.mod" ]` succeeded and the script built *that* project's
-`./cmd/sortie-loop` instead of fetching `sortie-loop`.
+`./cmd/jig` instead of fetching `jig`.
 
 It now downloads the release binary and verifies it against
 `checksums.txt`, taking the source directory from `$0` only when `$0`
@@ -142,13 +142,13 @@ incomplete `checksums.txt` is an error, not a skip, and the install
 refuses when neither `sha256sum` nor `shasum` is available rather than
 skipping verification.
 
-The engine block is gone: `sortie-loop setup` installs the engine. The
-`--sortie-bin` flag went with it, since `SORTIE_BIN` covers the same
+The engine block is gone: `jig setup` installs the engine. The
+`--sortie-bin` flag went with it, since `JIG_ENGINE_BIN` covers the same
 need.
 
 ### 5. Argument parsing — done
 
-`sortie-loop setup <dir> --repo owner/name` ignored `<dir>` and operated
+`jig setup <dir> --repo owner/name` ignored `<dir>` and operated
 on the current working directory, writing `.sortie/` and rewriting
 `.gitignore` in the wrong repository. The cause was the last-non-flag-arg
 rule: the `setup` branch skipped `--repo` but not the value after it, so
@@ -193,11 +193,11 @@ hits that.
   would fail it for the wrong reason. It prefers the fork and skips when
   no engine is present, which is the correct CI state.
 - `release.yml` and `.goreleaser.yaml` producing
-  `sortie-loop_<version>_<os>_<arch>.tar.gz` for linux/darwin ×
+  `jig_<version>_<os>_<arch>.tar.gz` for linux/darwin ×
   amd64/arm64, plus `checksums.txt` and SBOMs — the layout `install.sh`
   expects. The config carries no publish target pointing outside this
   repository, which is the trap the engine fork inherited.
-- `sortie-loop` had no version of its own: `version.go` held only the
+- `jig` had no version of its own: `version.go` held only the
   engine pin, and `--dump-version` printed it. A `version` variable is
   now stamped by `-X main.version`, `--version` reports the tool and the
   engine it drives, and `--dump-version` keeps reporting the engine pin
@@ -266,9 +266,9 @@ hits that.
   going public is a decision, not a task.
 - Git history exposes the author identity of 40 commits. Decide before
   the repository goes public.
-- **First release.** `install.sh` needs one `sortie-loop` release tagged
+- **First release.** `install.sh` needs one `jig` release tagged
   before it can install anything; until then `--from-source` is the only
   working path, and the fork's engine release must exist for the pinned
   `engineTag` to resolve.
-- One uncommitted change (`cmd/sortie-loop/pm-agent.md`, +42/-4) to
+- One uncommitted change (`cmd/jig/pm-agent.md`, +42/-4) to
   commit or discard.

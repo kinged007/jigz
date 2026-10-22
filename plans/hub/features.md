@@ -22,7 +22,7 @@ section 5. "later" items stay in `NOT-NOW.md` until a phase is assigned.
   priorities, protected areas) [1]
 - Provider sync: issues, PRs, labels, assignees, milestones, comments, CI
   status; webhooks and periodic re-sync [1]
-- Label setup in each project, same definitions as `sortie-loop setup` [1]
+- Label setup in each project, same definitions as `jig setup` [1]
 - Environments (dev, staging, prod) and URLs read from GitHub Environments
   and deployments through provider sync; shown on the milestone [3]
 - No branch policy in the hub; agent PRs target the default branch [3]

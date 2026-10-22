@@ -1,22 +1,22 @@
-# sortie-loop: what sortie-central can rely on
+# Dashboard requests: what Jigz can rely on
 
-Details and request IDs (L1-L12) are in `plans/sortie-loop/enhancements.md`, section 7.
+Details and request IDs (L1-L12) are in `plans/jigz/enhancements.md`, section 7.
 
-## What sortie-loop is
+## What Jigz is
 
-`sortie-loop` is a supervisor that runs one Sortie engine child process per
+`jig` is a supervisor that runs one Sortie engine child process per
 workflow file in a repository. If one child exits, the supervisor stops the
 whole run; automatic restart of a crashed child is not implemented. It is
 controlled by signals today, and registers each running supervisor in a
 registry entry.
 
-## What sortie-loop provides
+## What Jigz provides
 
-- L1 status document: `sortie-loop status --json`, also served on a localhost
+- L1 status document: `jig status --json`, also served on a localhost
 endpoint or as a file referenced from the registry entry (chosen at
-implementation). The file is `<user cache dir>/sortie-loop/status/<hash>.json`,
+implementation). The file is `<user cache dir>/jigz/status/<hash>.json`,
 keyed by a hash of the repo root; the `status_path` field of the registry
-entry is the supported way for central to find it. The document remains
+entry is the supported way for the dashboard to find it. The document remains
 after a failed run, with state `exited`. Proposed key fields (names are not final):
   - `version`, `engine_version`, `schema_versions_tested`, `pid`,
   `started_at`, `repo`
@@ -29,17 +29,17 @@ after a failed run, with state `exited`. Proposed key fields (names are not fina
 - L2 control commands: `wake [--json]` (result: `woke`, `was_sleeping`, `error`), `pause <workflow>`, `resume <workflow>`,
 `budget override <workflow>`, `cleanup [--dry-run]`. Each prints a JSON result
 and exits non-zero on failure.
-- L3 registry additions: workflow file path, loop type, `sortie-loop` version,
+- L3 registry additions: workflow file path, loop type, `jig` version,
 supervisor start time, status endpoint.
 - L8 child logs: `.sortie/logs/<workflow>.log`, rotated at 10 MiB with 3 rotated files kept (`.log.1` to `.log.3`). The path is `log_path` in each status workflow entry. The per-run transcript is not implemented.
-- L9 `sortie-loop validate [--json]`: runs `sortie validate` on all workflow
+- L9 `jig validate [--json]`: runs `sortie validate` on all workflow
 files and checks sleep, cleanup, and budget rules.
 - L10 safe apply: `restart --when-idle` for workflow changes, and a reload for
 repo config. The `config_hash` field shows what each child runs.
-- L11 `sortie-loop setup --json`: reports what was created, skipped, and why.
+- L11 `jig setup --json`: reports what was created, skipped, and why.
 - L12 (optional): L2 commands cover stop and restart on Windows.
 
-## What central derives from the existing DBs
+## What the dashboard derives from the existing DBs
 
 All workflow DBs (`.sortie/workflows/.sortie-<workflow>.db`, one hidden file per workflow) share one schema,
 `schema_migrations` version 16. Open them read-only, pin the supported
@@ -76,7 +76,7 @@ history.
 - Per-run model history for past attempts.
 - A full event stream and per-event token deltas.
 
-## What central displays
+## What the dashboard displays
 
 - Sleep state, and next wake (`sleep`), with a wake button (L2 `wake`).
 - Budget state per workflow, including paused and override flags and the
@@ -85,11 +85,11 @@ unmeasured run count.
 
 ## Access rules
 
-- Central reads the DBs read-only.
+- The dashboard reads the DBs read-only.
 - Controls use the L2 commands. Stop and restart use signals.
-- `sortie-loop` has no HTTP API beyond the status endpoint.
+- `jig` has no HTTP API beyond the status endpoint.
 
-## Implementation order (sortie-loop)
+## Implementation order (Jigz)
 
 1. Cleanup, L1, L3, L2 `cleanup`.
 2. Idle sleep, L2 `wake`, L1 sleep fields.
@@ -98,11 +98,11 @@ unmeasured run count.
 5. L8 logs and tested schema versions in L1.
 6. L9, L10, L11, optional L12.
 
-## Open questions affecting central
+## Open questions affecting the dashboard
 
 - Whether `rule_name` equals the stage name once chains run.
 - Whether past-run model history and a full event stream justify an engine
 change later.
 - Whether the branch is available after cleanup deletes workspaces.
 - Whether the status document is an endpoint or a file.
-- Password and TLS exposure for a public central deployment.
+- Password and TLS exposure for a public dashboard deployment.

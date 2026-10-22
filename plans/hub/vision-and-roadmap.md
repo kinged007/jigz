@@ -5,7 +5,7 @@ Status: draft for discussion (2026-10-21)
 Shiftd, the hub, is the control centre of the system
 described in `plans/system/overview.md`. It plans, assigns, governs,
 verifies, and measures work; the git provider holds the record, and
-`sortie-loop` daemons on members' machines do the execution. These
+`jig` daemons on members' machines do the execution. These
 documents move to the hub repository when it exists.
 
 Features by area: `plans/hub/features.md`. Contract with daemons:
@@ -30,7 +30,7 @@ kinds of projects can be added later.
 
 | In the hub | Not in the hub |
 | ---------- | -------------- |
-| Organizations, members, sign-in | Running agents (`sortie-loop` and sortie) |
+| Organizations, members, sign-in | Running agents (`jig` and sortie) |
 | Projects and provider sync | Agent credentials and subscriptions |
 | Agents (product manager, project manager, other roles), their instructions, tools, and permissions | Workspaces, sandboxes, preview hosting |
 | Tasks and triggers for hub-driven work | |
@@ -73,7 +73,7 @@ The hub has no dependency on sortie.
 | Environment | a deployment target (dev, staging, prod) read from the provider (4.10) |
 | Channel | a connector to an external platform, with the agents and actions it allows (4.12) |
 | Guest | a person without a provider account, identified by a channel account (4.12) |
-| Daemon | an enrolled `sortie-loop` instance: member, runner label, status |
+| Daemon | an enrolled `jig` instance: member, runner label, status |
 | Run | one agent execution reported by a daemon |
 | Evidence | artifacts that prove acceptance criteria |
 | Question | a parsed `agent-question` block and its answers |
@@ -178,7 +178,7 @@ sends a message to an agent or a role. The limits in 4.13 apply.
   runner is offline, the agent's work waits and the hub dashboard shows
   the runner as offline.
 - The plan assumes management agents are assigned to an always-on runner,
-  a server running `sortie-loop` in connected mode. A member's
+  a server running `jig` in connected mode. A member's
   subscription then serves requests from other people. Provider terms for
   that are the organization's responsibility.
 - The hub relays messages over the daemon's connection
@@ -330,7 +330,7 @@ and adopts it only when outcomes improve (idea from Harness²).
 
 Each phase ends with a usable result, a green acceptance suite, and a
 public write-up. The hub tests against a fake daemon generated from the
-protocol schemas, so it does not wait for `sortie-loop` releases.
+protocol schemas, so it does not wait for `jig` releases.
 
 ### Phase 0: Repository and harness
 
@@ -342,7 +342,7 @@ protocol schemas, so it does not wait for `sortie-loop` releases.
 ### Phase 1: Walking skeleton
 
 - Add a GitHub project; provider sync of issues, PRs, labels, assignees.
-- Enroll a daemon (fake, then real `sortie-loop`).
+- Enroll a daemon (fake, then real `jig`).
 - Assign an issue to a member → runner label → daemon runs it → run
   events → shown on the work item.
 - Fleet view. One E2E test covers the path.
@@ -408,7 +408,7 @@ protocol schemas, so it does not wait for `sortie-loop` releases.
 
 ## 6. Open decisions
 
-1. Stack: Go, SQLite or Postgres, server-rendered UI (reuses `sortie-loop`
+1. Stack: Go, SQLite or Postgres, server-rendered UI (reuses `jig`
    experience), or another.
 2. License and commercial model (`plans/system/overview.md` section 7).
 3. How a guest signs in to the dashboard, for example Sign in with Slack.

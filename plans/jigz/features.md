@@ -1,9 +1,9 @@
-# sortie-loop: features
+# Jigz: features
 
 Status: draft for discussion (2026-10-21)
 
 "exists" means implemented on `main` or on `feat/united-dashboard`. A
-number in brackets is the phase in `plans/sortie-loop/vision-and-roadmap.md`
+number in brackets is the phase in `plans/jigz/vision-and-roadmap.md`
 section 6.
 
 ## 1. Setup and config
@@ -16,7 +16,7 @@ section 6.
 - Query filters with milestone and assignee scope (`config.go`) — exists
 - `validate [--json]` (`validate.go`) — exists
 - Engine resolution, download with checksum (`internal/engine`), one resolver for the CLI, plan, supervisor and dashboard — exists
-- Configurable engine repository and version (`engine:` in machine.yaml, `SORTIE_ENGINE_REPO`, `SORTIE_ENGINE_VERSION`); upstream supported — exists
+- Configurable engine repository and version (`engine:` in machine.yaml, `JIG_ENGINE_REPO`, `JIG_ENGINE_VERSION`); upstream supported — exists
 - Capability detection (engine version, tracker and agent kinds), one result for supervisor, validate, dashboard and status document (`internal/engine/probe.go`, `gate.go`, `internal/plan/gating.go`) — exists
 
 ## 2. Supervision
@@ -29,7 +29,7 @@ section 6.
 - Workspace cleanup (`cleanup.go`) — exists
 - Status document (`status.go`) — exists
 - Working hours per machine and per pool entry (`internal/machine`,
-  `cmd/sortie-loop/gate.go`) — exists
+  `cmd/jig/gate.go`) — exists
 - Agent account pool, `agent-exec` wrapper, runtime failover
   (`agentexec.go`, `agents.go`) — exists
 

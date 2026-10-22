@@ -2,7 +2,7 @@
 
 Status: draft v0 (2026-10-21)
 
-The contract between a connected `sortie-loop` daemon and the hub, and the
+The contract between a connected `jig` daemon and the hub, and the
 conventions both products share on the git provider. Both agent streams
 implement against this document. Changes follow `overview.md` section 6.
 
@@ -18,7 +18,7 @@ when implementation starts; until then this document is the reference.
 - Base path `/api/daemon/v0/`.
 - Enrollment exchanges a one-time token for a daemon credential (bearer
   token). The credential can be rotated and revoked from the hub.
-- Every request carries the daemon id and its `sortie-loop` version.
+- Every request carries the daemon id and its `jig` version.
   The hub rejects unsupported protocol versions with an error that names
   the supported range.
 
@@ -28,7 +28,7 @@ when implementation starts; until then this document is the reference.
 
 | Request | Body | Response |
 | ------- | ---- | -------- |
-| `POST enroll` | one-time token, daemon name, host info (OS, arch, CPU, memory), `sortie-loop` version, sortie version | daemon id, credential, runner label |
+| `POST enroll` | one-time token, daemon name, host info (OS, arch, CPU, memory), `jig` version, sortie version | daemon id, credential, runner label |
 | `GET config` (with ETag) | none | projects (provider, repo, enabled workflows per project, query filter additions per project), workflow and prompt files with versions, label conventions, member identity |
 | `POST status` (heartbeat, every 30 s) | status document: loops per project (project, workflow, state: stopped, sleeping, or running; running, retrying), capacity, working hours and whether inside them now, agent accounts (name, runtime, available or exhausted until), budgets, last error | next heartbeat interval; config ETag (daemon re-fetches when it changes) |
 | `POST runs` (batch) | run events: started, finished, outcome class, usage (tokens, cost if known), work item reference, links (branch, PR, comment) | accepted ids |
@@ -83,7 +83,7 @@ this form:
   `project` (technical approach, implementation, order of work).
 - A blocking question also adds the `needs-answer` label to the item.
 
-Answers are comments in this form, written by the hub, by `sortie-loop`,
+Answers are comments in this form, written by the hub, by `jig`,
 or by a human:
 
 ```markdown
@@ -108,7 +108,7 @@ or by a human:
 | `needs-answer` | has an unanswered blocking question; excluded from dispatch |
 | `runner:<name>` | routed to one daemon (section 3) |
 
-The full set and colours are defined by `sortie-loop setup`; the hub uses
+The full set and colours are defined by `jig setup`; the hub uses
 the same definitions.
 
 ## 6. Versioning
