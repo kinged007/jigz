@@ -40,6 +40,9 @@ type Config struct {
 	Engine Engine  `yaml:"engine"`
 	// Warnings are non-fatal findings from Load, for example file permissions.
 	Warnings []string `yaml:"-"`
+	// Unsupported holds the runtimes the engine cannot run. Their pool
+	// entries are never picked.
+	Unsupported map[string]bool `yaml:"-"`
 }
 
 // Engine selects the sortie engine release: a GitHub repository and a

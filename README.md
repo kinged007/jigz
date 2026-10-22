@@ -316,8 +316,36 @@ fork by default, not from upstream `sortie-ai/sortie`. The fork exists because
 the workflows need two things upstream does not always ship: the **pi agent
 adapter**, and the **github-pr tracker**, which treats pull requests as work
 items so a review loop can watch a pull request rather than an issue. A
-repository you configure must carry both. See [SECURITY.md](SECURITY.md) for
-what running a fork means.
+repository you configure should carry both; the next section says what is
+switched off when it does not. See [SECURITY.md](SECURITY.md) for what
+running a fork means.
+
+#### Engine capabilities
+
+At start, `sortie-loop` asks the resolved engine binary for its version
+(`sortie -dumpversion`) and for the tracker and agent kinds it has
+registered. No engine command lists the kinds, so the second part runs
+`sortie validate` on a temporary workflow with an unknown tracker and agent
+kind and reads the `registered: [...]` lists from its errors. The result is
+cached per binary path, modification time and size for the life of the
+process. The supervisor, `validate`, setup validation, the dashboard and the
+status document use the same result. A binary that cannot be probed has an
+unknown capability set: nothing is disabled, and the dashboard says that the
+features could not be detected.
+
+| The engine | What happens |
+|---|---|
+| Is older than 1.27.0, the oldest the shipped workflows run on | No loop starts. `validate` fails with the reason, and the dashboard shows an alert. |
+| Has no `github-pr` tracker | The PR workflow loop does not start. `validate` reports it as disabled, not as an error. The workflow file stays installed. |
+| Has no `pi` agent | Loops whose agent is the shipped default `pi` run with `claude-code` (`SORTIE_AGENT_KIND=claude-code`, `SORTIE_AGENT_COMMAND=claude`). Pool entries with runtime `pi` are shown as unavailable and are not picked. |
+| Lacks an agent kind that you set (`SORTIE_AGENT_KIND`, or an `agent.kind` other than `pi` in the workflow file) | The loop does not start. `validate` and the dashboard show an error. There is no fallback. |
+
+Each disabled feature has one alert on the Operations page with the reason,
+for example "PR workflow is off: engine sortie-ai/sortie v1.29.0 has no
+github-pr tracker." The Settings page lists the registered tracker and agent
+kinds, and a workflow that is not started has the state `disabled` and the
+reason in the status document. The `engine_version` field of the status
+document is the version the engine binary reports.
 
 The repository and version are read in this order, first match wins:
 
@@ -821,7 +849,11 @@ claude-code` and `agent.command: claude`. The `model:` value
 passes through to `claude --model` unvalidated, so only use aliases
 your installed CLI accepts. The pinned engine only knows `pi` and
 `claude-code` (plus a few others); other adapters need a newer or
-upstream engine binary. The dashboard's token/model columns populate
+upstream engine binary. An engine without `pi` runs the loops with
+`claude-code` (see [Engine capabilities](#engine-capabilities)). Setting
+`agent.kind` to `codex` or `opencode` needs `agent.command` set as well (the
+shipped `command: pi` would be passed to the adapter), and no pool runtime or
+shipped adapter block exists for them. The dashboard's token/model columns populate
 for either agent.
 
 Sortie upstream references:

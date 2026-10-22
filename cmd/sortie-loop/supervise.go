@@ -19,6 +19,7 @@ import (
 
 	"github.com/kinged007/sortie-loop/internal/config"
 	"github.com/kinged007/sortie-loop/internal/engine"
+	"github.com/kinged007/sortie-loop/internal/plan"
 )
 
 // Control signals. A loop is stopped by signalling the process that owns
@@ -140,6 +141,10 @@ type supervisor struct {
 	budgetReadErr map[string]string
 
 	machineState
+	// gate is what the engine can run. The zero value allows everything.
+	gate engine.Gate
+	// disabled is why a loop the gate does not allow is not running.
+	disabled map[string]string
 	// sessions reports whether a loop has a session running; retries do
 	// not count.
 	sessions func(port int) (active, known bool)
@@ -159,6 +164,7 @@ func newSupervisor(root, bin string, defs []loopDef, ports []int) *supervisor {
 		budgetUse: map[string]budgetUsage{}, budgetPolled: map[string]time.Time{},
 		budgetReadErr: map[string]string{},
 		sessions:      loopSessions,
+		disabled:      map[string]string{},
 	}
 	s.initMachine()
 	for i, d := range defs {
@@ -242,6 +248,26 @@ func (s *supervisor) startOne(name string) error {
 	if err != nil {
 		return err
 	}
+	s.mu.Lock()
+	gate := s.gate
+	s.mu.Unlock()
+	lg := plan.GateLoop(gate, string(workflow), env)
+	if lg.Off != "" {
+		s.mu.Lock()
+		_, again := s.disabled[name]
+		s.disabled[name] = lg.Off
+		delete(s.gateHeld, name)
+		s.mu.Unlock()
+		if !again {
+			fmt.Fprintf(os.Stderr, "sortie-loop: %s: %s\n", name, lg.Off)
+		}
+		s.republish()
+		return nil
+	}
+	if lg.Note != "" {
+		fmt.Fprintf(os.Stderr, "sortie-loop: %s: %s\n", name, lg.Note)
+	}
+	env = append(env, lg.Env...)
 	var logw io.Writer
 	var logf *rotatingLog
 	if lf, err := openRotatingLog(childLogPath(s.root, name), childLogMaxBytes, childLogKeep); err != nil {
@@ -269,6 +295,7 @@ func (s *supervisor) startOne(name string) error {
 	}
 	s.procs[name] = p
 	delete(s.gateHeld, name)
+	delete(s.disabled, name)
 	s.idleSince = s.clock()
 	s.mu.Unlock()
 	go func() {
@@ -627,7 +654,7 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 	doc := statusDoc{
 		SchemaVersion:        statusSchemaVersion,
 		Version:              version,
-		EngineVersion:        engine.Current().Version(),
+		EngineVersion:        s.engineVersion(),
 		TestedSchemaVersions: testedSchemaVersions,
 		PID:                  os.Getpid(),
 		Repo:                 s.root,
@@ -680,14 +707,17 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 		}
 		wf, _ := os.ReadFile(filepath.Join(s.root, ".sortie", "workflows", def.file))
 		bs := s.budgetStatusLocked(name)
-		st := "paused"
+		st, hold := "paused", gate.holdFor(bs)
 		if s.gateHeld[name] && (bs == nil || !bs.Paused) {
 			st = "held"
+		}
+		if why, ok := s.disabled[name]; ok {
+			st, hold = "disabled", why
 		}
 		doc.Workflows = append(doc.Workflows, workflowStatus{
 			Name: name, WorkflowFile: def.file, LoopType: loopTypeOf(wf), Port: s.ports[name],
 			State: st, StartedAt: s.startedAt.UTC(), LogPath: childLogPath(s.root, name),
-			Budget: bs, Hold: gate.holdFor(bs),
+			Budget: bs, Hold: hold,
 		})
 	}
 	sort.Slice(doc.Workflows, func(i, j int) bool { return doc.Workflows[i].Name < doc.Workflows[j].Name })

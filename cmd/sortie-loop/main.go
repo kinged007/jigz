@@ -312,6 +312,7 @@ func run() (code int) {
 		names[i] = l.name
 	}
 	sup := newSupervisor(abs, bin, loops, loopPorts)
+	sup.setGate(engine.Detect(bin))
 	sup.sleepCfg = cfg.Sleep
 	sup.initBudget(cfg.Budgets)
 	// Ordered rather than deferred in the body: os.Exit would skip a

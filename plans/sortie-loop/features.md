@@ -17,7 +17,7 @@ section 6.
 - `validate [--json]` (`validate.go`) — exists
 - Engine resolution, download with checksum (`internal/engine`), one resolver for the CLI, plan, supervisor and dashboard — exists
 - Configurable engine repository and version (`engine:` in machine.yaml, `SORTIE_ENGINE_REPO`, `SORTIE_ENGINE_VERSION`); upstream supported — exists
-- Capability detection (engine version, tracker and agent kinds) [2]
+- Capability detection (engine version, tracker and agent kinds), one result for supervisor, validate, dashboard and status document (`internal/engine/probe.go`, `gate.go`, `internal/plan/gating.go`) — exists
 
 ## 2. Supervision
 
@@ -49,7 +49,7 @@ section 6.
 - JSON API (`api.go`) — exists
 - Run data through sortie's HTTP API; SQLite only for history (`internal/collector/api.go`, `internal/rollup`) — exists
 - Outcome classes of the hub protocol, mapped in one adapter (`internal/store/outcome.go`) — exists
-- Disabled-feature notices from capability detection [2]
+- Disabled-feature notices from capability detection (`capabilities.go`, `alerts.go`) — exists
 - Questions page with answering [3]
 - Working hours and account pool status (`gate.go`, `agents.go`) — exists
 - Preview links on runs [5]

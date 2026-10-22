@@ -8,10 +8,14 @@ func (e Entry) Available(st State, t time.Time) bool {
 	return !t.Before(st[e.Name].ExhaustedUntil) && e.Hours.Open(t)
 }
 
+func (c *Config) usable(e Entry, st State, t time.Time) bool {
+	return !c.Unsupported[e.Runtime] && e.Available(st, t)
+}
+
 // Pick returns the first available entry of the runtime in config order.
 func (c *Config) Pick(st State, runtime string, t time.Time) (Entry, bool) {
 	for _, e := range c.Pool {
-		if e.Runtime == runtime && e.Available(st, t) {
+		if e.Runtime == runtime && c.usable(e, st, t) {
 			return e, true
 		}
 	}
@@ -22,7 +26,7 @@ func (c *Config) Pick(st State, runtime string, t time.Time) (Entry, bool) {
 // none is available.
 func (c *Config) ActiveRuntime(st State, t time.Time) string {
 	for _, e := range c.Pool {
-		if e.Available(st, t) {
+		if c.usable(e, st, t) {
 			return e.Runtime
 		}
 	}

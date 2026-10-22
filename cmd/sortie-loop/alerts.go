@@ -109,6 +109,7 @@ func (a *app) opsAlerts(d pageData, projects []opsProject) []alert {
 		}
 	}
 	out = append(out, a.dbAlerts(projects)...)
+	out = append(out, a.capabilityAlerts()...)
 	if d.Sys.DiskTotal > 0 && d.Sys.DiskUsed*100/d.Sys.DiskTotal > diskAlertPercent {
 		out = append(out, alert{"warn", "Disk", "Disk use is " + pct(d.Sys.DiskUsed, d.Sys.DiskTotal) + " of " + gib(d.Sys.DiskTotal), "/settings"})
 	}

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kinged007/sortie-loop/internal/engine"
 	"github.com/kinged007/sortie-loop/internal/machine"
 )
 
@@ -173,6 +174,34 @@ func (s *supervisor) initMachine() {
 	s.bootErr = s.refreshMachine(s.clock(), true)
 }
 
+// setGate replaces the engine's gate, and with it the runtimes the pool may
+// pick.
+func (s *supervisor) setGate(g engine.Gate) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.gate = g
+	s.machine.Unsupported = unsupportedRuntimes(g)
+}
+
+// engineVersion is the version the engine reports, or the configured one
+// when the engine could not be probed.
+func (s *supervisor) engineVersion() string {
+	if v := s.gate.Caps.Version; v != "" {
+		return v
+	}
+	return engine.Current().Version()
+}
+
+func unsupportedRuntimes(g engine.Gate) map[string]bool {
+	out := map[string]bool{}
+	for _, rt := range machine.Runtimes {
+		if g.RuntimeOff(rt) != "" {
+			out[rt] = true
+		}
+	}
+	return out
+}
+
 func (s *supervisor) machineErr() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -209,6 +238,7 @@ func (s *supervisor) refreshMachine(now time.Time, force bool) (loadErr error) {
 				fmt.Fprintln(os.Stderr, "sortie-loop: machine config:", w)
 			}
 			s.machine, s.bootErr = cfg, nil
+			s.machine.Unsupported = unsupportedRuntimes(s.gate)
 			s.poolRead = time.Time{}
 			loaded = cfg
 		}

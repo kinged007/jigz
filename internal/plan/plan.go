@@ -622,6 +622,16 @@ func (p Plan) ValidateFile(r config.Resolved, file string) (FileResult, error) {
 func (p Plan) validateFile(bin string, env []string, f string) (FileResult, error) {
 	cmd := exec.Command(bin, "validate", "--format", "json", f)
 	cmd.Env = append(os.Environ(), env...)
+	if text, err := os.ReadFile(f); err == nil {
+		lg := GateLoop(engine.Detect(bin), string(text), cmd.Env)
+		switch {
+		case lg.Problem:
+			return FileResult{Errors: []Issue{{Check: "capability", Message: lg.Off}}}, nil
+		case lg.Off != "":
+			return FileResult{Valid: true, Warnings: []Issue{{Check: "capability", Message: lg.Off}}}, nil
+		}
+		cmd.Env = append(cmd.Env, lg.Env...)
+	}
 	var stdout, stderr strings.Builder
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {

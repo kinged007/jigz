@@ -79,6 +79,12 @@ func (a *app) agents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	v.Machine = loadMachineView(time.Now())
+	g := a.gate()
+	for i, row := range v.Machine.Pool {
+		if off := g.RuntimeOff(row.Runtime); off != "" {
+			v.Machine.Pool[i].State, v.Machine.Pool[i].Class, v.Machine.Pool[i].Reason = "unavailable on this engine", "failed", off
+		}
+	}
 	execPage(w, "agents", v)
 }
 

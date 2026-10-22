@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -8,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/kinged007/sortie-loop/internal/config"
+	"github.com/kinged007/sortie-loop/internal/engine"
 	"github.com/kinged007/sortie-loop/internal/plan"
 )
 
@@ -130,6 +132,16 @@ func runSortieValidate(bin, dir string, loop loopDef, cfg *config.Config) (strin
 			"SORTIE_TRACKER_API_KEY=test",
 			"SORTIE_LOOP_WORKSPACES="+fallbackWS,
 		)
+	}
+	if text, err := os.ReadFile(filepath.Join(dir, loop.file)); err == nil {
+		lg := plan.GateLoop(engine.Detect(bin), string(text), env)
+		switch {
+		case lg.Problem:
+			return "", errors.New(lg.Off)
+		case lg.Off != "":
+			return "disabled: " + lg.Off, nil
+		}
+		env = append(env, lg.Env...)
 	}
 	cmd := exec.Command(bin, "validate", loop.file)
 	cmd.Dir = dir

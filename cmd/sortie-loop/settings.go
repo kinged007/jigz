@@ -64,7 +64,9 @@ func (a *app) toolVersions() []pair {
 		if bin, err := p.SortieBinPath(); err == nil {
 			reported = firstLine(bin, "--version")
 		}
-		a.versions = append(a.versions, pair{"engine", reported}, pair{"engine release", engine.Current().String()}, pair{"supported database schema", schemaList(rollup.SupportedSchemas)})
+		a.versions = append(a.versions, pair{"engine", reported}, pair{"engine release", engine.Current().String()})
+		a.versions = append(a.versions, engineCapabilities(a.gate())...)
+		a.versions = append(a.versions, pair{"supported database schema", schemaList(rollup.SupportedSchemas)})
 	})
 	return a.versions
 }
