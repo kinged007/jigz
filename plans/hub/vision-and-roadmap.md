@@ -196,7 +196,7 @@ sends a message to an agent or a role. The limits in 4.13 apply.
 - An approved proposal becomes a spec with acceptance criteria and work
   items in a milestone.
 
-### 4.13 Tasks and triggers
+### 4.7 Tasks and triggers
 
 - A task is hub-driven work with no issue: agent, project, instructions,
   approval level.
@@ -208,7 +208,7 @@ sends a message to an agent or a role. The limits in 4.13 apply.
 - Examples: a daily standup by a scrum master, a morning CI review, a
   release.
 
-### 4.14 Governed actions
+### 4.8 Governed actions
 
 Actions such as a release or the promotion of `dev` to `main`:
 
@@ -220,7 +220,7 @@ Actions such as a release or the promotion of `dev` to `main`:
    example `gh release create` or `gh workflow run`.
 5. The hub records the request, the approval, and the result.
 
-### 4.15 CI failures
+### 4.9 CI failures
 
 - The GitHub App receives `workflow_run` completed events with conclusion
   failure on watched branches, configured per project (for example `dev`).
@@ -231,7 +231,7 @@ Actions such as a release or the promotion of `dev` to `main`:
   review task can supplement it.
 - PR CI failures stay with the review-fix workflow.
 
-### 4.16 Branches and environments
+### 4.10 Branches and environments
 
 - The hub has no branch policy. Branch protection, merge rules, and
   promotion workflows are GitHub settings and the project's CI.
@@ -241,7 +241,7 @@ Actions such as a release or the promotion of `dev` to `main`:
   Environments and deployments through provider sync. The hub does not
   define them. They are shown on the milestone for verification.
 
-### 4.17 Milestone review rounds
+### 4.11 Milestone review rounds
 
 - Milestone states: in development, in review, changes requested, accepted,
   released. "In review" and "changes requested" alternate until the
