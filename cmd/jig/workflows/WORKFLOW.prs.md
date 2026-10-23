@@ -29,7 +29,7 @@ tracker:
 polling:
   interval_ms: 60000
 
-db_path: .sortie-prs.db
+db_path: jigz-prs.db
 
 workspace:
   root: $JIG_WORKSPACES/prs

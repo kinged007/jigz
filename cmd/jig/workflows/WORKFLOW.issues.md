@@ -32,7 +32,7 @@ tracker:
 polling:
   interval_ms: 60000
 
-db_path: .sortie-issues.db
+db_path: jigz-issues.db
 
 workspace:
   root: $JIG_WORKSPACES/issues

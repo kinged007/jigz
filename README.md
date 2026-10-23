@@ -526,10 +526,11 @@ loop config in git instead (keep `token: ""` and use env for secrets),
 replace `.jigz/` with:
 
 ```gitignore
+# jig: track shared config, ignore run state
 .jigz/*
 !.jigz/config.yaml
 !.jigz/workflows/
-.sortie-*.db
+jigz-*.db
 ```
 
 `.jigz/config.yaml`:

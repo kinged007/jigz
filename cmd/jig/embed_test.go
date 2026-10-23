@@ -261,13 +261,52 @@ func TestEnsureGitignoreIgnoresSortieWholesale(t *testing.T) {
 	if !strings.Contains(string(raw), ".jigz/\n") {
 		t.Errorf("no wholesale entry after migration: %q", raw)
 	}
-	// Selective tracking (negations) is left alone.
+	// Selective tracking (negations) is left alone; a missing db ignore
+	// is added, exactly once.
 	os.WriteFile(filepath.Join(root, ".gitignore"),
 		[]byte(".jigz/*\n!.jigz/config.yaml\n"), 0o644)
 	ensureGitignore(root)
 	raw, _ = os.ReadFile(filepath.Join(root, ".gitignore"))
 	if strings.Contains(string(raw), ".jigz/\n") {
 		t.Errorf("selective gitignore overwritten: %q", raw)
+	}
+	const wantSelective = ".jigz/*\n!.jigz/config.yaml\njigz-*.db\n"
+	if string(raw) != wantSelective {
+		t.Errorf("selective gitignore = %q, want original lines plus one jigz-*.db", raw)
+	}
+	ensureGitignore(root)
+	if raw, _ = os.ReadFile(filepath.Join(root, ".gitignore")); string(raw) != wantSelective {
+		t.Errorf("second run changed the selective gitignore: %q", raw)
+	}
+}
+
+func TestEnsureGitignoreJSONAppendsDBIgnore(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ".gitignore")
+	if err := os.WriteFile(path, []byte(".jigz/*\n!.jigz/config.yaml\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const want = ".jigz/*\n!.jigz/config.yaml\njigz-*.db\n"
+	res := &setupResult{}
+	ensureGitignoreJSON(root, res)
+	raw, _ := os.ReadFile(path)
+	if string(raw) != want {
+		t.Errorf("selective gitignore = %q, want original lines plus one jigz-*.db", raw)
+	}
+	if len(res.Created) != 1 || res.Created[0].Kind != "gitignore" {
+		t.Errorf("created = %+v, want one gitignore entry", res.Created)
+	}
+	res = &setupResult{}
+	ensureGitignoreJSON(root, res)
+	raw, _ = os.ReadFile(path)
+	if string(raw) != want {
+		t.Errorf("second run changed the selective gitignore: %q", raw)
+	}
+	if len(res.Skipped) != 1 || res.Skipped[0].Reason != "selective-tracked" {
+		t.Errorf("skipped = %+v, want one selective-tracked entry", res.Skipped)
+	}
+	if len(res.Warnings) != 0 {
+		t.Errorf("warnings = %v, want none", res.Warnings)
 	}
 }
 
