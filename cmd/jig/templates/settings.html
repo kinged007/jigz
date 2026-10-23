@@ -1,0 +1,48 @@
+{{define "settings"}}{{template "shell-top" .}}
+<div class="pagehead">
+  <div>
+    <h1>Settings</h1>
+    <p class="sub">This dashboard's access, versions and paths.</p>
+  </div>
+  <div class="row">
+    <a class="btn" href="/backups">Backups</a>
+    {{template "fleetactions" .}}
+  </div>
+</div>
+<div class="grid2">
+  <div class="card"><h2>Access</h2>
+    <ul class="muted">
+      <li>The dashboard is bound to <code>{{.BindAddr}}</code>. It has no authentication: anyone who can reach this address can start and stop agents and edit the configuration.</li>
+      <li>The tracker token reaches the loops through <code>.sortie/.env.loop</code>, written by the run that started them. This page never reads or shows it.</li>
+    </ul>
+  </div>
+  <div class="card"><h2>GitHub enrichment</h2>
+    <table class="kv"><tbody>
+      <tr><td>Enabled</td><td>{{if .GitHub.Enrich}}on{{else}}off{{end}}</td></tr>
+      <tr><td>Commits and checks</td><td>{{if .GitHub.DetailsOn}}on{{else}}off{{end}}</td></tr>
+      <tr><td>Pass interval</td><td>{{.GitHubInterval}}</td></tr>
+      <tr><td>API URL</td><td><code>{{.GitHubAPI}}</code></td></tr>
+      {{range .Statuses}}<tr><td>{{.Name}}</td><td>{{.Value}}</td></tr>{{end}}
+    </tbody></table>
+    <ul class="muted">
+      <li>Off by default. When on, Jigz reads pull requests from GitHub with each project's own token (<code>token_env</code>) to fill branch, PR link and opened and merged times. It never writes to GitHub.</li>
+      <li>Commits and checks is off by default. When on (and enrichment is on), Jigz also reads the commits, changed files and check runs of each pull request, with up to two more requests per pull request.</li>
+    </ul>
+  </div>
+  <div class="card"><h2>Versions</h2>
+    <table class="kv"><tbody>{{range .Versions}}<tr><td>{{.Name}}</td><td><code>{{.Value}}</code></td></tr>{{end}}</tbody></table>
+  </div>
+  <div class="card"><h2>Retention</h2>
+    <table class="kv"><tbody>
+      <tr><td>Host and fleet samples</td><td>{{.SampleDays}} days</td></tr>
+      <tr><td>Run history</td><td>kept indefinitely</td></tr>
+      <tr><td>Audit log</td><td>kept indefinitely</td></tr>
+      <tr><td>Backups per file</td><td>{{.BackupsKept}}</td></tr>
+    </tbody></table>
+  </div>
+  <div class="card"><h2>Paths</h2>
+    <table class="kv"><tbody>{{range .Paths}}<tr><td>{{.Name}}</td><td><code>{{.Value}}</code></td></tr>{{end}}</tbody></table>
+  </div>
+</div>
+{{template "statuspoll"}}
+{{template "shell-bottom" .}}{{end}}

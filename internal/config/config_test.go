@@ -28,10 +28,10 @@ func TestLoadEnvAndMilestone(t *testing.T) {
 	os.MkdirAll(filepath.Join(dir, ".sortie"), 0o755)
 	os.WriteFile(filepath.Join(dir, ".sortie", "config.yaml"),
 		[]byte("repo: file/o\ntoken: filetok\n"), 0o644)
-	t.Setenv("SORTIE_LOOP_REPO", "o/r")
-	t.Setenv("SORTIE_LOOP_TOKEN", "tok")
-	t.Setenv("SORTIE_LOOP_MILESTONE", "v2")
-	t.Setenv("SORTIE_LOOP_ASSIGNEE", "")
+	t.Setenv("JIG_REPO", "o/r")
+	t.Setenv("JIG_TOKEN", "tok")
+	t.Setenv("JIG_MILESTONE", "v2")
+	t.Setenv("JIG_ASSIGNEE", "")
 	cfg, err := Load(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -56,10 +56,10 @@ func TestLoadAssigneeDefaultAndOptOut(t *testing.T) {
 	os.MkdirAll(filepath.Join(dir, ".sortie"), 0o755)
 	os.WriteFile(filepath.Join(dir, ".sortie", "config.yaml"),
 		[]byte("repo: file/o\ntoken: filetok\n"), 0o644)
-	t.Setenv("SORTIE_LOOP_REPO", "o/r")
-	t.Setenv("SORTIE_LOOP_TOKEN", "tok")
-	t.Setenv("SORTIE_LOOP_MILESTONE", "v2")
-	os.Unsetenv("SORTIE_LOOP_ASSIGNEE")
+	t.Setenv("JIG_REPO", "o/r")
+	t.Setenv("JIG_TOKEN", "tok")
+	t.Setenv("JIG_MILESTONE", "v2")
+	os.Unsetenv("JIG_ASSIGNEE")
 	cfg, err := Load(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +70,7 @@ func TestLoadAssigneeDefaultAndOptOut(t *testing.T) {
 	if cfg.FilterFor("prs") != `label:agent:review,agent:build,agent:merge,in-progress -label:needs-human milestone:"v2" assignee:@me` {
 		t.Errorf("prs filter: %q", cfg.FilterFor("prs"))
 	}
-	t.Setenv("SORTIE_LOOP_ASSIGNEE", "")
+	t.Setenv("JIG_ASSIGNEE", "")
 	cfg, err = Load(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -88,9 +88,9 @@ func TestLoadConfigFile(t *testing.T) {
 	os.MkdirAll(filepath.Join(dir, ".sortie"), 0o755)
 	os.WriteFile(filepath.Join(dir, ".sortie", "config.yaml"),
 		[]byte("repo: file/o\ntoken: filetok\n"), 0o644)
-	t.Setenv("SORTIE_LOOP_REPO", "")
-	t.Setenv("SORTIE_LOOP_TOKEN", "")
-	t.Setenv("SORTIE_LOOP_MILESTONE", "")
+	t.Setenv("JIG_REPO", "")
+	t.Setenv("JIG_TOKEN", "")
+	t.Setenv("JIG_MILESTONE", "")
 	t.Setenv("GH_MILESTONE", "")
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("GH_TOKEN", "")
@@ -101,8 +101,8 @@ func TestLoadConfigFile(t *testing.T) {
 	if cfg.Repo != "file/o" || cfg.Token != "filetok" {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
-	if cfg.CloneURL != "https://github.com/file/o.git" {
-		t.Errorf("clone url: %q", cfg.CloneURL)
+	if cfg.Tracker != "file/o" {
+		t.Errorf("tracker: %q", cfg.Tracker)
 	}
 }
 
@@ -111,13 +111,13 @@ func TestLoadFilterOverrides(t *testing.T) {
 	os.MkdirAll(filepath.Join(dir, ".sortie"), 0o755)
 	os.WriteFile(filepath.Join(dir, ".sortie", "config.yaml"),
 		[]byte("repo: file/o\ntoken: filetok\nfilters:\n  triage: label:agent:triage\n  issues: label:agent:custom\n"), 0o644)
-	t.Setenv("SORTIE_LOOP_REPO", "")
-	t.Setenv("SORTIE_LOOP_TOKEN", "")
-	t.Setenv("SORTIE_LOOP_MILESTONE", "")
+	t.Setenv("JIG_REPO", "")
+	t.Setenv("JIG_TOKEN", "")
+	t.Setenv("JIG_MILESTONE", "")
 	t.Setenv("GH_MILESTONE", "")
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("GH_TOKEN", "")
-	t.Setenv("SORTIE_LOOP_ASSIGNEE", "")
+	t.Setenv("JIG_ASSIGNEE", "")
 	cfg, err := Load(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -181,7 +181,7 @@ func TestDefaultLabelPrefix(t *testing.T) {
 
 func TestLoadMissingConfigFails(t *testing.T) {
 	dir := t.TempDir() // no .sortie/config.yaml, git remote irrelevant
-	t.Setenv("SORTIE_LOOP_REPO", "o/r")
+	t.Setenv("JIG_REPO", "o/r")
 	if _, err := Load(dir); err == nil {
 		t.Error("expected error with no config file")
 	}
@@ -189,7 +189,7 @@ func TestLoadMissingConfigFails(t *testing.T) {
 
 func TestLoadNoRepoFails(t *testing.T) {
 	dir := t.TempDir() // no git remote, no config
-	t.Setenv("SORTIE_LOOP_REPO", "")
+	t.Setenv("JIG_REPO", "")
 	if _, err := Load(dir); err == nil {
 		t.Error("expected error with no repo detectable")
 	}

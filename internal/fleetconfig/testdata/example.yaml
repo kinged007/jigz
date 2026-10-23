@@ -1,0 +1,91 @@
+# Jigz configuration. Copy to jigz.yaml and edit.
+#
+# Anything left out keeps Jigz's own default: this file restates no
+# defaults of its own, because a default belongs to the thing it
+# defaults and a copy here is how the two drift.
+
+# Where each repository's .sortie/ lives. Empty means
+# ~/.local/state/jigz. No checkout is made: this directory
+# holds loop configuration and run state, and the agent clones the
+# repository itself into the workspaces where it works.
+state_dir: ""
+
+# Optional enrichment of run history from the GitHub REST API: branch,
+# pull request link, the Journey card of an issue run, and PRs opened and
+# merged per day. Read only, and off
+# by default; with it off Jigz makes no GitHub request. Each project's
+# own token (token_env) is used for its own calls. Applied on reload.
+github:
+  enrich: false
+  # Also read the commits, changed files and check runs of each cached pull
+  # request, shown in the Delivery card of a run. Up to two more requests
+  # per pull request. Only used when enrich is true. Default false.
+  details: false
+  # Time between passes, at least 1m. Default 10m.
+  interval: 10m
+  # Default https://api.github.com. Set it for GitHub Enterprise Server.
+  api_url: https://api.github.com
+
+# Applied to every repository that does not override the knob.
+defaults:
+  # One variable for the whole fleet. A repository may name its own.
+  token_env: GH_TOKEN
+  # Only issues assigned to the token owner are picked up. "" shares the
+  # backlog. This is Jigz's own default when omitted here.
+  assignee: "@me"
+  agent:
+    max_concurrent_agents: 1
+    max_turns: 10
+  polling_interval_ms: 60000
+
+repos:
+  # A full example: scoped to three of the shipped loops, with its own
+  # concurrency and model.
+  - repo: owner/alpha
+    workflows: [plan, build, review]
+    agent:
+      model: gpt-5
+      max_concurrent_agents: 4
+    polling_interval_ms: 30000
+
+  # The minimum: no overrides at all, so every shipped workflow runs
+  # with Jigz's defaults.
+  - repo: owner/beta
+
+  # A team that keeps its loop config in git: point path at a real
+  # checkout. The token still travels in the environment, never in a file.
+  - repo: owner/gamma
+    path: ~/src/gamma
+
+  # A second bot account. token_env names a variable; if it is unset the
+  # run fails rather than starting a loop that authenticates as nobody.
+  - repo: owner/delta
+    token_env: GH_TOKEN_DELTA
+
+  # Configured and labelled, but never started until enabled: true.
+  - repo: owner/epsilon
+    enabled: false
+
+  # Narrowed tracker scope for one loop, and a milestone on all of them.
+  - repo: owner/zeta
+    milestone: "v2"
+    filters:
+      build: "label:agent:build -label:needs-human"
+
+  # Loops that do not all run the same way. plan and review take the
+  # repository values; build is heavier, and review runs on a different
+  # model. A knob any workflow overrides is written into each workflow's
+  # own file rather than the environment, because the environment is
+  # shared by every loop and would otherwise beat the override.
+  - repo: owner/eta
+    agent:
+      model: gpt-5
+      max_concurrent_agents: 2
+    workflows: [plan, build, review]
+    workflow_overrides:
+      build:
+        agent:
+          max_concurrent_agents: 8
+      review:
+        agent:
+          model: opus

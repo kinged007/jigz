@@ -1,4 +1,4 @@
-module github.com/kinged007/sortie-loop
+module github.com/kinged007/jigz
 
 go 1.26.0
 

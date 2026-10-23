@@ -1,0 +1,84 @@
+{{define "info"}}<span class="info" tabindex="0" role="img" aria-label="Data source: {{.}}" title="Data source: {{.}}">i</span>{{end}}
+
+{{define "share"}}<div class="share"><div class="bar" aria-hidden="true"><i style="width:{{.}}%"></i></div><small>{{.}}%</small></div>{{end}}
+
+{{define "chartjs"}}<script>
+(function () {
+  function all(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+  function fmt(n) { return Number(n).toLocaleString('en-US'); }
+  document.addEventListener('mousemove', function (ev) {
+    var w = ev.target.closest && ev.target.closest('.chartwrap');
+    all('.chartwrap .tip').forEach(function (t) { if (!w || t.parentNode !== w) { t.hidden = true; } });
+    if (!w) { return; }
+    var days = w.dataset.days.split(','), n = days.length;
+    var L = +w.dataset.l, R = +w.dataset.r, W = +w.dataset.w, span = W - L - R;
+    var svg = w.querySelector('svg'), box = svg.getBoundingClientRect();
+    var i = n > 1 ? Math.round(((ev.clientX - box.left) / box.width * W - L) / span * (n - 1)) : 0;
+    i = Math.max(0, Math.min(n - 1, i));
+    var x = L + (n > 1 ? i / (n - 1) : 0.5) * span, cur = svg.querySelector('.cursor');
+    cur.setAttribute('x1', x); cur.setAttribute('x2', x); cur.setAttribute('visibility', 'visible');
+    var tip = w.querySelector('.tip'), wb = w.getBoundingClientRect();
+    tip.textContent = '';
+    var head = document.createElement('b');
+    head.textContent = days[i];
+    tip.appendChild(head);
+    all('g[data-series]', svg).forEach(function (g) {
+      if (g.style.display === 'none') { return; }
+      var row = document.createElement('div'), sw = document.createElement('i');
+      sw.style.background = g.dataset.color;
+      row.appendChild(sw);
+      row.appendChild(document.createTextNode(g.dataset.series + ': ' + fmt(g.dataset.vals.split(',')[i]) + ' tokens'));
+      tip.appendChild(row);
+    });
+    tip.hidden = false;
+    tip.style.left = Math.max(0, Math.min(wb.width - 190, ev.clientX - wb.left + 14)) + 'px';
+  });
+  document.addEventListener('mouseout', function (ev) {
+    if (ev.relatedTarget && ev.relatedTarget.closest && ev.relatedTarget.closest('.chartwrap')) { return; }
+    all('.chartwrap .tip').forEach(function (t) { t.hidden = true; });
+    all('.chart .cursor').forEach(function (c) { c.setAttribute('visibility', 'hidden'); });
+  });
+  document.addEventListener('click', function (ev) {
+    var b = ev.target.closest && ev.target.closest('.lg');
+    if (!b) { return; }
+    var hide = b.getAttribute('aria-pressed') === 'true';
+    b.setAttribute('aria-pressed', hide ? 'false' : 'true');
+    all('g[data-series]', b.closest('.card')).forEach(function (g) {
+      if (g.dataset.series === b.dataset.legend) { g.style.display = hide ? 'none' : ''; }
+    });
+  });
+})();
+</script>{{end}}
+
+{{define "metrics"}}{{with .Ops}}<section aria-labelledby="mt">
+<div class="pagehead sechead">
+  <div><h2 id="mt">Metrics</h2></div>
+  <div class="seg" role="group" aria-label="Metrics period">{{range .Periods}}<a href="/?period={{.Key}}&amp;sort={{$.Ops.Sort}}" {{if eq .Key $.Ops.Period}}aria-current="true"{{end}}>{{.Key}}</a>{{end}}</div>
+</div>
+{{if .MetricErr}}<div class="banner">{{.MetricErr}}</div>{{else if not .Metrics}}<div class="banner">Run history is unavailable, so there are no metrics.</div>{{end}}
+{{with .Metrics}}
+<p class="sub">Period: {{.Window}} ({{.Timezone}} days; the first day is partial). Token figures count tokens, not dollars.
+{{if .Totals.Unmeasured}}{{.Totals.Unmeasured}} unmeasured run{{if ne .Totals.Unmeasured 1}}s{{end}} in this period (the adapter reported no tokens) are left out of token totals.{{end}}</p>
+{{if .Empty}}<p class="empty">No runs started in this period.</p>{{else}}
+<div class="grid2">
+  <div class="card"><h2>Token usage over time, all projects {{template "info" .TipTokens}}</h2>{{.TokensChart}}</div>
+  <div class="card"><h2>Token usage over time, per project {{template "info" .TipTokens}}</h2>{{.ProjectsChart}}</div>
+</div>
+{{end}}
+<h2>Activity</h2>
+<div class="tiles">
+  {{range .Tiles}}<div class="tile"><b>{{.Value}}</b><span>{{.Label}}{{template "info" .Tip}}</span>{{.Spark}}</div>
+  {{end}}
+  <div class="tile" id="active-tile"><b>{{$.Ops.Active}}</b><span>active runs now (running and retrying)</span></div>
+</div>
+{{if not .Empty}}<div class="card"><h2>Runs per day</h2>{{.RunsChart}}</div>{{end}}
+<h2>Cost and per-item averages</h2>
+<div class="tiles">
+  <div class="tile off" aria-disabled="true"><b>needs engine cost data (planned)</b><span>cost per issue{{template "info" .TipCost}}</span></div>
+  <div class="tile off" aria-disabled="true"><b>needs engine cost data (planned)</b><span>cost per PR{{template "info" .TipCost}}</span></div>
+  <div class="tile"><b>{{.AvgIssue}}</b><span>average tokens per issue, over {{.Issues}} issue{{if ne .Issues 1}}s{{end}}{{template "info" .TipIssues}}</span></div>
+  <div class="tile"><b>{{.AvgPR}}</b><span>average tokens per PR worked on, over {{.PRs}} PR{{if ne .PRs 1}}s{{end}}{{template "info" .TipPRs}}</span></div>
+</div>
+<p class="sub">Hover or focus the (i) icon on a tile to see the run_history field it comes from.</p>
+{{end}}
+</section>{{end}}{{end}}

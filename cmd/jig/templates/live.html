@@ -1,0 +1,255 @@
+{{define "page"}}{{template "shell-top" .}}
+<style>
+.alerts { display: flex; flex-direction: column; gap: .3rem; margin-bottom: 1rem; }
+.alert { display: flex; flex-wrap: wrap; gap: .25rem .5rem; align-items: center; padding: .25rem .6rem; border-left: 3px solid var(--c);
+         background: color-mix(in srgb, var(--c) 12%, transparent); border-radius: 0 3px 3px 0; }
+.alert.err { --c: var(--err); }
+.alert.warn { --c: var(--warn); }
+.alert .icon { color: var(--c); }
+.alert .k { font-weight: 700; white-space: nowrap; }
+.alert .m { flex: 1 1 14rem; min-width: 0; overflow-wrap: anywhere; }
+.alert a { margin-left: auto; white-space: nowrap; }
+.sechead { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .5rem 1rem; margin: 1.5rem 0 .5rem; }
+.sechead h2 { margin: 0; }
+tr.lp td { background: var(--bg2); padding-top: .1rem; padding-bottom: .1rem; }
+.running td:nth-child(-n+3), .audit td:nth-child(-n+4) { white-space: nowrap; }
+tr.lp td:first-child { padding-left: 1.6rem; }
+.acts { display: flex; gap: .25rem; flex-wrap: wrap; }
+.s-sleeping { --c: var(--info); }
+.s-awake { --c: var(--ok); }
+.errtext { color: var(--err); overflow-wrap: anywhere; }
+</style>
+<div class="pagehead">
+  <div>
+    <h1>Operations</h1>
+    <p class="sub">Fleet state, budgets and usage</p>
+  </div>
+  <div class="row">{{template "fleetbulk" .}}{{template "fleetactions" .}}</div>
+</div>
+{{template "livetop" .}}{{template "metrics" .}}
+<div class="sechead">
+  <h2>Projects and loops <span class="muted">tokens over the last {{.Ops.Period}}</span></h2>
+  <form class="row" method="get" action="/">
+    <input type="hidden" name="period" value="{{.Ops.Period}}">
+    <label class="row">Sort by
+      <select name="sort" aria-label="Sort projects" onchange="this.form.submit()">{{range .Sorts}}<option {{if eq . $.Ops.Sort}}selected{{end}}>{{.}}</option>{{end}}</select></label>
+    <noscript><input type="submit" value="Sort"></noscript>
+  </form>
+</div>
+{{template "livebody" .}}{{template "chartjs"}}{{template "livescript"}}{{template "shell-bottom" .}}{{end}}
+
+{{define "fleetbulk"}}<form class="row" method="post" action="/action">
+  <div class="acts">
+    <button name="op" value="startall" {{ctl "Start every project that is stopped and ready"}}>{{template "icon-play"}} start all</button>
+    <button name="op" value="drainall" {{ctl "Each loop stops as soon as it has no work in flight. This page keeps running."}}>{{template "icon-drain"}} drain all</button>
+  </div>
+</form>{{end}}
+
+{{define "live"}}{{template "livetop" .}}{{template "livebody" .}}{{end}}
+
+{{define "livetop"}}<div id="live-top"><span id="active-n" hidden>{{.Ops.Active}}</span>
+{{if .Ops.Alerts}}<h2 style="margin-top:0">Alerts <span class="chip s-{{.Ops.AlertChip}}">{{len .Ops.Alerts}}</span></h2>
+<div class="alerts">{{range .Ops.Alerts}}<div class="alert {{.Sev}}">{{template "icon-alert"}}<span class="k">{{.Kind}}</span><span class="m">{{.Msg}}</span>{{if .Href}}<a href="{{.Href}}">Open</a>{{end}}</div>
+{{end}}</div>{{else}}<p class="sub" style="margin-bottom:.75rem">No alerts</p>{{end}}
+<div class="tiles">
+  <div class="tile" title="Loops that answered on their own port, of all loops"><b>{{.Fleet.Live}}/{{len .Fleet.Loops}}</b><span>loops active</span></div>
+  <div class="tile"><b>{{.Fleet.Running}}</b><span>runs running</span></div>
+  <div class="tile"><b>{{.Ops.Retrying}}</b><span>runs retrying</span></div>
+  <div class="tile" title="Measured tokens of runs started in the last 7 days"><b>{{if .Ops.Metrics}}{{commas .Ops.Week}}{{else}}&mdash;{{end}}</b><span>tokens this week</span></div>
+</div>
+</div>{{end}}
+
+{{define "projectacts"}}<form class="inline" method="post" action="/action">
+  <input type="hidden" name="repo" value="{{.Slug}}">
+  <div class="acts">
+    {{if .IsRunning}}
+      <button class="sm" name="op" value="stop" {{ctl ""}}>{{template "icon-stop"}} stop</button>
+      <button class="sm" name="op" value="drain" {{ctl "Each loop stops as soon as it has no work in flight, one loop at a time. The loop run decides when; the dashboard only asks."}}>{{template "icon-drain"}} stop when idle</button>
+    {{else}}
+      <button class="sm" name="op" value="start" {{ctl ""}}>{{template "icon-play"}} start</button>
+    {{end}}
+    <button class="sm" name="op" value="restart" {{ctl "Stop now and start again, interrupting whatever is running"}}>{{template "icon-restart"}} restart</button>
+    {{if .CanWake}}<button class="sm" name="op" value="wake" {{ctl "Wake this project's sleeping loops now"}}>{{template "icon-play"}} wake</button>{{end}}
+    {{if .CanCleanup}}
+      <button class="sm" name="op" value="cleanup" {{ctl "List what the cleanup command would remove. Nothing is deleted."}}>Run cleanup (dry run)</button>
+      <button class="sm danger" name="op" value="cleanup" formaction="/action?dry_run=0" {{ctl "Run the cleanup command for real"}} onclick="return confirm('Run cleanup for {{.Slug}} now? This deletes what the cleanup command removes.')">Run cleanup</button>
+    {{end}}
+  </div>
+</form>{{end}}
+
+{{define "livebody"}}<div id="live">
+{{if not .Ops.AnyStatus}}<div class="banner info">Sleep, wake and cleanup details need the loop status document, which these loops do not write. Only process state is shown.</div>{{end}}
+{{if not .Ops.Projects}}<p class="empty">no projects are configured</p>{{else}}
+<div class="tw"><table>
+<thead><tr>
+  <th title="A project, then the loops it runs">Project / loop</th>
+  <th title="The supervisor's own state for a project: running, stopped, failed, invalid (settings did not validate) or disabled. Loops show their own state">State</th>
+  <th class="num" title="Running / retrying runs">Run / retry</th>
+  <th class="num" title="Measured tokens of runs started in the selected period, from Jigz's run history">Tokens ({{.Ops.Period}})</th>
+  <th class="num" title="Measured tokens of runs started since 00:00 UTC today">Tokens today</th>
+  <th class="num" title="The engine does not record cost yet">Cost</th>
+  <th title="A project's share of all projects, and a loop's share of its project, in the selected period">Share</th>
+  {{if .Ops.AnyCleanup}}<th title="The last time the project's cleanup command ran">Last cleanup</th>{{end}}
+  <th title="Stop waits for the agents rather than cutting a run off mid-turn">Actions</th>
+</tr></thead>
+<tbody>
+{{range .Ops.Projects}}
+<tr>
+  <td><a href="/projects/{{.Slug}}"><b>{{.Slug}}</b></a><div class="muted">{{len .Loops}} loop{{if ne (len .Loops) 1}}s{{end}}
+    <span class="metric-inline" title="Space this repository's directory occupies on disk, measured every 10 minutes">{{template "icon-disk-small"}}{{if .DiskKnown}}{{size .Disk}}{{else}}&mdash;{{end}}</span>
+    <span class="metric-inline" title="{{.Dir}}">{{template "icon-folder"}}</span></div></td>
+  <td>
+    <span class="chip s-{{.State}}">{{.State}}</span>
+    {{if .Sleep}}<div class="muted"><span class="chip s-{{.Sleep}}">{{.Sleep}}</span> {{.SleepNote}}</div>{{end}}
+    {{if .Err}}<div class="errtext">{{.Err}}</div>{{end}}
+    {{with .Diags.Errors}}<div class="errtext">{{index . 0}}{{if gt (len .) 1}} (and {{len .}} more, see Alerts){{end}}</div>{{end}}
+    {{if and .Output (or (eq .State "failed") (eq .State "invalid"))}}<details><summary>output</summary><pre>{{range .Output}}{{.}}
+{{end}}</pre></details>{{end}}
+  </td>
+  <td class="num">{{.Running}} / {{.Retrying}}</td>
+  <td class="num"><b>{{commas .Period}}</b></td>
+  <td class="num">{{commas .Today}}</td>
+  <td class="num" title="The engine does not record cost yet">&mdash;</td>
+  <td>{{template "share" .Share}}</td>
+  {{if $.Ops.AnyCleanup}}<td>{{with .Cleanup}}<span class="chip s-{{if .Ok}}succeeded{{else}}failed{{end}}">{{if .Ok}}ok{{else}}failed{{end}}</span>{{if .DryRun}} <span class="muted">dry run</span>{{end}}
+    <span class="muted" title="{{.At}}">{{.Ago}}</span>
+    <div class="muted">exit code {{.ExitCode}}, {{.Paths}} path{{if ne .Paths 1}}s{{end}}</div>{{else}}{{if .CanCleanup}}<span class="muted">no run yet</span>{{end}}{{end}}</td>{{end}}
+  <td>{{template "projectacts" .}}</td>
+</tr>
+{{range .Loops}}
+<tr class="lp">
+  <td>{{.L.Loop}} <span class="muted">loop</span>
+    <a class="btn" href="/logs/{{.L.Repo}}/{{.L.Loop}}" title="The last lines of this workflow's child log">log</a></td>
+  <td>
+    <span class="chip s-{{.Class}}">{{.State}}</span>
+    {{if .Paused}}<span class="chip s-paused" title="The budget holds this workflow">{{if .PausedBy}}{{.PausedBy}}{{else}}paused{{end}}</span>{{end}}
+    {{if .Hold}}<span class="chip s-paused" title="The machine's working hours or agent accounts hold this workflow">{{if and (ne .State "held") (ne .State "disabled")}}held: {{end}}{{.Hold}}</span>{{end}}
+    {{if .Runtime}}<span class="muted" title="Agent runtime the machine gate selected">{{.Runtime}}</span>{{end}}
+    {{if .Hint}}<div class="muted">{{.Hint}}</div>{{end}}
+    {{if .Budget}}<div class="muted" title="Tokens used this period against the workflow's cap">{{.Budget}} <span style="opacity:.7">({{.BudgetPct}}%)</span></div>{{end}}
+    {{if .L.DBError}}<div class="errtext">{{.L.DBError}}</div>{{end}}
+  </td>
+  <td class="num">{{len .L.Running}} / {{.L.Retrying}}</td>
+  <td class="num">{{commas .Figures.Period}}</td>
+  <td class="num">{{commas .Figures.Today}}</td>
+  <td class="num" title="Cost of the agents running now, as the engine estimates it">{{usd .L.Cost}}</td>
+  <td>{{template "share" .Figures.Share}}</td>
+  {{if $.Ops.AnyCleanup}}<td></td>{{end}}
+  <td><form class="inline" method="post" action="/action">
+    <input type="hidden" name="repo" value="{{.L.Repo}}">
+    <input type="hidden" name="workflow" value="{{.L.Loop}}">
+    <div class="acts">
+      {{if .Paused}}<button class="sm" name="op" value="resume" {{ctl "Let this workflow run again"}}>resume</button>
+      {{else}}<button class="sm" name="op" value="pause" {{ctl "Stop this workflow from picking up new work; a running agent finishes its turn"}}>pause</button>{{end}}
+      <button class="sm" name="op" value="override" {{ctl "Clear this period's budget hold so the workflow runs again"}}>budget override</button>
+    </div>
+  </form></td>
+</tr>
+{{end}}
+{{end}}
+</tbody>
+</table></div>
+<p class="sub">A budget line shows this period's spend against the workflow's cap. Pause stops a workflow from picking up new work and resume undoes it; budget override clears this period's cap hold. A running agent finishes its turn either way.</p>
+{{end}}
+
+<div class="card">
+<h2>Running now</h2>
+{{if not .Active}}<p class="empty">no agents are running</p>{{else}}
+<div class="tw running"><table>
+<thead><tr>
+  <th title="The repository this agent is working in">repository</th>
+  <th title="Which of the repository's loops started it">loop</th>
+  <th title="The issue being worked on">issue</th>
+  <th title="The engine's state for this run">state</th>
+  <th class="num" title="Agent turns taken so far">turns</th>
+  <th class="num" title="Tokens this run has used, as the engine has measured them so far">tokens</th>
+  <th title="The agent adapter from the config, and the model the engine reports for it">agent and model</th>
+  <th class="num" title="This run's share of its loop's cost, split by token share">cost</th>
+  <th title="When the loop first picked this issue up on its current pass, counting every retry since">picked up</th>
+  <th class="num" title="How long since that pickup">running for</th>
+</tr></thead>
+<tbody>
+{{range .Active}}
+<tr>
+  <td>{{.Repo}}</td>
+  <td>{{.Loop}}</td>
+  <td><a href="{{liveHref .Repo .Loop .Identifier}}"><code>{{.Identifier}}</code></a></td>
+  <td>{{.State}}</td>
+  <td class="num">{{.Turns}}</td>
+  <td class="num">{{commas .Tokens}}</td>
+  <td>{{if .Model}}{{if .Agent}}{{agent .Agent}} &middot; {{end}}{{.Model}}{{else if .Agent}}{{agent .Agent}}{{else}}<span class="empty">default</span>{{end}}</td>
+  <td class="num">{{usd .Cost}}</td>
+  <td class="sub">{{at .PickedUp}}</td>
+  <td class="num">{{since .PickedUp}}</td>
+</tr>
+{{end}}
+</tbody>
+</table></div>
+{{end}}
+</div>
+
+<h2>Audit log</h2>
+{{if not .Ops.Audit}}<p class="empty">No audit entries yet.</p>
+{{else}}<div class="tw audit"><table>
+<thead><tr><th>When (UTC)</th><th>Who</th><th>Action</th><th>Target</th><th>Result</th></tr></thead>
+<tbody>
+{{range .Ops.Audit}}<tr><td>{{utc .TS}}</td><td>{{.Actor}}</td><td>{{.Action}}</td><td>{{.Project}}{{if .Target}} ({{.Target}}){{end}}</td><td>{{.Result}}</td></tr>
+{{end}}
+</tbody>
+</table></div>{{end}}
+</div>{{end}}
+
+{{define "livescript"}}<script>
+// Refresh the changing parts only. The page needs no build step and
+// degrades to a static page without scripting.
+//
+// The status block is fetched as its own fragment because it lives in the
+// header, outside the live blocks, and a CPU percentage means nothing
+// until it is sampled again. It is fetched on load as well as on the
+// tick, so the first reading's dash clears straight away.
+var timer;
+var reported = false;
+function refresh(url, ids) {
+  return fetch(url).then(function (r) {
+    if (r.redirected) { location.reload(); return new Promise(function () {}); }
+    return r.text();
+  }).then(function (html) {
+    var box = document.createElement('template');
+    box.innerHTML = html;
+    ids.forEach(function (id) {
+      var fresh = box.content.getElementById(id), el = document.getElementById(id);
+      if (fresh && el) { el.replaceWith(fresh); }
+    });
+  });
+}
+// The page is served by the process it reports on, so a fetch that never
+// arrives means that process has exited, which is what the stop-all
+// button asks for. Say so once, over the figures, and stop asking: a
+// process that is gone answers no tick, and a dashboard that keeps
+// counting is a dashboard claiming a fleet nothing is supervising.
+function gone() {
+  if (reported) { return; }
+  reported = true;
+  clearInterval(timer);
+  document.title = 'Jigz is not running';
+  var note = document.createElement('p');
+  note.className = 'msg exposed';
+  note.textContent = 'Jigz has exited, so nothing is supervising these ' +
+    'loops. What is below is its last report.';
+  document.body.insertBefore(note, document.body.firstChild);
+}
+function tick() {
+  refresh('/live' + location.search, ['live-top', 'live']).then(function () {
+    var n = document.getElementById('active-n'), t = document.querySelector('#active-tile b');
+    if (n && t) { t.textContent = n.textContent; }
+    var clock = document.getElementById('clock');
+    if (!clock) { return; }
+    var d = new Date();
+    clock.textContent = [d.getHours(), d.getMinutes(), d.getSeconds()]
+      .map(function (n) { return String(n).padStart(2, '0'); }).join(':');
+  }, gone);
+  refresh('/status', ['status']).catch(function () {});
+}
+tick();
+timer = setInterval(tick, 3000);
+</script>{{end}}

@@ -1,10 +1,10 @@
-# sortie-loop
+# Jigz
 
-[![CI](https://github.com/kinged007/sortie-loop/actions/workflows/ci.yml/badge.svg)](https://github.com/kinged007/sortie-loop/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/kinged007/sortie-loop)](https://github.com/kinged007/sortie-loop/releases) [![Go](https://img.shields.io/badge/Go-1.26-blue)](go.mod)
+[![CI](https://github.com/kinged007/jigz/actions/workflows/ci.yml/badge.svg)](https://github.com/kinged007/jigz/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/kinged007/jigz)](https://github.com/kinged007/jigz/releases) [![Go](https://img.shields.io/badge/Go-1.26-blue)](go.mod)
 
 Run autonomous coding agents against your GitHub issues with one command.
 
-`sortie-loop` watches a repo's issues and pull requests, and for each
+`jig` watches a repo's issues and pull requests, and for each
 labeled item spins up an AI coding agent that reads the issue, writes the
 code, and moves the work forward — planning, implementing, reviewing, and
 merging — mostly on its own. You manage the backlog by adding labels and
@@ -13,18 +13,16 @@ tracker.
 
 ## What is what
 
-**sortie-loop** (this repo) is a small Go wrapper. It does setup (config,
+**Jigz** (this repo) is a small Go wrapper. It does setup (config,
 labels, workflow files) and then launches one loop process per workflow,
 plus a web dashboard. It contains no agent itself.
 
-**Sortie** (the engine, from the
-[kinged007/sortie](https://github.com/kinged007/sortie) fork) does the
-heavy lifting inside each loop: it polls GitHub on a timer, claims a
-matching issue, clones the repo into a scratch workspace, hands the issue
-text to an agent, and records the run in a local SQLite DB. The fork
-exists because the loops need two pieces upstream lacks: the `pi` agent
-adapter and the `github-pr` tracker (which treats pull requests as
-work items).
+**The engine** does the heavy lifting inside each loop: it polls the
+tracker on a timer, claims a matching item, clones the repo into a scratch
+workspace, hands the item to an agent, and records the run in a local
+SQLite database. The engine release Jigz uses carries two pieces the
+workflows need: the `pi` agent adapter and the `github-pr` tracker
+(which treats pull requests as work items).
 
 **The agent** is `pi`, a coding agent that runs in a terminal the same
 way you would: it reads files, edits code, runs checks, and shells out
@@ -164,7 +162,7 @@ warning on stderr says so. To migrate:
 
 1. Delete the five old files, and their `.sortie-<name>.db` files if you
    do not need the run history.
-2. Rerun `sortie-loop setup` to install the two new files.
+2. Rerun `jig setup` to install the two new files.
 3. In `.sortie/config.yaml`, rename old loop names to `issues` or `prs` in
    the `filters:` and `workflows:` (budget) keys.
 4. Existing installs keep their old `prompts/plan.md` and `prompts/build.md`,
@@ -184,50 +182,113 @@ named by its stem on the next run. Per-loop label queries can be
 narrowed via the `filters:` map in `.sortie/config.yaml` without
 re-running setup.
 
-`SORTIE_LOOP_ONLY=issues` narrows the run to the named loops, for a
+`JIG_ONLY=issues` narrows the run to the named loops, for a
 supervisor that drives several repos and wants a different set per
 repo. Unset (the default) runs every installed loop. A name that
 matches no installed workflow is fatal rather than silently dropped, so
 a typo cannot leave that loop's work unwatched.
 
-## Unified dashboard
+## Dashboard
 
-Every run serves a small status page (default
-`http://127.0.0.1:7677`, auto-refreshes every 5s). Each loop also gets
-its own debug port starting at 7678. The page shows what is running
-right now (issue, loop, turns, tokens, model) alongside all-time totals
-read from each loop's SQLite DB, so numbers survive restarts.
+Every run serves a control page (default `http://127.0.0.1:7677`, bound to
+loopback) and its own debug port per loop, starting at 7678. The page is
+also the control panel: it starts, stops, drains and restarts each
+repository, wakes a sleeping run, runs the cleanup command, pauses or
+resumes one workflow, overrides a budget hold, and stops everything.
+
+It reads the shared registry and each repository's status document plus
+run data from its loops, so the numbers survive restarts and a repository
+that is not running still shows its last known state (see
+[Run data](#run-data)). Every
+3 seconds the changing parts are re-fetched as fragments, so the page
+needs no build step and works as static HTML without scripting.
+
+Pages: Operations (fleet, alerts, token charts, per-repository and
+per-loop rows), Runs and Usage from the history database, Workflows (the
+pipeline each repository's files describe, plus validation), Projects,
+Agents (the settings each workflow file declares), Settings, the workflow
+editor, and each loop's child log.
+
+### Run data
+
+While a loop's engine answers on its port, the dashboard reads that loop
+through the engine's HTTP API: finished runs from `/api/v1/runs`, the
+parked, retrying and budget-held issues from `/api/v1/state`, and the
+all-time run counts from `/api/v1/stats`. Each pass copies the runs the
+history database does not have yet, matched by the engine's run id. When two
+workflows share one engine database, only the runs of each workflow's own
+file are copied to it.
+
+When the engine does not answer, the dashboard reads the loop's SQLite
+database read-only, so the history of a stopped repository stays visible.
+The database reader accepts the engine schema versions 18 to 43 (the
+engine releases 1.28.1 and 1.29.0 write 38 and 43) when the tables and
+columns it reads exist. A database written by a newer engine than the
+newest known one is reported as a schema notice and not read.
+
+A run shows the fields the engine reports for it: status, error, attempts,
+turns, tokens, agent adapter, model, session id and workflow file. The
+engine reports no workspace path, prompt template, API request count,
+handoff counter reset or review metadata, so the dashboard does not show
+them. If the engine database was replaced by a new one, whose newest run id
+is lower than the last copied one, the stored runs of that workflow are
+removed and copied again from the engine.
 
 Running loops in several repos at once? Pass `--unite`:
 
 ```sh
-sortie-loop --unite          # in each repo
+jig --unite    # in each repo
 ```
 
 The first `--unite` run starts the dashboard; later ones detect it and
-join instead of starting a second page. Every run registers its loops
-in a shared registry file, so the one page rolls up all repos: a
-per-repo summary plus the same running-now and token tables with a Repo
-column. Without `--unite` the dashboard shows only its own repo.
+join instead of starting a second page. Without `--unite` the page shows
+only its own repository; with it, every registered repository appears
+with whatever process is supervising it.
+
+Controls act on the running process, not on a copy: they signal it, or
+write the same request files the CLI writes, so the page and the
+commands cannot disagree. A repository that stopped keeps its row, so it
+can be started again from the page; a state-changing request from another
+origin is refused.
+
+### Access
+
+The dashboard has no authentication. It binds `127.0.0.1` by default, so
+only processes on the same machine can reach it. `--host 0.0.0.0` (or
+`--host ::`) listens on all interfaces, and `--host ADDR` binds one
+address. A non-loopback bind prints a notice on stderr at startup.
+
+Anyone who can reach the dashboard can start and stop agents and edit the
+configuration. Use it locally, on a private network, or behind your own
+secure proxy, for example an SSH tunnel, Tailscale, or a reverse proxy
+that requires authentication.
+
+The dashboard refuses a request whose `Host` header is not one it serves
+and a state-changing request from another origin. Naming one interface
+with `--host` limits the accepted `Host` values to that address and the
+loopback names; a wildcard bind accepts any `Host`.
+
+Each loop runs its own engine server. These bind `127.0.0.1` and are used
+internally by Jigz; the dashboard does not link to them.
 
 ## Install
 
 macOS and Linux, on Intel or Apple silicon.
 
 ```sh
-curl -sSL https://raw.githubusercontent.com/kinged007/sortie-loop/main/install.sh | sh
+curl -sSL https://raw.githubusercontent.com/kinged007/jigz/main/install.sh | sh
 ```
 
-That downloads a release binary to `~/.local/bin/sortie-loop` and checks
+That downloads a release binary to `~/.local/bin/jig` and checks
 it against the release's `checksums.txt`. No Go toolchain needed.
-`./install.sh --prefix DIR` installs to `DIR/bin/sortie-loop` instead,
+`./install.sh --prefix DIR` installs to `DIR/bin/jig` instead,
 `--version TAG` pins a release, and `--from-source` builds from a
 checkout.
 
 Already have Go?
 
 ```sh
-go install github.com/kinged007/sortie-loop/cmd/sortie-loop@latest
+go install github.com/kinged007/jigz/cmd/jig@latest
 ```
 
 Also requires the **gh CLI** — `setup` shells out to it, and the agent
@@ -235,36 +296,86 @@ prompts use it throughout.
 
 ### The engine
 
-`sortie-loop` is the supervisor. The work is done by the **engine**, a
-`sortie` binary, which polls GitHub, claims work, and runs the agents.
-`sortie-loop setup` downloads the pinned engine release, verifies it
-against that release's `checksums.txt`, and links it onto your `PATH` as
-`sortie`, so `sortie validate` and `sortie stats` work in any shell. A
-fresh install needs no separate engine step.
+`jig` is the supervisor. The work is done by the **engine**, a separate
+program that polls GitHub, claims work, and runs the agents. `jig setup`
+downloads the pinned engine release, verifies it against that release's
+`checksums.txt`, and links it onto your `PATH`, so the engine's own
+commands (`validate`, `stats`) work in any shell. A fresh install needs no
+separate engine step.
 
-The pinned version is the release the shipped workflows were written
-against. Read it with `sortie-loop --dump-version`.
+The engine is a GitHub release, chosen by a repository (`owner/name`) and a
+version tag (`vX.Y.Z`), defaulting to `v1.28.1`, the release the shipped
+workflows were written against. `jig --version` prints the tool version
+and the engine release it resolves to, and the dashboard Settings page
+shows that release next to the version the engine binary reports.
 
-The engine comes from the [kinged007/sortie](https://github.com/kinged007/sortie)
-fork, not from upstream `sortie-ai/sortie`. The fork exists because the
-workflows need two things upstream does not ship: the **pi agent
-adapter**, and the **github-pr tracker**, which treats pull requests as
-work items so a review loop can watch a pull request rather than an
-issue. See [SECURITY.md](SECURITY.md) for what running a fork means.
+The workflows need two things the engine does not always ship: the **pi
+agent adapter**, and the **github-pr tracker**, which treats pull requests
+as work items so a review loop can watch a pull request rather than an
+issue. A repository you configure should carry both; the next section says
+what is switched off when it does not.
 
-To use a different build of the same engine, set `SORTIE_ENGINE_REPO`
-and, if its version differs, `SORTIE_ENGINE_VERSION`. To bring your own
-binary, set `SORTIE_BIN`. The engine version is pinned rather than
-resolved to "latest" on purpose: the workflows are written against
-specific engine behaviour, and an engine that changes under them breaks
-loops in ways that are hard to trace.
+#### Engine capabilities
+
+At start, `jig` asks the resolved engine binary for its version (its
+version flag) and for the tracker and agent kinds it has registered. No
+engine command lists the kinds, so the second part runs the engine's
+`validate` command on a temporary workflow with an unknown tracker and agent
+kind and reads the `registered: [...]` lists from its errors. The result is
+cached per binary path, modification time and size for the life of the
+process. The supervisor, `validate`, setup validation, the dashboard and the
+status document use the same result. A binary that cannot be probed has an
+unknown capability set: nothing is disabled, and the dashboard says that the
+features could not be detected.
+
+| The engine | What happens |
+|---|---|
+| Is older than 1.27.0, the oldest the shipped workflows run on | No loop starts. `validate` fails with the reason, and the dashboard shows an alert. |
+| Has no `github-pr` tracker | The PR workflow loop does not start. `validate` reports it as disabled, not as an error. The workflow file stays installed. |
+| Has no `pi` agent | Loops whose agent is the shipped default `pi` run with `claude-code` instead (the agent kind and the agent command are set to `claude-code` and `claude`). Pool entries with runtime `pi` are shown as unavailable and are not picked. |
+| Lacks an agent kind that you set (an `agent.kind` other than `pi` in the workflow file) | The loop does not start. `validate` and the dashboard show an error. There is no fallback. |
+
+Each disabled feature has one alert on the Operations page with the reason,
+for example "PR workflow is off: engine v1.29.0 has no
+github-pr tracker." The Settings page lists the registered tracker and agent
+kinds, and a workflow that is not started has the state `disabled` and the
+reason in the status document. The `engine_version` field of the status
+document is the version the engine binary reports.
+
+The repository and version are read in this order, first match wins:
+
+1. `JIG_ENGINE_BIN`: use this binary. No repository or version applies.
+2. The environment variables `JIG_ENGINE_REPO` and `JIG_ENGINE_VERSION`.
+3. The `engine:` block of `machine.yaml` (see
+   [Working hours and agent accounts](#working-hours-and-agent-accounts)).
+4. The defaults.
+
+Each of the repository and the version is resolved on its own. A release
+needs one archive per platform (Linux and macOS, `amd64` and `arm64`),
+named after the version, the OS and the architecture, and a
+`checksums.txt`; the download is verified against it. An invalid value is
+an error.
+
+The setup command, the loops, `validate`, the dashboard and the supervisor
+all resolve the engine the same way: `JIG_ENGINE_BIN`, then the engine installed
+for the configured repository and version in `$XDG_DATA_HOME/jigz` (or
+`~/.local/share/jigz`) or in `<prefix>/share/jigz` beside the
+`jig` binary, then a verified download into the first of those. The
+installed file is named after the repository and the version, so the same
+version from two repositories is stored separately. If the download fails,
+an engine binary beside the `jig` binary or on `PATH` is used with a
+warning, and its version is not checked.
+
+The version is fixed rather than resolved to "latest" on purpose: the
+workflows are written against specific engine behaviour, and an engine that
+changes under them breaks loops in ways that are hard to trace.
 
 | Variable | Effect |
 |---|---|
-| `SORTIE_BIN` | use this engine binary |
-| `SORTIE_ENGINE_REPO` | fetch the engine from this repository's releases |
-| `SORTIE_ENGINE_VERSION` | fetch this version instead of the pin |
-| `SORTIE_ENGINE_URL` | fetch one archive from this URL (with `SORTIE_ENGINE_SHA256` to verify it) |
+| `JIG_ENGINE_BIN` | use this engine binary |
+| `JIG_ENGINE_REPO` | fetch the engine from this repository's releases (`owner/name`) |
+| `JIG_ENGINE_VERSION` | fetch this version (`vX.Y.Z`) instead of the configured one |
+| `JIG_ENGINE_URL` | fetch one archive from this URL (with `JIG_ENGINE_SHA256` to verify it) |
 
 ### GitHub token
 
@@ -280,11 +391,11 @@ your personal name.
    https://github.com/settings/tokens with the `repo` scope (classic
    token is simplest; a fine-grained token needs Contents, Issues, and
    Pull requests read/write on the repos you loop over).
-2. Expose it with one of (first set wins: `SORTIE_LOOP_TOKEN`, then
+2. Expose it with one of (first set wins: `JIG_TOKEN`, then
    `token:` in `.sortie/config.yaml`, then `GITHUB_TOKEN`, then
    `GH_TOKEN`):
    ```sh
-   export GITHUB_TOKEN="ghp_..."     # or GH_TOKEN; or SORTIE_LOOP_TOKEN to override just the loop
+   export GITHUB_TOKEN="ghp_..."     # or GH_TOKEN; or JIG_TOKEN to override just the loop
    ```
    The `gh` CLI reads `GITHUB_TOKEN`/`GH_TOKEN` itself, so exporting
    one of those covers both the loop and the agent's `gh` calls. Never
@@ -296,23 +407,23 @@ your personal name.
 
 ```sh
 cd your-repo
-sortie-loop setup    # writes .sortie/config.yaml, updates .gitignore, creates the labels,
-                     # installs the engine, and installs .sortie/pm-agent.md
-                     # (a project-manager prompt)
-sortie-loop          # run every WORKFLOW.*.md loop (Ctrl-C stops all)
+jig setup    # writes .sortie/config.yaml, updates .gitignore, creates the labels,
+             # installs the engine, and installs .sortie/pm-agent.md
+             # (a project-manager prompt)
+jig          # run every WORKFLOW.*.md loop (Ctrl-C stops all)
 ```
 
 `setup` detects `owner/name` from the git `origin` remote
 (`--repo=owner/name` overrides). The loop re-detects it at every run, so
 moving the checkout or forking needs no reconfiguration. A positional
 argument selects the repository root and may sit anywhere on the line,
-so `sortie-loop setup ./repo --repo owner/name` and
-`sortie-loop setup --repo owner/name ./repo` do the same thing.
+so `jig setup ./repo --repo owner/name` and
+`jig setup --repo owner/name ./repo` do the same thing.
 
 `setup` confirms before changing a label whose colour or description
 differs from the shipped one. It never changes an existing workflow file.
 
-`sortie-loop status [--json] [repo-root]` reports the run serving the
+`jig status [--json] [repo-root]` reports the run serving the
 repo-root: version, pid, state, and per workflow its state, port, pid,
 restart count and last exit code. `--json` prints the status document
 with an added `liveness` field: `running` when the pid is alive, `stale`
@@ -321,7 +432,7 @@ run ended. The command reads the document from the repo-root and does not
 need a registry entry. It exits non-zero when no document is found.
 
 The supervisor writes the status document (schema version 1) to
-`<user cache dir>/sortie-loop/status/<hash>.json`, where `<hash>` is the
+`<user cache dir>/jigz/status/<hash>.json`, where `<hash>` is the
 first 16 hex digits of the SHA-256 of the absolute repo-root. The registry
 entry holds the same path as `status_path`. A clean exit removes the
 document. A run that ends on a loop failure leaves it with state
@@ -333,13 +444,13 @@ file.
 
 The status document has a top-level `cleanup` object once a cleanup has
 run: `last_run_at`, `duration_ms`, `exit_code`, `dry_run` and `paths`.
-`sortie-loop status` prints it as one line.
+`jig status` prints it as one line.
 
 The status document has a top-level `sleep` object: `enabled`, `awake`,
 `sleeping_since` and `next_wake` (RFC 3339 or `null`), and, when sleep is
 enabled, `idle_since` (RFC 3339, or `null` after a busy observation). While
 the run sleeps, the workflow entries have state `sleeping`.
-`sortie-loop status` prints one `sleep:` line when sleep is enabled.
+`jig status` prints one `sleep:` line when sleep is enabled.
 
 A workflow entry has a `budget` object when the workflow has a budget or is
 paused: `period`, `period_start`, `tokens_used`, `cap`, `warn_percent`,
@@ -351,7 +462,7 @@ precedence over `sleeping`.
 
 The stdout and stderr of each engine child are written to
 `<repo-root>/.sortie/logs/<workflow>.log`, interleaved in arrival order and
-unchanged. They are still printed to the terminal of `sortie-loop`. The file
+unchanged. They are still printed to the terminal of `jig`. The file
 is opened for appending, so it keeps its content across child recycles and
 supervisor restarts. When a write would take the file over 10 MiB, it is
 renamed to `<workflow>.log.1`, `.1` becomes `.2`, `.2` becomes `.3`, and the
@@ -360,17 +471,17 @@ is rotated first. The limit and the 3 rotated files are fixed in the code.
 If the log file cannot be opened or written, one warning is printed and the
 child keeps running. The per-run agent transcript is not part of these logs.
 
-`sortie-loop cleanup [--dry-run] [--json] [repo-root]` runs the configured
+`jig cleanup [--dry-run] [--json] [repo-root]` runs the configured
 cleanup command once (see [Workspace cleanup](#workspace-cleanup)).
 
-`sortie-loop wake [--json] [repo-root]` starts the engine loops of a run
+`jig wake [--json] [repo-root]` starts the engine loops of a run
 that is sleeping (see [Idle sleep](#idle-sleep)). `--json` prints `woke`,
 `was_sleeping` and `error`. When the run is awake or sleep is disabled it
 does nothing, prints `was_sleeping: false` and exits 0. It exits non-zero
 when no supervisor is running for the repo-root, or when the supervisor is
 not awake 5 seconds after the request.
 
-`sortie-loop pause <workflow> [--json] [repo-root]` stops the engine loop of
+`jig pause <workflow> [--json] [repo-root]` stops the engine loop of
 one workflow and keeps it stopped, also across a supervisor restart.
 `resume <workflow>` clears a manual or budget pause and starts the loop.
 `budget override <workflow>` clears a budget pause, turns the cap off for
@@ -395,8 +506,8 @@ Flags: `--unite` joins (or starts) the shared dashboard,
 per-loop debug ports respectively. A positional arg selects the repo
 root (default: current directory).
 
-`SORTIE_LOOP_ONLY=plan,build` starts only those loops; unset runs them
-all. This is how `sortie-central` picks a per-repo workflow set.
+`JIG_ONLY=plan,build` starts only those loops; unset runs them
+all. This is how Jigz picks a per-repo workflow set.
 
 ## Layout in the target repo
 
@@ -425,7 +536,7 @@ replace `.sortie/` with:
 
 ```yaml
 repo: ""        # empty = detect from git remote; or pin owner/name
-token: ""       # empty = SORTIE_LOOP_TOKEN, then GITHUB_TOKEN / GH_TOKEN env
+token: ""       # empty = JIG_TOKEN, then GITHUB_TOKEN / GH_TOKEN env
 milestone: ""   # optional milestone title to restrict all loops to
 assignee: "@me" # token owner only; "" = shared backlog
 # per-loop query-filter overrides, keyed by WORKFLOW.*.md stem
@@ -473,17 +584,17 @@ cleanup:
 
 When `enabled` is true, the supervisor runs `command` through `sh -c`
 every `interval`, starting one interval after startup, in the repo root.
-`sortie-loop` refuses to start when `command`, `interval` or
+`jig` refuses to start when `command`, `interval` or
 `max_age_days` is missing, or when `max_age_days` is not less than
 `workspace.retention_days` in a workflow file that sets it.
 
 The command gets these environment variables and no arguments:
 
-- `SORTIE_CLEANUP_DRY_RUN`: `1` or `0`. With `1` the command removes
+- `JIG_CLEANUP_DRY_RUN`: `1` or `0`. With `1` the command removes
   nothing and only reports what it would remove.
-- `SORTIE_CLEANUP_MAX_AGE_DAYS`: `cleanup.max_age_days`.
-- `SORTIE_CLEANUP_WORKSPACE_ROOT`: `.sortie/workspaces` in the repo root.
-- `SORTIE_CLEANUP_DB_DIR`: `.sortie/workflows`, which holds the workflow
+- `JIG_CLEANUP_MAX_AGE_DAYS`: `cleanup.max_age_days`.
+- `JIG_CLEANUP_WORKSPACE_ROOT`: `.sortie/workspaces` in the repo root.
+- `JIG_CLEANUP_DB_DIR`: `.sortie/workflows`, which holds the workflow
   SQLite DBs.
 
 Exit code 0 is success and anything else is a failed run. A failed run
@@ -493,8 +604,8 @@ paths of the run. The last 4 KB of stdout and stderr are logged. Two
 cleanups never run at the same time: a run that finds another one active
 is skipped.
 
-`sortie-loop cleanup` runs the command once with the same contract.
-`--dry-run` sets `SORTIE_CLEANUP_DRY_RUN=1`. `--json` prints
+`jig cleanup` runs the command once with the same contract.
+`--dry-run` sets `JIG_CLEANUP_DRY_RUN=1`. `--json` prints
 `started_at`, `duration_ms`, `exit_code`, `dry_run`, `command`,
 `output_tail` and `error`. It exits non-zero when the command fails or
 none is configured.
@@ -515,7 +626,7 @@ sleep:
 ```
 
 Both values are Go durations and must be positive when `enabled` is true;
-`sortie-loop` refuses to start otherwise. With `enabled: false` the loops
+`jig` refuses to start otherwise. With `enabled: false` the loops
 run all the time.
 
 Every 30 seconds the supervisor asks each child's `GET /api/v1/state` on
@@ -530,8 +641,8 @@ started child needs that long to find work. A run started with
 `--no-server` has no state endpoint and never sleeps.
 
 The children start again `wake_interval` after sleep began, or when
-`sortie-loop wake` is run. A wake starts them the same way as startup,
-with the config and workflow files now on disk. `sortie-loop wake` writes a
+`jig wake` is run. A wake starts them the same way as startup,
+with the config and workflow files now on disk. `jig wake` writes a
 request file next to the status document, which the supervisor reads at
 its next 2-second tick.
 
@@ -583,9 +694,90 @@ to the status document. Idle sleep does not start paused workflows at wake.
 A manual pause is kept across periods; the override and the warning reset at
 each period.
 
-Env overrides: `SORTIE_LOOP_REPO`, `SORTIE_LOOP_TOKEN`,
-`SORTIE_LOOP_MILESTONE` (plus `GH_MILESTONE` as a legacy alias),
-`SORTIE_LOOP_ASSIGNEE` (overrides `assignee:`).
+Env overrides: `JIG_REPO`, `JIG_TOKEN`,
+`JIG_MILESTONE` (plus `GH_MILESTONE` as a legacy alias),
+`JIG_ASSIGNEE` (overrides `assignee:`).
+
+### Working hours and agent accounts
+
+The optional file `<user config dir>/jigz/machine.yaml` (Linux:
+`$XDG_CONFIG_HOME/jigz/machine.yaml` or `~/.config/jigz/machine.yaml`)
+applies to the loops of every repository on the machine. Without it, loops run
+without an hours limit and without a pool. The Agents page of the dashboard
+shows the hours and the pool.
+
+```yaml
+hours:
+  timezone: Europe/Madrid     # IANA name; empty = local time
+  end: finish                 # finish | stop; default finish
+  windows:
+    - days: [mon, tue, wed, thu, fri]
+      start: "09:00"
+      end: "18:00"            # an end earlier than start wraps past midnight
+pool:
+  - name: claude-work
+    runtime: claude-code      # claude-code | pi
+    command: claude           # default "claude" or "pi" by runtime
+    env:
+      CLAUDE_CONFIG_DIR: ~/.claude-work
+    hours:                    # optional; windows only, same shape as above
+      windows: []
+    cost_class: subscription  # free-text label shown in the dashboard
+  - name: pi-api
+    runtime: pi
+    env:
+      ANTHROPIC_API_KEY: ...
+limits:
+  default_reset: 1h           # used when the CLI message has no reset time
+  patterns: []                # extra case-insensitive regexes
+engine:
+  repo: ""               # owner/name of the engine's GitHub repository; empty = the default
+  version: v1.28.1       # release tag, vX.Y.Z; empty = the default
+```
+
+The `engine` block selects the engine release and is optional; an empty
+field uses the default. `JIG_ENGINE_REPO` and `JIG_ENGINE_VERSION`
+override it (see [The engine](#the-engine)). A problem in the hours or pool
+settings does not stop the engine from being resolved.
+
+Without windows the hours are always open. `env` values expand a leading `~/`
+and `$VAR` or `${VAR}`. The file can hold API keys, so keep it readable by you
+only (`chmod 600`); loading warns when it is not.
+
+`end: finish` makes loops claim nothing new when the window closes and stops
+each loop once it has no running session. `end: stop` stops the loops when the
+window closes; the engine aborts the turn, the issue keeps its in-progress
+label and is dispatched again when the next window opens.
+
+With a pool, the supervisor starts each loop with the agent command set to
+`jig agent-exec <runtime>`. `agent-exec` runs the CLI of the first
+available entry of that runtime (not exhausted and inside its own hours), passes
+stdout through unchanged and exits with the CLI's exit code. When the CLI output
+reports a usage limit, the entry is marked exhausted until the reset time in
+the message, or for `limits.default_reset`. The state is stored in
+`<state dir>/jigz/pool.json`. Without an available entry, `agent-exec`
+exits 75. When the active runtime changes, loops are restarted once they have
+no running session.
+
+A usage limit is usually detected by `agent-exec` during the engine's credential
+check, which runs before each worker run. The run then fails before the turn
+starts, the engine posts no failure comment, and it retries after about 10
+seconds with the next available entry. A limit reached in the middle of a turn
+fails that engine session: the engine posts a session-failure comment on
+the issue and retries the same way.
+
+The dashboard, the CSV export and the JSON API class each finished run as
+`succeeded`, `failed_agent`, `failed_workspace`, `failed_limit`, `cancelled`,
+`timeout` or `handoff_withheld`. The class comes from the run status and the
+engine's error text. A usage limit is recognised in that text when the agent
+CLI reports it, or when `agent-exec` writes its limit line and the engine
+includes it in the error. `failed_agent` covers every other failure.
+
+Known limitation: with `max_concurrent_agents` above 1, a loop can claim new
+work between the window close and the moment it is stopped.
+
+Using a subscription account unattended can be restricted by the provider.
+Checking the provider's terms is your responsibility.
 
 ## Ad hoc: auto-merge on clean review
 
@@ -610,7 +802,7 @@ The commit author name/email is what GitHub displays. Point the loop's git
 identity at the agent — in the target repo or globally:
 
 ```sh
-git config --global user.name "sortie-agent"
+git config --global user.name "jig-agent"
 git config --global user.email "agent@example.com"
 ```
 
@@ -636,7 +828,7 @@ yours is older.
 ## Known limitations
 
 - **One crashed loop stops the run.** A loop process exiting ends
-  `sortie-loop`, as a signal does. The remaining loops are stopped
+  `jig`, as a signal does. The remaining loops are stopped
   cleanly and the registry entry is dropped, but nothing restarts them.
 - **Workflow files are not version-stamped.** A workflow file you have
   not edited is not updated when the binary is upgraded. Delete it and
@@ -647,35 +839,21 @@ yours is older.
 ## Customizing agents and workflows
 
 The shipped default is the `pi` agent. Every `WORKFLOW.*.md` also
-documents a commented-out `claude-code` alternative (`sonnet`) — swap
-the `agent:` block for the commented one, keeping the same `max_turns`
-and timeouts. The `model:` value
+carries a `claude-code:` block (`sonnet`) next to `pi:`; the engine reads
+only the block named by `agent.kind`. To switch, set `agent.kind:
+claude-code` and `agent.command: claude`. The `model:` value
 passes through to `claude --model` unvalidated, so only use aliases
 your installed CLI accepts. The pinned engine only knows `pi` and
 `claude-code` (plus a few others); other adapters need a newer or
-upstream engine binary. The dashboard's token/model columns populate
+upstream engine binary. An engine without `pi` runs the loops with
+`claude-code` (see [Engine capabilities](#engine-capabilities)). Setting
+`agent.kind` to `codex` or `opencode` needs `agent.command` set as well (the
+shipped `command: pi` would be passed to the adapter), and no pool runtime or
+shipped adapter block exists for them. The dashboard's token/model columns populate
 for either agent.
-
-Sortie upstream references:
-
-- [Claude Code adapter](https://docs.sortie-ai.com/reference/adapter-claude-code/) —
-  `agent:` fields and the `claude-code:` extension block
-  (`model`, `fallback_model`, `permission_mode`, costs)
-- [WORKFLOW.md configuration reference](https://docs.sortie-ai.com/reference/workflow-config/) —
-  full front-matter schema
-- [Configure dispatch rules](https://docs.sortie-ai.com/guides/configure-dispatch-rules/) —
-  routing plus the `dispatch.agent.missing_block` rule (every kind a
-  rule names needs its own settings block)
-- [Write a prompt template](https://docs.sortie-ai.com/guides/write-prompt-template/) —
-  template variables and helpers for `prompts/*.md`
-- [Control agent costs](https://docs.sortie-ai.com/guides/control-costs/) —
-  turn caps, session caps, concurrency limits
 
 ## Roadmap
 
-- Re-sync the engine fork periodically. `kinged007/sortie` is a superset
-  of `sortie-ai/sortie` today — 18 commits ahead, 0 behind — but nothing
-  merges upstream into it, so the two will drift.
 - Restart a loop that exits instead of ending the run. Currently one
   crashed loop stops every other loop; see
   [Known limitations](#known-limitations).
