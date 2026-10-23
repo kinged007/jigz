@@ -149,14 +149,16 @@ kept.
 - Plan and review prompts write questions in a marked block with an
   audience (`product` or `project`), a suggested answer, and whether the
   question blocks the work (format in `hub-protocol.md` section 4).
-- A blocking question also sets the `needs-answer` label; the item is
-  skipped until it is answered.
+- A blocking question escalates the item to the `needs-human` label; the
+  item is skipped until it is answered. The agent keeps its `agent:*`
+  trigger label, so removing `needs-human` returns the item to dispatch.
 - Standalone: the `jig` dashboard lists open questions.
 - Connected: the hub opens an inbox thread addressed to the product or
   project manager role. The role's agent (if configured) and subscribed
   humans can both read and reply.
-- The answer is posted to the issue as a marked comment and
-  `needs-answer` is removed. The next agent run reads it from the issue.
+- The answer is posted to the issue as a marked comment. When every
+  blocking question on the item has an answer, `needs-human` is removed.
+  The next agent run reads the answer from the issue.
 - Non-blocking questions: the agent proceeds with its suggested answer and
   records the assumption; a human can override it until the work starts.
 

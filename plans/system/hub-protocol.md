@@ -81,7 +81,12 @@ this form:
 
 - `audience`: `product` (scope, priority, user-facing behaviour) or
   `project` (technical approach, implementation, order of work).
-- A blocking question also adds the `needs-answer` label to the item.
+- A blocking question escalates the item to the `needs-human` label. Every
+  escalation to `needs-human` that waits for an answer carries at least one
+  blocking question in its comment. An escalation with no question (for
+  example, a PR that a person must review) has no block.
+- The agent keeps its `agent:*` trigger label when it escalates, so
+  removing `needs-human` returns the item to dispatch.
 
 Answers are comments in this form, written by the hub, by `jig`,
 or by a human:
@@ -92,8 +97,10 @@ or by a human:
 <!-- /agent-answer -->
 ```
 
-- When every blocking question on an item has an answer, the writer of the
-  last answer removes `needs-answer`.
+- When an item has at least one blocking question and every blocking
+  question has an answer, the writer of the last answer removes
+  `needs-human`. `needs-human` is never removed from an item that has no
+  question blocks.
 - Prompts instruct agents to read answers before acting and to treat an
   unanswered non-blocking question as answered with its suggestion.
 
@@ -104,8 +111,7 @@ or by a human:
 | `agent:<stage>` (plan, plan-build, build, docs, review, merge) | requests a workflow stage |
 | `in-progress` | claimed by a running agent |
 | `agent:done` | the agent finished its stage |
-| `needs-human` | escalated; excluded from dispatch |
-| `needs-answer` | has an unanswered blocking question; excluded from dispatch |
+| `needs-human` | escalated to a person, or waiting for an answer to a blocking question; excluded from dispatch |
 | `runner:<name>` | routed to one daemon (section 3) |
 
 The full set and colours are defined by `jig setup`; the hub uses
