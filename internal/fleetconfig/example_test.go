@@ -8,6 +8,7 @@ import (
 // The example config is documentation, so it has to keep loading and
 // keep behaving the way its comments claim.
 func TestExampleConfigLoadsAndDocumentsPerWorkflow(t *testing.T) {
+	t.Setenv("GH_TOKEN", "test-token")
 	c, err := Load(filepath.Join("testdata", "example.yaml"))
 	if err != nil {
 		t.Fatal(err)
