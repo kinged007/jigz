@@ -1,12 +1,15 @@
-// Package github is a read-only client for the few GitHub REST endpoints
-// Jigz uses to enrich run history. It only sends GET requests.
+// Package github is a client for the few GitHub REST endpoints Jigz uses
+// to enrich run history and to post answers. It sends GET, POST and DELETE
+// requests.
 //
 // Each call names a key, the project the token belongs to, so rate limit
 // back-off applies per token. Error values never contain the token.
 package github
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -33,6 +36,7 @@ type Client struct {
 
 	mu    sync.Mutex
 	until map[string]time.Time
+	users map[string]string
 }
 
 // Response is a successful reply. A 304 has NotModified set and no body.
@@ -44,6 +48,15 @@ type Response struct {
 
 // Error is a reply with a status other than 200 or 304.
 type Error struct{ Status int }
+
+// ErrNotFound matches a 404 reply. A DELETE that reports it means the
+// resource is already gone and counts as success for the caller.
+var ErrNotFound = errors.New("not found")
+
+// Is reports whether target is ErrNotFound and the reply was a 404.
+func (e *Error) Is(target error) bool {
+	return target == ErrNotFound && e.Status == http.StatusNotFound
+}
 
 func (e *Error) Error() string {
 	return fmt.Sprintf("GitHub answered %d %s", e.Status, http.StatusText(e.Status))
@@ -83,10 +96,60 @@ func (c *Client) backOff(key string, t time.Time) {
 // Get fetches path, which starts with "/", with token. A non-empty etag is
 // sent as If-None-Match.
 func (c *Client) Get(ctx context.Context, key, token, path, etag string) (Response, error) {
+	return c.do(ctx, key, token, http.MethodGet, path, nil, etag)
+}
+
+// Post sends body as JSON to path, which starts with "/", with token.
+func (c *Client) Post(ctx context.Context, key, token, path string, body []byte) (Response, error) {
+	return c.do(ctx, key, token, http.MethodPost, path, body, "")
+}
+
+// Delete removes the resource at path, which starts with "/", with token.
+// A 404 is reported as ErrNotFound: the resource is already gone.
+func (c *Client) Delete(ctx context.Context, key, token, path string) error {
+	_, err := c.do(ctx, key, token, http.MethodDelete, path, nil, "")
+	return err
+}
+
+// User returns the login of the token's account, cached per key.
+func (c *Client) User(ctx context.Context, key, token string) (string, error) {
+	c.mu.Lock()
+	login, ok := c.users[key]
+	c.mu.Unlock()
+	if ok {
+		return login, nil
+	}
+	resp, err := c.Get(ctx, key, token, "/user", "")
+	if err != nil {
+		return "", err
+	}
+	var u struct {
+		Login string `json:"login"`
+	}
+	if err := json.Unmarshal(resp.Body, &u); err != nil {
+		return "", fmt.Errorf("GitHub response: %w", err)
+	}
+	if u.Login == "" {
+		return "", errors.New("GitHub response: no login")
+	}
+	c.mu.Lock()
+	if c.users == nil {
+		c.users = map[string]string{}
+	}
+	c.users[key] = u.Login
+	c.mu.Unlock()
+	return u.Login, nil
+}
+
+func (c *Client) do(ctx context.Context, key, token, method, path string, body []byte, etag string) (Response, error) {
 	if t, limited := c.LimitedUntil(key); limited {
 		return Response{}, &RateLimitError{t}
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
+	var rd io.Reader
+	if body != nil {
+		rd = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, rd)
 	if err != nil {
 		return Response{}, err
 	}
@@ -99,6 +162,9 @@ func (c *Client) Get(ctx context.Context, key, token, path, etag string) (Respon
 	if etag != "" {
 		req.Header.Set("If-None-Match", etag)
 	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	hc := c.HTTP
 	if hc == nil {
 		hc = &http.Client{Timeout: 20 * time.Second}
@@ -109,10 +175,10 @@ func (c *Client) Get(ctx context.Context, key, token, path, etag string) (Respon
 	}
 	defer resp.Body.Close()
 	limited := c.noteLimits(key, resp)
-	switch resp.StatusCode {
-	case http.StatusNotModified:
+	switch {
+	case resp.StatusCode == http.StatusNotModified:
 		return Response{NotModified: true, ETag: etag}, nil
-	case http.StatusOK:
+	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
 		if err != nil {
 			return Response{}, fmt.Errorf("GitHub response: %w", err)
