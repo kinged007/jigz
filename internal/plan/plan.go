@@ -63,7 +63,7 @@ func (p Plan) ApplySettings(r config.Resolved) error {
 	}
 	kind := r.Agent.Kind
 	if kind == "" {
-		kind = defaultAdapter
+		kind = engine.DefaultAgent
 	}
 	for _, f := range files {
 		stem := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(f), "WORKFLOW."), ".md")
@@ -95,8 +95,8 @@ func (p Plan) ApplySettings(r config.Resolved) error {
 			case key == "model":
 				// The engine has no model override, so the file points at
 				// a variable. The adapter block is named by the agent
-				// kind, and the shipped workflows only carry the one for
-				// their own default kind, so this one may need creating.
+				// kind, and a kind the shipped workflows do not carry a
+				// block for needs one created.
 				block, fileKey, create = kind, "model", true
 				value = "$" + r.ModelVar(stem)
 			case !known:
@@ -138,12 +138,13 @@ const modelUnset = `""`
 // an adapter block Jigz created is a top-level key the engine does not
 // recognise once the agent kind is no longer that adapter.
 //
-// A block whose only content is Jigz's own line, and whose name is not
-// the default adapter's, is one Jigz created: the shipped workflows
-// carry a block for their own adapter and no other. It is dropped, because
-// an emptied block would still be an unrecognised top-level key. The
-// default adapter's block is shipped and is kept, as is any block holding
-// anything else, so only the reference in those is reverted.
+// A block whose only content is Jigz's own line is dropped, because an
+// emptied block would still be an unrecognised top-level key. The
+// default adapter's block is kept, as is any block holding anything
+// else, so only the reference in those is reverted. The rule cannot
+// tell a block Jigz created from a shipped block of another adapter
+// whose model line it rewrote, so the latter is dropped too and loses
+// its shipped model value.
 func pruneModelRefs(body []byte) ([]byte, error) {
 	lines := strings.Split(string(body), "\n")
 	start, end, err := frontMatter(lines)
@@ -169,7 +170,7 @@ func pruneModelRefs(body []byte) ([]byte, error) {
 		if own == 0 {
 			continue
 		}
-		drop := other == 0 && strings.TrimSuffix(strings.TrimSpace(lines[b.from]), ":") != defaultAdapter
+		drop := other == 0 && strings.TrimSuffix(strings.TrimSpace(lines[b.from]), ":") != engine.DefaultAgent
 		for i := b.from + 1; i < b.to; i++ {
 			if classify(lines[i]) == lineOwn {
 				if drop {
@@ -346,10 +347,6 @@ func frontMatter(lines []string) (int, int, error) {
 	}
 	return 0, 0, errors.New("unterminated front matter")
 }
-
-// modelVarDefault is the adapter block the shipped workflows use when no
-// agent kind is configured.
-const defaultAdapter = "pi"
 
 // Diagnostics is one repository's validation result. Empty Errors and
 // Warnings with Valid true means the repository is ready to start.
@@ -630,7 +627,6 @@ func (p Plan) validateFile(bin string, env []string, f string) (FileResult, erro
 		case lg.Off != "":
 			return FileResult{Valid: true, Warnings: []Issue{{Check: "capability", Message: lg.Off}}}, nil
 		}
-		cmd.Env = append(cmd.Env, lg.Env...)
 	}
 	var stdout, stderr strings.Builder
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

@@ -264,10 +264,6 @@ func (s *supervisor) startOne(name string) error {
 		s.republish()
 		return nil
 	}
-	if lg.Note != "" {
-		fmt.Fprintf(os.Stderr, "jig: %s: %s\n", name, lg.Note)
-	}
-	env = append(env, lg.Env...)
 	var logw io.Writer
 	var logf *rotatingLog
 	if lf, err := openRotatingLog(childLogPath(s.root, name), childLogMaxBytes, childLogKeep); err != nil {

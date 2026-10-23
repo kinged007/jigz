@@ -30,7 +30,7 @@ func workflows(t *testing.T, dir string, names ...string) {
 	for _, n := range names {
 		// Shaped like a shipped workflow: a polling: block, an agent:
 		// block, and an adapter block carrying the model.
-		body := "---\npolling:\n  interval_ms: 60000\n\nagent:\n  kind: pi\n  max_turns: 5\n  max_concurrent_agents: 1\n\npi:\n  model: \"\"\n---\nbody\n"
+		body := "---\npolling:\n  interval_ms: 60000\n\nagent:\n  kind: claude-code\n  max_turns: 5\n  max_concurrent_agents: 1\n\nclaude-code:\n  model: \"\"\n---\nbody\n"
 		if err := os.WriteFile(filepath.Join(w, "WORKFLOW."+n+".md"), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -342,13 +342,14 @@ func TestAdapterBlockIsCreatedForANonDefaultKind(t *testing.T) {
 	if !strings.Contains(string(raw), "codex:\n  model: $JIG_MODEL\n") {
 		t.Errorf("codex adapter block not created:\n%s", raw)
 	}
-	// The pi block is left alone: the engine only reads the active
-	// kind's block, and rewriting it would edit a block nothing reads.
-	if !strings.Contains(string(raw), "pi:\n  model: \"\"") {
-		t.Errorf("pi block was modified:\n%s", raw)
+	// The claude-code block is left alone: the engine only reads the
+	// active kind's block, and rewriting it would edit a block nothing
+	// reads.
+	if !strings.Contains(string(raw), "claude-code:\n  model: \"\"") {
+		t.Errorf("claude-code block was modified:\n%s", raw)
 	}
 	// The kind itself is the env's business, not the file's.
-	if !strings.Contains(string(raw), "agent:\n  kind: pi\n") {
+	if !strings.Contains(string(raw), "agent:\n  kind: claude-code\n") {
 		t.Errorf("agent block was modified:\n%s", raw)
 	}
 	// Still valid front matter: one closing fence, comments intact.

@@ -63,8 +63,8 @@ hooks:
   timeout_ms: 60000
 
 agent:
-  kind: pi
-  command: pi
+  kind: claude-code
+  command: claude
   max_turns: 10
   max_concurrent_agents: 1
   turn_timeout_ms: 3600000
@@ -77,10 +77,10 @@ pi:
   model: "sonnet"
 
 # Both runtime blocks are present; the engine reads only the one named by
-# agent.kind. The agent account pool in machine.yaml overrides agent.kind and
-# agent.command at run time.
+# agent.kind, which defaults to claude-code. The agent account pool in
+# machine.yaml overrides agent.kind and agent.command at run time.
 claude-code:
-  model: "sonnet"
+  model: "claude-haiku-5-5"
 
 # The first matching rule wins, so a PR carrying two trigger labels runs the
 # earlier rule.

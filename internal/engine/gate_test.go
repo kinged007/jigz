@@ -64,27 +64,26 @@ func TestGateTrackerOff(t *testing.T) {
 
 func TestGateAgent(t *testing.T) {
 	for _, c := range []struct {
-		name      string
-		g         Gate
-		kind      string
-		explicit  bool
-		use       string
-		note, bad bool
+		name string
+		g    Gate
+		kind string
+		bad  bool
 	}{
-		{"fork keeps pi", fork, "pi", false, "pi", false, false},
-		{"upstream falls back", upstream, "pi", false, "claude-code", true, false},
-		{"explicit pi is an error", upstream, "pi", true, "pi", false, true},
-		{"explicit codex available", upstream, "codex", true, "codex", false, false},
-		{"explicit unknown kind", upstream, "gemini", true, "gemini", false, true},
-		{"file kind unknown", upstream, "gemini", false, "gemini", false, true},
-		{"no fallback agent", NewGate(Capabilities{Bin: "x", Version: "1.29.0", Trackers: []string{"github"}, Agents: []string{"mock"}}, spec), "pi", false, "pi", false, true},
-		{"unknown capabilities", unknown, "pi", false, "pi", false, false},
-		{"no kind", upstream, "", false, "", false, false},
+		{"shipped default on any engine", upstream, "claude-code", false},
+		{"fork keeps pi", fork, "pi", false},
+		{"explicit pi on an engine without pi is an error", upstream, "pi", true},
+		{"explicit codex available", upstream, "codex", false},
+		{"explicit unknown kind", upstream, "gemini", true},
+		{"no fallback for the default kind", NewGate(Capabilities{Bin: "x", Version: "1.29.0", Trackers: []string{"github"}, Agents: []string{"mock"}}, spec), "claude-code", true},
+		{"unknown capabilities", unknown, "pi", false},
+		{"no kind", upstream, "", false},
 	} {
-		use, note, bad := c.g.Agent(c.kind, c.explicit)
-		if use != c.use || (note != "") != c.note || (bad != "") != c.bad {
-			t.Errorf("%s: Agent = %q, %q, %q", c.name, use, note, bad)
+		if got := c.g.Agent(c.kind); (got != "") != c.bad {
+			t.Errorf("%s: Agent = %q, bad = %v", c.name, got, c.bad)
 		}
+	}
+	if got := upstream.Agent("pi"); !strings.Contains(got, `Agent kind "pi" is not available`) {
+		t.Errorf("Agent text = %q", got)
 	}
 }
 

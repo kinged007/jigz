@@ -15,8 +15,8 @@ linux and darwin on amd64 and arm64. Windows is not a target.
 engine find one on `PATH` or in the cache and skip when there is none, so
 CI does not have to install the engine. The workflow-validation test is the
 exception: it runs the pinned engine when one is present, because
-the shipped workflows are only valid against an engine that has the `pi`
-adapter and the `github-pr` tracker.
+the shipped workflows are only valid against an engine that has the `github-pr`
+tracker; the `claude-code` adapter is standard on every supported engine.
 
 `release_config_test.go` asserts the contract between `install.sh` and
 `.goreleaser.yaml`. If you change either asset name, change both.

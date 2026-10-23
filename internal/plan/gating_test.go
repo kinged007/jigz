@@ -22,37 +22,31 @@ func TestGateLoop(t *testing.T) {
 	fork := gate("1.28.1", "github, github-pr", "claude-code, pi")
 	up := gate("1.29.0", "github", "claude-code, codex")
 	old := gate("1.26.0", "github, github-pr", "claude-code, pi")
-	fallback := []string{"SORTIE_AGENT_KIND=claude-code", "SORTIE_AGENT_COMMAND=claude"}
 	for _, c := range []struct {
-		name     string
-		g        engine.Gate
-		text     string
-		env      []string
-		off      string
-		problem  bool
-		env2     []string
-		hasNote  bool
-		wantNone bool
+		name    string
+		g       engine.Gate
+		text    string
+		env     []string
+		off     string
+		problem bool
 	}{
-		{name: "fork issue loop", g: fork, text: flow("github", "pi"), wantNone: true},
-		{name: "fork PR loop", g: fork, text: flow("github-pr", "pi"), wantNone: true},
-		{name: "upstream PR loop", g: up, text: flow("github-pr", "pi"), off: "PR workflow is off"},
-		{name: "upstream issue loop", g: up, text: flow("github", "pi"), env2: fallback, hasNote: true},
-		{name: "upstream codex", g: up, text: flow("github", "codex"), wantNone: true},
+		{name: "the shipped default runs as is on any engine", g: up, text: flow("github", "claude-code")},
+		{name: "fork PR loop", g: fork, text: flow("github-pr", "claude-code")},
+		{name: "explicit pi on an engine without pi is an error", g: up, text: flow("github", "pi"), off: `Agent kind "pi"`, problem: true},
+		{name: "explicit pi on an engine with pi runs as is", g: fork, text: flow("github", "pi")},
+		{name: "upstream PR loop", g: up, text: flow("github-pr", "claude-code"), off: "PR workflow is off"},
+		{name: "upstream codex", g: up, text: flow("github", "codex")},
 		{name: "upstream unknown agent", g: up, text: flow("github", "gemini"), off: `Agent kind "gemini"`, problem: true},
-		{name: "upstream explicit pi in env", g: up, text: flow("github", "claude-code"), env: []string{"SORTIE_AGENT_KIND=pi"}, off: `Agent kind "pi"`, problem: true},
-		{name: "pool picked claude-code", g: up, text: flow("github", "pi"), env: []string{"SORTIE_AGENT_KIND=claude-code"}, wantNone: true},
-		{name: "old engine", g: old, text: flow("github", "pi"), off: "Loops are off", problem: true},
-		{name: "unreadable file", g: up, text: "no front matter", wantNone: true},
-		{name: "zero gate", g: engine.Gate{}, text: flow("github-pr", "pi"), wantNone: true},
+		{name: "env kind the engine lacks", g: up, text: flow("github", "claude-code"), env: []string{"SORTIE_AGENT_KIND=pi"}, off: `Agent kind "pi"`, problem: true},
+		{name: "pool picks claude-code", g: up, text: flow("github", "pi"), env: []string{"SORTIE_AGENT_KIND=claude-code"}},
+		{name: "old engine", g: old, text: flow("github", "claude-code"), off: "Loops are off", problem: true},
+		{name: "unreadable file", g: up, text: "no front matter"},
+		{name: "zero gate", g: engine.Gate{}, text: flow("github-pr", "claude-code")},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			lg := GateLoop(c.g, c.text, c.env)
 			if (c.off == "") != (lg.Off == "") || !strings.Contains(lg.Off, c.off) || lg.Problem != c.problem {
 				t.Fatalf("GateLoop = %+v, want off %q problem %v", lg, c.off, c.problem)
-			}
-			if strings.Join(lg.Env, " ") != strings.Join(c.env2, " ") || (lg.Note != "") != c.hasNote {
-				t.Fatalf("GateLoop = %+v, want env %v note %v", lg, c.env2, c.hasNote)
 			}
 		})
 	}
@@ -79,8 +73,8 @@ esac
 	}
 	prs := filepath.Join(dir, "WORKFLOW.prs.md")
 	issues := filepath.Join(dir, "WORKFLOW.issues.md")
-	os.WriteFile(prs, []byte(flow("github-pr", "pi")), 0o644)
-	os.WriteFile(issues, []byte(flow("github", "pi")), 0o644)
+	os.WriteFile(prs, []byte(flow("github-pr", "claude-code")), 0o644)
+	os.WriteFile(issues, []byte(flow("github", "claude-code")), 0o644)
 
 	p := Plan{}
 	res, err := p.validateFile(bin, nil, prs)

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kinged007/jigz/internal/engine"
+	"github.com/kinged007/jigz/internal/plan"
 )
 
 const (
@@ -31,9 +32,9 @@ func TestCapAlerts(t *testing.T) {
 	fork := testGate("1.28.1", forkTrackers, forkAgents)
 	old := testGate("1.26.0", forkTrackers, forkAgents)
 	unknown := engine.NewGate(engine.Capabilities{Bin: "/bin/sortie", Err: "exit status 3"}, engine.Spec{})
-	issues := loopFile{"o/a", "issues", flow("github", "pi")}
-	prs := loopFile{"o/a", "prs", flow("github-pr", "pi")}
-	prs2 := loopFile{"o/b", "prs", flow("github-pr", "pi")}
+	issues := loopFile{"o/a", "issues", flow("github", "claude-code")}
+	prs := loopFile{"o/a", "prs", flow("github-pr", "claude-code")}
+	prs2 := loopFile{"o/b", "prs", flow("github-pr", "claude-code")}
 
 	for _, c := range []struct {
 		name  string
@@ -45,12 +46,13 @@ func TestCapAlerts(t *testing.T) {
 	}{
 		{"fork runs everything", fork, []loopFile{issues, prs}, nil, []string{"pi"}, nil},
 		{"upstream", upstream, []loopFile{issues, prs, prs2}, nil, nil, []string{
-			"warn|Agent fallback|Agent pi is not available: engine sortie-ai/sortie v1.29.0 has no pi agent. Loops run with claude-code.",
 			"warn|Feature off|PR workflow is off: engine sortie-ai/sortie v1.29.0 has no github-pr tracker."}},
 		{"upstream with a pi pool entry", upstream, nil, nil, []string{"pi", "claude-code"}, []string{
 			"warn|Pool|Pool entries with runtime pi are unavailable: engine sortie-ai/sortie v1.29.0 has no pi agent."}},
 		{"explicit kind the engine lacks", upstream, []loopFile{{"o/a", "issues", flow("github", "gemini")}}, nil, nil, []string{
 			`err|Agent kind|o/a/issues: Agent kind "gemini" is not available: engine sortie-ai/sortie v1.29.0 registers claude-code, codex, mock. The loop is not started.`}},
+		{"explicit pi is an error with no fallback", upstream, []loopFile{{"o/a", "issues", flow("github", "pi")}}, nil, nil, []string{
+			`err|Agent kind|o/a/issues: Agent kind "pi" is not available: engine sortie-ai/sortie v1.29.0 registers claude-code, codex, mock. The loop is not started.`}},
 		{"explicit env kind the engine lacks", upstream, []loopFile{issues}, []string{"SORTIE_AGENT_KIND=pi"}, nil, []string{
 			`err|Agent kind|o/a/issues: Agent kind "pi" is not available: engine sortie-ai/sortie v1.29.0 registers claude-code, codex, mock. The loop is not started.`}},
 		{"codex in the file", upstream, []loopFile{{"o/a", "issues", flow("github", "codex")}}, nil, nil, nil},
@@ -86,8 +88,8 @@ func gatedSup(t *testing.T, g engine.Gate) (*supervisor, string) {
 	t.Helper()
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, ".jigz", "config.yaml"), "repo: owner/name\n")
-	mustWrite(t, filepath.Join(root, ".jigz", "workflows", "WORKFLOW.issues.md"), flow("github", "pi"))
-	mustWrite(t, filepath.Join(root, ".jigz", "workflows", "WORKFLOW.prs.md"), flow("github-pr", "pi"))
+	mustWrite(t, filepath.Join(root, ".jigz", "workflows", "WORKFLOW.issues.md"), flow("github", "claude-code"))
+	mustWrite(t, filepath.Join(root, ".jigz", "workflows", "WORKFLOW.prs.md"), flow("github-pr", "claude-code"))
 	sup := newTestSup(t, root, "issues", "prs")
 	sup.ports["issues"], sup.ports["prs"] = 0, 0
 	sup.bin = writeScript(t, root, "sortie", `echo "$SORTIE_AGENT_KIND $SORTIE_AGENT_COMMAND" >> "`+root+`/agent.log"`+"\nwhile true; do sleep 1; done\n")
@@ -96,7 +98,7 @@ func gatedSup(t *testing.T, g engine.Gate) (*supervisor, string) {
 	return sup, root
 }
 
-func TestUpstreamEngineSkipsThePRLoopAndFallsBackToClaudeCode(t *testing.T) {
+func TestUpstreamEngineSkipsThePRLoop(t *testing.T) {
 	sup, root := gatedSup(t, testGate("1.29.0", upTrackers, upAgents))
 	if err := sup.startAll([]string{"issues", "prs"}); err != nil {
 		t.Fatal(err)
@@ -120,13 +122,48 @@ func TestUpstreamEngineSkipsThePRLoopAndFallsBackToClaudeCode(t *testing.T) {
 	if !found {
 		t.Error("the status document lacks the disabled loop")
 	}
+	// The file names claude-code, which the engine has: the loop runs
+	// with the file's own agent settings and nothing is injected.
 	var logged string
-	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline) && !strings.Contains(logged, "claude"); time.Sleep(20 * time.Millisecond) {
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline) && logged == ""; time.Sleep(20 * time.Millisecond) {
 		b, _ := os.ReadFile(filepath.Join(root, "agent.log"))
 		logged = string(b)
 	}
-	if strings.TrimSpace(logged) != "claude-code claude" {
-		t.Fatalf("the issues loop ran with %q, want claude-code claude", strings.TrimSpace(logged))
+	if strings.TrimSpace(logged) != "" {
+		t.Fatalf("the issues loop ran with agent overrides %q, want the file's own settings", strings.TrimSpace(logged))
+	}
+}
+
+func TestAnExplicitPiKindOnAnEngineWithoutPiDoesNotStart(t *testing.T) {
+	sup, root := gatedSup(t, testGate("1.29.0", upTrackers, upAgents))
+	mustWrite(t, filepath.Join(root, ".jigz", "workflows", "WORKFLOW.issues.md"), flow("github", "pi"))
+	if err := sup.startAll([]string{"issues", "prs"}); err != nil {
+		t.Fatal(err)
+	}
+	why := sup.disabled["issues"]
+	if !strings.Contains(why, `Agent kind "pi" is not available`) {
+		t.Fatalf("disabled[issues] = %q", why)
+	}
+	if len(sup.procs) != 0 {
+		t.Fatalf("running %v, want none", sup.names())
+	}
+}
+
+// The shipped workflows parse to the claude-code agent, the claude
+// command and the claude-haiku-5-5 model in the claude-code block.
+func TestShippedWorkflowsUseTheClaudeCodeDefault(t *testing.T) {
+	for _, name := range []string{"WORKFLOW.issues.md", "WORKFLOW.prs.md"} {
+		raw, err := embeddedWorkflows.ReadFile("workflows/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wf, err := plan.ParseWorkflow(string(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if wf.AgentKind != "claude-code" || wf.Knobs["command"] != "claude" || wf.Model != "claude-haiku-5-5" {
+			t.Errorf("%s: agent %q command %q model %q, want claude-code, claude, claude-haiku-5-5", name, wf.AgentKind, wf.Knobs["command"], wf.Model)
+		}
 	}
 }
 

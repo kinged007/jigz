@@ -141,7 +141,6 @@ func runSortieValidate(bin, dir string, loop loopDef, cfg *config.Config) (strin
 		case lg.Off != "":
 			return "disabled: " + lg.Off, nil
 		}
-		env = append(env, lg.Env...)
 	}
 	cmd := exec.Command(bin, "validate", loop.file)
 	cmd.Dir = dir
