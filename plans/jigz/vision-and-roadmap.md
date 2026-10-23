@@ -150,7 +150,8 @@ Without the fork, the issue workflow runs with `claude-code`, `codex`, or
 - Dashboard page listing open questions across repositories; answering
   there writes an `agent-answer` comment. When every blocking question on
   the item has an answer, the dashboard removes `needs-human` and
-  `agent:done` together.
+  `agent:done` and adds the trigger label named in the question's
+  `resume` attribute.
 
 ### 5.4 Previews
 
@@ -284,13 +285,14 @@ Done.
 ### Phase 3: Questions (5.3)
 
 - Plan and review prompts write `agent-question` blocks; a blocking
-  question escalates the item to `needs-human` and keeps its `agent:*`
-  trigger label.
+  question escalates the item to `needs-human` and names its `agent:*`
+  trigger label in `resume`, because the engine removes the trigger at
+  handoff.
 - Prompts read `agent-answer` comments before acting.
 - Dashboard Questions page across repositories: list, filter by audience
   and blocking, answer (writes an `agent-answer` comment; removes
-  `needs-human` and `agent:done` together when every blocking question on
-  the item has an answer).
+  `needs-human` and `agent:done` and adds the `resume` trigger when every
+  blocking question on the item has an answer).
 - Plan: [questions.md](questions.md).
 - Acceptance: a blocking question stops dispatch; answering it in the
   dashboard resumes it and the next run sees the answer.

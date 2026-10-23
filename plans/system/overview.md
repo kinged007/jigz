@@ -150,16 +150,17 @@ kept.
   audience (`product` or `project`), a suggested answer, and whether the
   question blocks the work (format in `hub-protocol.md` section 4).
 - A blocking question escalates the item to the `needs-human` label; the
-  item is skipped until it is answered. The agent keeps its `agent:*`
-  trigger label, and the engine adds `agent:done` when the run exits.
+  item is skipped until it is answered. The question block names the
+  trigger label in `resume`, because at handoff the engine adds
+  `agent:done` and removes the trigger.
 - Standalone: the `jig` dashboard lists open questions.
 - Connected: the hub opens an inbox thread addressed to the product or
   project manager role. The role's agent (if configured) and subscribed
   humans can both read and reply.
 - The answer is posted to the issue as a marked comment. When every
   blocking question on the item has an answer, `needs-human` and
-  `agent:done` are removed together, and the trigger label returns the
-  item to dispatch. The next agent run reads the answer from the issue.
+  `agent:done` are removed and the `resume` trigger label is added, which
+  returns the item to dispatch. The next agent run reads the answer from the issue.
 - Non-blocking questions: the agent proceeds with its suggested answer and
   records the assumption; a human can override it until the work starts.
 
