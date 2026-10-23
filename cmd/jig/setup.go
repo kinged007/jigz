@@ -482,8 +482,15 @@ func ensureGitignoreJSON(dir string, res *setupResult) {
 		}
 	}
 	if selective {
-		res.Skipped = append(res.Skipped, setupSkipped{Path: path, Reason: "selective-tracked"})
-		res.Warnings = append(res.Warnings, ".gitignore tracks parts of .jigz/ — leaving ignore rules alone")
+		if have["jigz-*.db"] {
+			res.Skipped = append(res.Skipped, setupSkipped{Path: path, Reason: "selective-tracked"})
+			return
+		}
+		if err := appendDBIgnore(path, string(raw)); err != nil {
+			printSetupJSONAndFatal(res, fmt.Errorf("write .gitignore: %w", err))
+			return
+		}
+		res.Created = append(res.Created, setupCreated{Path: path, Kind: "gitignore"})
 		return
 	}
 	want := []string{".jigz/", "/jig"}
@@ -574,13 +581,25 @@ const selectiveGitignore = `# jig: track shared config, ignore run state
 .jigz/*
 !.jigz/config.yaml
 !.jigz/workflows/
-.sortie-*.db`
+jigz-*.db`
+
+// appendDBIgnore appends the jigz-*.db ignore on its own line and
+// writes the result to path.
+func appendDBIgnore(path, content string) error {
+	out := content
+	if out != "" && !strings.HasSuffix(out, "\n") {
+		out += "\n"
+	}
+	out += "jigz-*.db\n"
+	return os.WriteFile(path, []byte(out), 0o644)
+}
 
 // ensureGitignore ignores .jigz/ wholesale — generated env, workspaces,
 // db files, and local config all stay untracked — creating .gitignore if
 // missing. Stale lines from the old granular scheme are removed. When the
 // file re-includes parts of .jigz/ via negations the user tracks
-// selectively on purpose, so those lines are left alone.
+// selectively on purpose, so those lines are left alone and a missing
+// jigz-*.db ignore is appended.
 func ensureGitignore(dir string) {
 	path := filepath.Join(dir, ".gitignore")
 	raw, err := os.ReadFile(path)
@@ -597,7 +616,13 @@ func ensureGitignore(dir string) {
 		}
 	}
 	if selective {
-		fmt.Println(".gitignore tracks parts of .jigz/ — leaving ignore rules alone")
+		if have["jigz-*.db"] {
+			return
+		}
+		if err := appendDBIgnore(path, string(raw)); err != nil {
+			fatal(fmt.Errorf("write .gitignore: %w", err))
+		}
+		fmt.Println("added jigz-*.db to", path)
 		return
 	}
 	want := []string{".jigz/", "/jig"}
