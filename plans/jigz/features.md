@@ -51,7 +51,7 @@ section 6.
 - Outcome classes of the hub protocol, mapped in one adapter (`internal/store/outcome.go`) — exists
 - Disabled-feature notices from capability detection (`capabilities.go`, `alerts.go`) — exists
 - Questions page with answering; the last answer removes `needs-human`
-  and `agent:done` together [3] ([plan](questions.md))
+  and `agent:done` and adds the `resume` trigger [3] ([plan](questions.md))
 - Working hours and account pool status (`gate.go`, `agents.go`) — exists
 - Preview links on runs [5]
 

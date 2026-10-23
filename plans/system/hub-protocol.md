@@ -73,21 +73,28 @@ Agents write questions inside a comment (plan, review, or any other) in
 this form:
 
 ```markdown
-<!-- agent-question id="q-<short-id>" audience="product|project" blocking="true|false" -->
+<!-- agent-question id="q-<short-id>" audience="product|project" blocking="true|false" resume="agent:<stage>" -->
 **Question:** ...
 **Suggested answer:** ...
 <!-- /agent-question -->
 ```
 
+Example start marker:
+`<!-- agent-question id="q-7f3a" audience="project" blocking="true" resume="agent:plan" -->`.
+
 - `audience`: `product` (scope, priority, user-facing behaviour) or
   `project` (technical approach, implementation, order of work).
+- `resume`: the trigger label that dispatched the run, an `agent:*` label
+  other than `agent:done`. Required when `blocking="true"`, optional
+  otherwise. A blocking question without it is malformed.
 - A blocking question escalates the item to the `needs-human` label. Every
   escalation to `needs-human` that waits for an answer carries at least one
   blocking question in its comment. An escalation with no question (for
   example, a PR that a person must review) has no block.
-- The agent keeps its `agent:*` trigger label when it escalates. On a
-  clean exit the engine adds `agent:done` because the trigger is still
-  on the item.
+- At handoff the engine adds `agent:done` and removes every other state
+  label: the trigger, `in-progress` and any terminal label. It does not
+  touch `needs-human`. A parked item therefore carries `needs-human` and
+  `agent:done` and no trigger; `resume` records the trigger.
 
 Answers are comments in this form, written by the hub, by `jig`,
 or by a human:
@@ -100,9 +107,11 @@ or by a human:
 
 - When an item has at least one blocking question and every blocking
   question has an answer, the writer of the last answer removes both
-  `needs-human` and `agent:done` in one operation. The trigger label is
-  still on the item, so the next poll dispatches it as a new run. Neither
-  label is removed from an item that has no blocking question.
+  `needs-human` and `agent:done`, one `DELETE` call per label, so no
+  other label is overwritten, then adds the label named by `resume` unless
+  the item already carries a trigger. The next poll dispatches the item as
+  a new run. Neither label is removed from an item that has no blocking
+  question.
 - Prompts instruct agents to read answers before acting and to treat an
   unanswered non-blocking question as answered with its suggestion.
 
