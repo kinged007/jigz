@@ -143,6 +143,31 @@ func TestWarnStalePrompts(t *testing.T) {
 	}
 }
 
+func TestWarnStaleWorkflows(t *testing.T) {
+	root := t.TempDir()
+	syncWorkflows(root)
+	if got := captureStderr(t, func() { warnStaleWorkflows(root) }); got != "" {
+		t.Errorf("shipped workflows warned: %q", got)
+	}
+	// A pre-rename copy names a variable the binary no longer sets.
+	p := filepath.Join(root, ".jigz", "workflows", "WORKFLOW.issues.md")
+	cur, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := strings.ReplaceAll(string(cur), "$JIG_WORKSPACES", "$SORTIE_LOOP_WORKSPACES")
+	if stale == string(cur) {
+		t.Fatal("shipped copy no longer sets a workspace root")
+	}
+	if err := os.WriteFile(p, []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := captureStderr(t, func() { warnStaleWorkflows(root) })
+	if strings.Count(got, "note:") != 1 || !strings.Contains(got, "WORKFLOW.issues.md") {
+		t.Errorf("message = %q", got)
+	}
+}
+
 func TestWarnMissingLabels(t *testing.T) {
 	if got := captureStderr(t, func() { warnMissingLabels(config.DefaultLabels) }); got != "" {
 		t.Errorf("full list warned: %q", got)

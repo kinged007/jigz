@@ -89,6 +89,7 @@ func runSetup(dir, repo string, asJSON bool) {
 	}
 	warnLegacy(syncWorkflows(abs))
 	warnStalePrompts(abs)
+	warnStaleWorkflows(abs)
 	fmt.Println("workflows ready in", filepath.Join(abs, ".jigz", "workflows"))
 	syncPMAgent(abs, askBeforeOverwrite)
 	fmt.Println("project manager prompt ready in", filepath.Join(abs, ".jigz", "pm-agent.md"))
@@ -272,6 +273,17 @@ func runSetupJSON(dir, repo string) {
 		want, err := embeddedWorkflows.ReadFile("workflows/prompts/" + name)
 		if err == nil && string(cur) != string(want) {
 			msg := fmt.Sprintf("note: .jigz/workflows/prompts/%s differs from the shipped copy; diff it or delete it and rerun setup to take the shipped version.", name)
+			res.Warnings = append(res.Warnings, msg)
+		}
+	}
+	for _, name := range consolidatedWorkflows {
+		cur, err := os.ReadFile(filepath.Join(abs, ".jigz", "workflows", name))
+		if err != nil {
+			continue
+		}
+		want, err := embeddedWorkflows.ReadFile("workflows/" + name)
+		if err == nil && string(cur) != string(want) {
+			msg := fmt.Sprintf("note: .jigz/workflows/%s differs from the shipped copy; diff it or delete it and rerun setup to take the shipped version.", name)
 			res.Warnings = append(res.Warnings, msg)
 		}
 	}

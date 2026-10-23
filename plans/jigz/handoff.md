@@ -248,10 +248,17 @@ Known gaps from Phase 1, not scheduled:
 - A target repository installed before the directory rename keeps its
   files: `config.MigrateRepoDir` renames `.sortie/` to `.jigz/` on first
   lookup, when `.jigz` is missing. A repo with both directories keeps
-  `.jigz` and leaves the other alone. The workflow files a target
-  repository installed before the rename still name the old variables,
-  and `internal/config` sets those names alongside the new ones, so the
-  loops keep running until `jig setup` refreshes the files.
+  `.jigz` and leaves the other alone. The rename does not touch file
+  contents, so a workflow file installed before it still reads
+  `$SORTIE_LOOP_WORKSPACES` and `$SORTIE_LOOP_CLONE_URL`, which
+  `internal/config` no longer sets. The workspace root then expands to
+  empty and the engine fails its dispatch preflight with
+  `workspace.root is not writable: /issues`. `jig setup` does not
+  overwrite an existing `WORKFLOW.*.md`; it reports the file as
+  differing from the shipped copy, and the fix is to delete the stale
+  file and re-run setup, which restores the shipped copy. Local edits to
+  a workflow file do not survive that, and the `pi:`/`claude-code:`
+  `model:` value has to be reapplied.
 - `plans/jigz/enhancements.md` and `production-readiness.md` refer
   to `plans/pm-agent.md`, which does not exist in the repository.
 - Target repositories installed before Phase 1 have workflows without the

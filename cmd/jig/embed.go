@@ -100,6 +100,31 @@ func warnStalePrompts(root string) {
 	}
 }
 
+// warnStaleWorkflows names the installed workflow files that differ from
+// the shipped copies. A stale copy keeps variables the binary no longer
+// sets, so setup must point at it instead of leaving a run to fail on an
+// empty expansion.
+func warnStaleWorkflows(root string) {
+	dir := filepath.Join(root, ".jigz", "workflows")
+	entries, err := embeddedWorkflows.ReadDir("workflows")
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || !slices.Contains(consolidatedWorkflows, e.Name()) {
+			continue
+		}
+		cur, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		want, err := embeddedWorkflows.ReadFile("workflows/" + e.Name())
+		if err == nil && string(cur) != string(want) {
+			fmt.Fprintf(os.Stderr, "note: .jigz/workflows/%s differs from the shipped copy; diff it or delete it and rerun setup to take the shipped version.\n", e.Name())
+		}
+	}
+}
+
 // warnMissingLabels names the shipped labels absent from a configured
 // labels list, because setup only creates the labels in that list.
 func warnMissingLabels(labels []config.Label) {
