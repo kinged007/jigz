@@ -62,7 +62,7 @@ func TestStoppedProjectIsCopiedFromItsDatabases(t *testing.T) {
 	root := repoWithDBs(t, map[string]string{
 		"WORKFLOW.build.md": "---\ndb_path: .sortie-build.db\n---\n",
 		"WORKFLOW.plain.md": "no front matter\n",
-	}, ".sortie-build.db", ".sortie.db", ".sortie-orphan.db")
+	}, ".sortie-build.db", ".sortie.db", "jigz-orphan.db")
 	c, st := discovering(t, nil, map[string]string{"acme/app": root})
 	c.Once(context.Background())
 	got := runCounts(t, st)
@@ -109,13 +109,13 @@ func TestRegisteredLoopIsNotCountedAgainWhenDiscovered(t *testing.T) {
 }
 
 func TestDiscoveredDatabasesKeepGainingRuns(t *testing.T) {
-	root := repoWithDBs(t, nil, ".sortie-build.db")
+	root := repoWithDBs(t, nil, "jigz-build.db")
 	c, st := discovering(t, nil, map[string]string{"acme/app": root})
 	c.Once(context.Background())
 	if n := runCounts(t, st)["acme/app/build"]; n != 16 {
 		t.Fatalf("first pass = %d runs, want 16", n)
 	}
-	db, err := sql.Open("sqlite", filepath.Join(root, ".jigz", "workflows", ".sortie-build.db"))
+	db, err := sql.Open("sqlite", filepath.Join(root, ".jigz", "workflows", "jigz-build.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,8 +131,8 @@ func TestDiscoveredDatabasesKeepGainingRuns(t *testing.T) {
 }
 
 func TestGarbageDiscoveredDatabaseIsSkipped(t *testing.T) {
-	root := repoWithDBs(t, nil, ".sortie-ok.db")
-	bad := filepath.Join(root, ".jigz", "workflows", ".sortie-bad.db")
+	root := repoWithDBs(t, nil, "jigz-ok.db")
+	bad := filepath.Join(root, ".jigz", "workflows", "jigz-bad.db")
 	if err := os.WriteFile(bad, []byte("not a database"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -141,5 +141,47 @@ func TestGarbageDiscoveredDatabaseIsSkipped(t *testing.T) {
 	got := runCounts(t, st)
 	if got["acme/app/ok"] != 16 || got["acme/app/bad"] != 0 {
 		t.Fatalf("runs = %v", got)
+	}
+}
+
+func TestJigzNamedDatabasesAreDiscovered(t *testing.T) {
+	cases := []struct {
+		name  string
+		files map[string]string
+		dbs   []string
+		want  map[string]int
+	}{
+		{
+			name:  "workflow claims jigz-build.db",
+			files: map[string]string{"WORKFLOW.build.md": "---\ndb_path: jigz-build.db\n---\n"},
+			dbs:   []string{"jigz-build.db"},
+			want:  map[string]int{"acme/app/build": 16},
+		},
+		{
+			name: "unclaimed jigz-orphan.db",
+			dbs:  []string{"jigz-orphan.db"},
+			want: map[string]int{"acme/app/orphan": 16},
+		},
+		{
+			name: "legacy .sortie-y.db is ignored",
+			dbs:  []string{"jigz-x.db", ".sortie-y.db"},
+			want: map[string]int{"acme/app/x": 16},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := repoWithDBs(t, tc.files, tc.dbs...)
+			c, st := discovering(t, nil, map[string]string{"acme/app": root})
+			c.Once(context.Background())
+			got := runCounts(t, st)
+			if len(got) != len(tc.want) {
+				t.Fatalf("runs = %v, want %v", got, tc.want)
+			}
+			for k, n := range tc.want {
+				if got[k] != n {
+					t.Errorf("runs = %v, want %v", got, tc.want)
+				}
+			}
+		})
 	}
 }

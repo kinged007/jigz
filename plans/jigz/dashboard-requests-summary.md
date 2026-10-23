@@ -41,7 +41,7 @@ repo config. The `config_hash` field shows what each child runs.
 
 ## What the dashboard derives from the existing DBs
 
-All workflow DBs (`.jigz/workflows/.sortie-<workflow>.db`, one hidden file per workflow) share one schema,
+All workflow DBs (`.jigz/workflows/jigz-<workflow>.db`, one file per workflow) share one schema,
 `schema_migrations` version 16. Open them read-only, pin the supported
 versions, check columns with `PRAGMA table_info`, and hide a feature when its
 column is missing.

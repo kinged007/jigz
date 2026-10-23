@@ -252,7 +252,7 @@ func TestAcceptance(t *testing.T) {
 	t.Run("c_dashboard_reads_the_run_through_the_engine_api", func(t *testing.T) {
 		t0 := time.Now()
 		var schema int
-		db, err := sql.Open("sqlite", "file:"+filepath.Join(repoDir, ".jigz", "workflows", ".sortie-issues.db")+"?mode=ro")
+		db, err := sql.Open("sqlite", "file:"+filepath.Join(repoDir, ".jigz", "workflows", "jigz-issues.db")+"?mode=ro")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -434,7 +434,7 @@ func TestAcceptance(t *testing.T) {
 			t.Errorf("claude-b state %+v, want not exhausted and last_used set", sb)
 		}
 
-		db, err := sql.Open("sqlite", "file:"+filepath.Join(repoDir, ".jigz", "workflows", ".sortie-issues.db")+"?mode=ro")
+		db, err := sql.Open("sqlite", "file:"+filepath.Join(repoDir, ".jigz", "workflows", "jigz-issues.db")+"?mode=ro")
 		if err != nil {
 			t.Fatal(err)
 		}

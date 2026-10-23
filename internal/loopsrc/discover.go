@@ -13,7 +13,7 @@ import (
 // or not its loops are running. It reads files only and never contacts a
 // loop. A workflow gets the database Jigz would open for it; a
 // database shared by several workflows is listed once, under the first
-// of them by name. A .sortie-<name>.db that no workflow file points at is
+// of them by name. A jigz-<name>.db that no workflow file points at is
 // listed under <name>.
 func Discover(roots map[string]string) []rollup.Loop {
 	projects := make([]string, 0, len(roots))
@@ -36,14 +36,14 @@ func Discover(roots map[string]string) []rollup.Loop {
 			claimed[path] = true
 			out = append(out, rollup.Loop{Repo: p, Loop: name, DBPath: path})
 		}
-		dbs, _ := filepath.Glob(filepath.Join(dir, ".sortie-*.db"))
+		dbs, _ := filepath.Glob(filepath.Join(dir, "jigz-*.db"))
 		slices.Sort(dbs)
 		for _, path := range dbs {
 			if claimed[path] {
 				continue
 			}
 			claimed[path] = true
-			name := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(path), ".sortie-"), ".db")
+			name := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(path), "jigz-"), ".db")
 			out = append(out, rollup.Loop{Repo: p, Loop: name, DBPath: path})
 		}
 	}
