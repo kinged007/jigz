@@ -240,14 +240,31 @@ gh issue edit {{ .issue.identifier }} --repo $SORTIE_TRACKER_PROJECT \
 `agent:done` keeps every loop away from the item, so a trigger meant for
 the next stage has to be in the same command as its removal.
 
-If a person has to look at this before anything else happens, keep your
-trigger: it is the record of what was dispatched, and `needs-human` is
-what parks the item.
+If a person has to look at this before anything else happens and you
+asked no question, keep your trigger: it is the record of what was
+dispatched, and `needs-human` is what parks the item.
 
 ```
 gh issue edit {{ .issue.identifier }} --repo $SORTIE_TRACKER_PROJECT \
   --remove-label "in-progress" --add-label "needs-human,agent:done"
 ```
+
+## Questions
+
+Ask a question when a decision needs a person's answer and you cannot reasonably choose. Put one block per question in the comment you post:
+
+<!-- agent-question id="q-<short-id>" audience="product|project" blocking="true|false" resume="agent:build" -->
+**Question:** ...
+**Suggested answer:** ...
+<!-- /agent-question -->
+
+- `id` is `q-` plus a short unique id of letters, digits, `_` or `-`.
+- `audience` is `product` (scope, priority, user-facing behaviour) or `project` (technical approach, implementation, order of work).
+- `resume` is always `agent:build`: the label that returns the item to dispatch after the answer. Use it also on an `agent:plan-build` item: the plan already exists.
+- `blocking="true"`: you cannot continue without the answer. Add the label `needs-human` with `gh issue edit {{ .issue.identifier }} --repo $SORTIE_TRACKER_PROJECT --add-label needs-human` and end your turn. Do not add `agent:done` yourself and do not rely on your trigger label staying on the item: the engine hands the item off, and the answer returns it to dispatch through `resume`.
+- `blocking="false"`: continue with your suggested answer and record the assumption in your comment.
+
+Before you act, read every comment on the item with `gh issue view {{ .issue.identifier }} --repo $SORTIE_TRACKER_PROJECT --comments`. Apply each `<!-- agent-answer id="q-..." -->` block to the question with the same id. Treat an unanswered non-blocking question as answered with its suggestion.
 
 {{ if .issue.url }}
 

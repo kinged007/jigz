@@ -3,11 +3,15 @@ package main
 import (
 	"bytes"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
+	"text/template"
 
 	"github.com/kinged007/jigz/internal/config"
 )
@@ -140,6 +144,95 @@ func TestWarnStalePrompts(t *testing.T) {
 	got := captureStderr(t, func() { warnStalePrompts(root) })
 	if strings.Count(got, "note:") != 1 || !strings.Contains(got, "prompts/build.md") {
 		t.Errorf("message = %q", got)
+	}
+}
+
+// questionPrompts maps each prompt that may ask a question to the labels its
+// question blocks may name as resume.
+var questionPrompts = map[string][]string{
+	"plan.md":       {"agent:plan", "agent:plan-build"},
+	"review.md":     {"agent:review"},
+	"build.md":      {"agent:build"},
+	"review-fix.md": {"agent:build"},
+	"docs.md":       {"agent:docs"},
+}
+
+var resumeAttr = regexp.MustCompile(`resume="([A-Za-z0-9:_-]+)"`)
+
+// questionsSection is the text between the "## Questions" heading and the next
+// "## " heading.
+func questionsSection(body string) (string, bool) {
+	i := strings.Index(body, "## Questions")
+	if i < 0 {
+		return "", false
+	}
+	rest := body[i+len("## Questions"):]
+	if j := strings.Index(rest, "\n## "); j >= 0 {
+		rest = rest[:j]
+	}
+	return rest, true
+}
+
+func TestPromptQuestionSection(t *testing.T) {
+	for name, want := range questionPrompts {
+		raw, err := embeddedWorkflows.ReadFile("workflows/prompts/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		section, ok := questionsSection(string(raw))
+		if !ok {
+			t.Errorf("%s: no ## Questions heading", name)
+			continue
+		}
+		for _, s := range []string{"<!-- agent-question", `resume="agent:`, "--add-label needs-human", "--comments"} {
+			if !strings.Contains(section, s) {
+				t.Errorf("%s: questions section lacks %q", name, s)
+			}
+		}
+		if !strings.Contains(section, "gh issue view") && !strings.Contains(section, "gh pr view") {
+			t.Errorf("%s: questions section has no --comments read command", name)
+		}
+		if strings.Contains(section, "keep your trigger") {
+			t.Errorf("%s: questions section tells the agent to keep its trigger", name)
+		}
+		for _, label := range want {
+			if !strings.Contains(section, label) {
+				t.Errorf("%s: questions section does not name %q", name, label)
+			}
+		}
+		for _, m := range resumeAttr.FindAllStringSubmatch(section, -1) {
+			if !slices.Contains(want, m[1]) {
+				t.Errorf("%s: resume %q not one of %v", name, m[1], want)
+			}
+		}
+	}
+}
+
+func TestPromptQuestionTemplatesParse(t *testing.T) {
+	entries, err := fs.ReadDir(embeddedWorkflows, "workflows/prompts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		raw, err := embeddedWorkflows.ReadFile("workflows/prompts/" + e.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := template.New(e.Name()).Parse(string(raw)); err != nil {
+			t.Errorf("%s: %v", e.Name(), err)
+		}
+	}
+}
+
+func TestPromptQuestionAbsentInMergeAndQuick(t *testing.T) {
+	for _, name := range []string{"merge.md", "quick.md"} {
+		raw, err := embeddedWorkflows.ReadFile("workflows/prompts/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), "agent-question") {
+			t.Errorf("%s: asks a question", name)
+		}
 	}
 }
 
