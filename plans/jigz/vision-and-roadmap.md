@@ -145,10 +145,11 @@ Without the fork, the issue workflow runs with `claude-code`, `codex`, or
 ### 5.3 Questions
 
 - Plan and review prompts write questions in the `agent-question` format
-  (`hub-protocol.md` section 4); blocking questions add `needs-answer`.
-- `needs-answer` is excluded by the default query filters.
+  (`hub-protocol.md` section 4); a blocking question escalates the item to
+  `needs-human`, which the shipped workflows already exclude from dispatch.
 - Dashboard page listing open questions across repositories; answering
-  there writes an `agent-answer` comment and clears `needs-answer`.
+  there writes an `agent-answer` comment. When every blocking question on
+  the item has an answer, the dashboard clears `needs-human`.
 
 ### 5.4 Previews
 
@@ -281,13 +282,14 @@ Done.
 
 ### Phase 3: Questions (5.3)
 
-- Plan and review prompts write `agent-question` blocks; blocking
-  questions add `needs-answer`.
-- `needs-answer` label in `setup` and excluded in default query filters.
+- Plan and review prompts write `agent-question` blocks; a blocking
+  question escalates the item to `needs-human` and keeps its `agent:*`
+  trigger label.
 - Prompts read `agent-answer` comments before acting.
 - Dashboard Questions page across repositories: list, filter by audience
-  and blocking, answer (writes an `agent-answer` comment and clears
-  `needs-answer`).
+  and blocking, answer (writes an `agent-answer` comment; clears
+  `needs-human` when every blocking question on the item has an answer).
+- Plan: [questions.md](questions.md).
 - Acceptance: a blocking question stops dispatch; answering it in the
   dashboard resumes it and the next run sees the answer.
 
