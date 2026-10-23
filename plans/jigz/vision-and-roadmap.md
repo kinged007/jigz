@@ -149,7 +149,8 @@ Without the fork, the issue workflow runs with `claude-code`, `codex`, or
   `needs-human`, which the shipped workflows already exclude from dispatch.
 - Dashboard page listing open questions across repositories; answering
   there writes an `agent-answer` comment. When every blocking question on
-  the item has an answer, the dashboard clears `needs-human`.
+  the item has an answer, the dashboard removes `needs-human` and
+  `agent:done` together.
 
 ### 5.4 Previews
 
@@ -287,8 +288,9 @@ Done.
   trigger label.
 - Prompts read `agent-answer` comments before acting.
 - Dashboard Questions page across repositories: list, filter by audience
-  and blocking, answer (writes an `agent-answer` comment; clears
-  `needs-human` when every blocking question on the item has an answer).
+  and blocking, answer (writes an `agent-answer` comment; removes
+  `needs-human` and `agent:done` together when every blocking question on
+  the item has an answer).
 - Plan: [questions.md](questions.md).
 - Acceptance: a blocking question stops dispatch; answering it in the
   dashboard resumes it and the next run sees the answer.

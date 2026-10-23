@@ -80,7 +80,8 @@ section 5. "later" items stay in `NOT-NOW.md` until a phase is assigned.
 
 - Question parsing from provider comments [2]
 - Threads addressed to roles; humans and agents both reply [2]
-- Answers written back to the issue; `needs-human` cleared [2]
+- Answers written back to the issue; `needs-human` and `agent:done`
+  removed together [2]
 - Approvals as inbox messages with actions [2]
 - Daily digest [2]; email and Slack delivery [later]
 - Agent message limits and loop detection [4]

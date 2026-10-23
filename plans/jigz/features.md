@@ -50,7 +50,8 @@ section 6.
 - Run data through sortie's HTTP API; SQLite only for history (`internal/collector/api.go`, `internal/rollup`) — exists
 - Outcome classes of the hub protocol, mapped in one adapter (`internal/store/outcome.go`) — exists
 - Disabled-feature notices from capability detection (`capabilities.go`, `alerts.go`) — exists
-- Questions page with answering [3] ([plan](questions.md))
+- Questions page with answering; the last answer removes `needs-human`
+  and `agent:done` together [3] ([plan](questions.md))
 - Working hours and account pool status (`gate.go`, `agents.go`) — exists
 - Preview links on runs [5]
 
