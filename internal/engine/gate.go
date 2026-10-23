@@ -14,11 +14,7 @@ const (
 	// PRTracker is the tracker kind of the PR workflow.
 	PRTracker = "github-pr"
 	// DefaultAgent is the agent kind of the shipped workflows.
-	DefaultAgent = "pi"
-	// FallbackAgent runs the loops when the engine has no DefaultAgent.
-	FallbackAgent = "claude-code"
-	// FallbackCommand is the executable of FallbackAgent.
-	FallbackCommand = "claude"
+	DefaultAgent = "claude-code"
 )
 
 // Gate holds the features one engine can run. The zero value allows
@@ -81,17 +77,14 @@ func (g Gate) TrackerOff(kind string) string {
 	return fmt.Sprintf("Tracker kind %q is not available: %s registers %s.", kind, g.Label, strings.Join(g.Caps.Trackers, ", "))
 }
 
-// Agent resolves the agent kind a loop runs with. use differs from kind when
-// kind is the shipped default and the engine lacks it, and note then says
-// why. A kind the engine lacks that was set explicitly gives a problem.
-func (g Gate) Agent(kind string, explicit bool) (use, note, problem string) {
-	if !g.Caps.Known() || kind == "" || g.Caps.HasAgent(kind) {
-		return kind, "", ""
+// Agent reports why a loop cannot run with the agent kind, "" when it
+// can. A kind the engine lacks is an error whatever the file or the
+// environment named it: there is no fallback agent.
+func (g Gate) Agent(kind string) string {
+	if kind == "" || !g.Caps.Known() || g.Caps.HasAgent(kind) {
+		return ""
 	}
-	if kind == DefaultAgent && !explicit && g.Caps.HasAgent(FallbackAgent) {
-		return FallbackAgent, fmt.Sprintf("Agent %s is not available: %s has no %s agent. Loops run with %s.", kind, g.Label, kind, FallbackAgent), ""
-	}
-	return kind, "", fmt.Sprintf("Agent kind %q is not available: %s registers %s.", kind, g.Label, strings.Join(g.Caps.Agents, ", "))
+	return fmt.Sprintf("Agent kind %q is not available: %s registers %s.", kind, g.Label, strings.Join(g.Caps.Agents, ", "))
 }
 
 // RuntimeOff is why pool entries of the runtime cannot be used, "" when they

@@ -10,21 +10,16 @@ import (
 type LoopGate struct {
 	// Off is why the loop does not start, "" when it starts. Problem is
 	// true when Off is an error: an engine too old for the workflows, or
-	// an agent kind set explicitly that the engine lacks. Otherwise Off
-	// names a feature the engine cannot run.
+	// an agent kind the engine lacks. Otherwise Off names a feature the
+	// engine cannot run.
 	Off     string
 	Problem bool
-	// Note says that the loop runs with another agent than its file names.
-	Note string
-	// Env sets that other agent for the engine process.
-	Env []string
 }
 
 // GateLoop applies the gate to a workflow file's text. env is the
-// environment the loop starts with: SORTIE_AGENT_KIND there is an explicit
-// agent setting, as is any agent.kind in the file other than the shipped
-// default. A file that cannot be read gives no decision, and the engine
-// reports it.
+// environment the loop starts with; SORTIE_AGENT_KIND there is the agent
+// setting when a pool entry or the configuration chose one. A file that
+// cannot be read gives no decision, and the engine reports it.
 func GateLoop(g engine.Gate, text string, env []string) LoopGate {
 	wf, err := ParseWorkflow(text)
 	if err != nil {
@@ -36,17 +31,12 @@ func GateLoop(g engine.Gate, text string, env []string) LoopGate {
 	if off := g.TrackerOff(wf.TrackerKind); off != "" {
 		return LoopGate{Off: off}
 	}
-	kind, explicit := lastEnv(env, "SORTIE_AGENT_KIND"), true
+	kind := lastEnv(env, "SORTIE_AGENT_KIND")
 	if kind == "" {
 		kind = wf.AgentKind
-		explicit = kind != engine.DefaultAgent
 	}
-	use, note, problem := g.Agent(kind, explicit)
-	switch {
-	case problem != "":
+	if problem := g.Agent(kind); problem != "" {
 		return LoopGate{Off: problem, Problem: true}
-	case use != kind:
-		return LoopGate{Note: note, Env: []string{"SORTIE_AGENT_KIND=" + use, "SORTIE_AGENT_COMMAND=" + engine.FallbackCommand}}
 	}
 	return LoopGate{}
 }

@@ -66,8 +66,6 @@ func capAlerts(g engine.Gate, files []loopFile, env, pool []string) []alert {
 			add("err", "Agent kind", f.project+"/"+f.name+": "+lg.Off+" The loop is not started.")
 		case lg.Off != "":
 			add("warn", "Feature off", lg.Off)
-		case lg.Note != "":
-			add("warn", "Agent fallback", lg.Note)
 		}
 	}
 	for _, rt := range machine.Runtimes {

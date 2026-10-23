@@ -20,13 +20,18 @@ plus a web dashboard. It contains no agent itself.
 **The engine** does the heavy lifting inside each loop: it polls the
 tracker on a timer, claims a matching item, clones the repo into a scratch
 workspace, hands the item to an agent, and records the run in a local
-SQLite database. The engine release Jigz uses carries two pieces the
-workflows need: the `pi` agent adapter and the `github-pr` tracker
-(which treats pull requests as work items).
+SQLite database. `claude-code` is a standard agent kind that every
+supported engine registers, so the shipped workflows run without extra
+setup. The one feature the workflows need that an engine may lack is the
+`github-pr` tracker (which treats pull requests as work items). The `pi`
+agent adapter is optional: an engine only needs it when a workflow or
+pool entry uses `pi`.
 
-**The agent** is `pi`, a coding agent that runs in a terminal the same
+**The agent** is Claude Code (`claude`), a coding agent that runs in a terminal the same
 way you would: it reads files, edits code, runs checks, and shells out
-to the `gh` CLI to read comments, open PRs, and move labels.
+to the `gh` CLI to read comments, open PRs, and move labels. The `pi`
+agent is supported too; see
+[Customizing agents and workflows](#customizing-agents-and-workflows).
 
 ## How the agents pick up issues
 
@@ -309,11 +314,13 @@ workflows were written against. `jig --version` prints the tool version
 and the engine release it resolves to, and the dashboard Settings page
 shows that release next to the version the engine binary reports.
 
-The workflows need two things the engine does not always ship: the **pi
-agent adapter**, and the **github-pr tracker**, which treats pull requests
-as work items so a review loop can watch a pull request rather than an
-issue. A repository you configure should carry both; the next section says
-what is switched off when it does not.
+The workflows need one feature an engine may not ship: the **github-pr
+tracker**, which treats pull requests as work items so a review loop can
+watch a pull request rather than an issue. Every supported engine
+registers the **claude-code** agent adapter, and the `pi` adapter is only
+needed when a workflow or pool entry uses `pi`. A repository you configure
+should carry the tracker; the next section says what is switched off when
+it does not.
 
 #### Engine capabilities
 
@@ -332,8 +339,7 @@ features could not be detected.
 |---|---|
 | Is older than 1.27.0, the oldest the shipped workflows run on | No loop starts. `validate` fails with the reason, and the dashboard shows an alert. |
 | Has no `github-pr` tracker | The PR workflow loop does not start. `validate` reports it as disabled, not as an error. The workflow file stays installed. |
-| Has no `pi` agent | Loops whose agent is the shipped default `pi` run with `claude-code` instead (the agent kind and the agent command are set to `claude-code` and `claude`). Pool entries with runtime `pi` are shown as unavailable and are not picked. |
-| Lacks an agent kind that you set (an `agent.kind` other than `pi` in the workflow file) | The loop does not start. `validate` and the dashboard show an error. There is no fallback. |
+| Lacks the agent kind a workflow names (`claude-code` unless you set `agent.kind`) | The loop does not start. `validate` and the dashboard show an error. There is no fallback agent. Pool entries with a runtime the engine lacks are shown as unavailable and are not picked. |
 
 Each disabled feature has one alert on the Operations page with the reason,
 for example "PR workflow is off: engine v1.29.0 has no
@@ -839,18 +845,24 @@ yours is older.
 
 ## Customizing agents and workflows
 
-The shipped default is the `pi` agent. Every `WORKFLOW.*.md` also
-carries a `claude-code:` block (`sonnet`) next to `pi:`; the engine reads
-only the block named by `agent.kind`. To switch, set `agent.kind:
-claude-code` and `agent.command: claude`. The `model:` value
-passes through to `claude --model` unvalidated, so only use aliases
-your installed CLI accepts. The pinned engine only knows `pi` and
-`claude-code` (plus a few others); other adapters need a newer or
-upstream engine binary. An engine without `pi` runs the loops with
-`claude-code` (see [Engine capabilities](#engine-capabilities)). Setting
-`agent.kind` to `codex` or `opencode` needs `agent.command` set as well (the
-shipped `command: pi` would be passed to the adapter), and no pool runtime or
-shipped adapter block exists for them. The dashboard's token/model columns populate
+The shipped default is the `claude-code` agent with the
+`claude-haiku-5-5` model. Every `WORKFLOW.*.md` carries a `claude-code:`
+block and a `pi:` block; the engine reads only the block named by
+`agent.kind`. To switch to `pi`, edit the workflow files: set
+`agent.kind: pi` and `agent.command: pi`. To use another model, edit the
+`model:` line of the block the agent kind names; the value passes
+through to `claude --model` unvalidated, so only use aliases your
+installed CLI accepts. The account pool in `machine.yaml` (see
+[Working hours and agent accounts](#working-hours-and-agent-accounts))
+overrides `agent.kind` and `agent.command` at run time, so the same
+workflows can run with another runtime without touching the files. The
+pinned engine only knows `pi` and `claude-code` (plus a few others);
+other adapters need a newer or upstream engine binary, and a loop whose
+agent kind the engine lacks does not start (see [Engine
+capabilities](#engine-capabilities)). Setting `agent.kind` to `codex` or
+`opencode` needs `agent.command` set as well (the shipped `command:
+claude` would be passed to the adapter), and no pool runtime or shipped
+adapter block exists for them. The dashboard's token/model columns populate
 for either agent.
 
 ## Roadmap
