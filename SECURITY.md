@@ -55,8 +55,8 @@ Prefer the narrowest scope that works:
   default branch without a person.
 
 The token is read from the first of `JIG_TOKEN`, `token:` in
-`.sortie/config.yaml`, `GITHUB_TOKEN`, `GH_TOKEN`. It is written to
-`.sortie/.env.loop` with mode `0600` and passed to engine processes in
+`.jigz/config.yaml`, `GITHUB_TOKEN`, `GH_TOKEN`. It is written to
+`.jigz/.env.loop` with mode `0600` and passed to engine processes in
 their environment, so it is readable by your user account and appears in
 `/proc/<pid>/environ`. Do not put a token in `token:` in a config file
 you track in git.

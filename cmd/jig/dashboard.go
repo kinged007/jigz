@@ -87,7 +87,7 @@ func serveDashboard(port int, unite bool, sup *supervisor, hostFlag string) {
 		Dir:    statusDir(),
 		Binary: selfBinary(),
 	}
-	a.configPath = filepath.Join(sup.root, ".sortie", "config.yaml")
+	a.configPath = filepath.Join(sup.root, ".jigz", "config.yaml")
 
 	if a.exposed {
 		fmt.Fprintf(os.Stderr, "jig: dashboard exposed beyond loopback on %s: it has no authentication, so keep it on a private network or behind a secure proxy\n", bindLabel(g, port))

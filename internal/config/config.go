@@ -1,4 +1,4 @@
-// Package config resolves the loop's runtime settings from .sortie/config.yaml
+// Package config resolves the loop's runtime settings from .jigz/config.yaml
 // with environment overrides, and derives the repo identity from git.
 package config
 
@@ -26,7 +26,7 @@ type Config struct {
 	// Empty = no restriction. Setup writes "@me" (the token owner).
 	Assignee *string `yaml:"assignee"`
 
-	Dir       string // repo root (sortie dir is Dir/.sortie)
+	Dir       string // repo root (sortie dir is Dir/.jigz)
 	SortieBin string // resolved sortie binary path
 	EnvFile   string // path to generated env file passed via --env-file
 	Tracker   string // tracker project, always == Repo
@@ -37,7 +37,7 @@ type Config struct {
 	// Labels are the GitHub labels setup ensures exist (create-or-edit;
 	// labels absent here are left alone). Empty = DefaultLabels.
 	Labels     []Label `yaml:"labels"`
-	Workspaces string  // .sortie/workspaces under Dir
+	Workspaces string  // .jigz/workspaces under Dir
 	Cleanup    Cleanup
 	Sleep      Sleep
 	// Budgets are the per-workflow spend caps by loop name. An entry with
@@ -129,8 +129,8 @@ func (c *Config) CheckBudgets() error {
 	}
 	sort.Strings(names)
 	for _, n := range names {
-		if _, err := os.Stat(filepath.Join(c.Dir, ".sortie", "workflows", "WORKFLOW."+n+".md")); err != nil {
-			return fmt.Errorf("workflows.%s: no WORKFLOW.%s.md in .sortie/workflows", n, n)
+		if _, err := os.Stat(filepath.Join(c.Dir, ".jigz", "workflows", "WORKFLOW."+n+".md")); err != nil {
+			return fmt.Errorf("workflows.%s: no WORKFLOW.%s.md in .jigz/workflows", n, n)
 		}
 	}
 	return nil
@@ -232,7 +232,7 @@ func (c *Config) CheckCleanup() error {
 	if !c.Cleanup.Enabled {
 		return nil
 	}
-	files, err := filepath.Glob(filepath.Join(c.Dir, ".sortie", "workflows", "WORKFLOW.*.md"))
+	files, err := filepath.Glob(filepath.Join(c.Dir, ".jigz", "workflows", "WORKFLOW.*.md"))
 	if err != nil {
 		return err
 	}
@@ -305,7 +305,7 @@ var DefaultLabels = []Label{
 	{"P3", "ededed", "Priority: lowest"},
 }
 
-// Load reads .sortie/config.yaml under dir (repo root), applies environment
+// Load reads .jigz/config.yaml under dir (repo root), applies environment
 // overrides, and derives git-based defaults. The config file must exist:
 // a fresh checkout needs `jig setup` first, and running without
 // it would silently fall back to defaults (wrong labels, no milestone)
@@ -315,9 +315,10 @@ func Load(dir string) (*Config, error) {
 	if dir == "" {
 		return nil, errors.New("config dir must not be empty")
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, ".sortie", "config.yaml"))
+	MigrateRepoDir(dir)
+	raw, err := os.ReadFile(filepath.Join(dir, ".jigz", "config.yaml"))
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("no .sortie/config.yaml in %s (run `jig setup` first)", dir)
+		return nil, fmt.Errorf("no .jigz/config.yaml in %s (run `jig setup` first)", dir)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
@@ -337,7 +338,7 @@ func Load(dir string) (*Config, error) {
 			} `yaml:"workflows"`
 		}
 		if err := yaml.Unmarshal(raw, &file); err != nil {
-			return nil, fmt.Errorf("parse .sortie/config.yaml: %w", err)
+			return nil, fmt.Errorf("parse .jigz/config.yaml: %w", err)
 		}
 		c.Repo, c.Token, c.Milestone = file.Repo, file.Token, file.Milestone
 		c.Assignee = file.Assignee
@@ -389,7 +390,7 @@ func Load(dir string) (*Config, error) {
 	}
 	c.Repo = NormalizeRepo(c.Repo)
 	if c.Repo == "" || !strings.Contains(c.Repo, "/") {
-		return nil, fmt.Errorf("expected owner/name, got %q (set repo: in .sortie/config.yaml or JIG_REPO)", c.Repo)
+		return nil, fmt.Errorf("expected owner/name, got %q (set repo: in .jigz/config.yaml or JIG_REPO)", c.Repo)
 	}
 	if c.Token == "" {
 		if v := os.Getenv("GITHUB_TOKEN"); v != "" {
@@ -399,8 +400,23 @@ func Load(dir string) (*Config, error) {
 		}
 	}
 	c.Tracker = c.Repo
-	c.Workspaces = filepath.Join(dir, ".sortie", "workspaces")
+	c.Workspaces = filepath.Join(dir, ".jigz", "workspaces")
 	return c, nil
+}
+
+// MigrateRepoDir moves a repo-local `.sortie/` directory to `.jigz/`
+// so an install made before the rename keeps its config, workflows,
+// logs, workspaces and generated env. Idempotent: when `.jigz` already
+// exists, a leftover `.sortie` is left alone. Fails are silent here;
+// callers that need the config surface the missing file themselves.
+// ponytail: rename is enough for now, merge when both hold files.
+func MigrateRepoDir(dir string) {
+	old := filepath.Join(dir, ".sortie")
+	cur := filepath.Join(dir, ".jigz")
+	if _, err := os.Stat(cur); err == nil {
+		return
+	}
+	_ = os.Rename(old, cur)
 }
 
 // defaultFilters are the label constraints for the shipped loops,
@@ -475,7 +491,7 @@ func (c *Config) CheckToken() error {
 	if c.Token != "" {
 		return nil
 	}
-	return errors.New("no GitHub token found. Set one of JIG_TOKEN, token: in .sortie/config.yaml, GITHUB_TOKEN, or GH_TOKEN (see the GitHub token section of the README)")
+	return errors.New("no GitHub token found. Set one of JIG_TOKEN, token: in .jigz/config.yaml, GITHUB_TOKEN, or GH_TOKEN (see the GitHub token section of the README)")
 }
 
 func withScope(base, assignee string) string {
@@ -502,7 +518,7 @@ func withMilestone(base, milestone string) string {
 func detectRepo(dir string) (string, error) {
 	out, err := exec.Command("git", "-C", dir, "remote", "get-url", "origin").Output()
 	if err != nil {
-		return "", errors.New("cannot detect repo from git remote (not a git checkout or no origin remote? set repo: in .sortie/config.yaml or JIG_REPO)")
+		return "", errors.New("cannot detect repo from git remote (not a git checkout or no origin remote? set repo: in .jigz/config.yaml or JIG_REPO)")
 	}
 	return NormalizeRepo(strings.TrimSpace(string(out))), nil
 }

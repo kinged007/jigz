@@ -69,7 +69,7 @@ func controlWorkflow(root, action, name string) (budgetCmdResult, error) {
 		done = func(w workflowStatus) bool { return !budgetPaused(w) }
 	case "override":
 		if w.Budget == nil || w.Budget.Cap == 0 {
-			return res, fmt.Errorf("workflow %q has no budget (set workflows.%s.budget in .sortie/config.yaml)", name, name)
+			return res, fmt.Errorf("workflow %q has no budget (set workflows.%s.budget in .jigz/config.yaml)", name, name)
 		}
 		done = budgetOverridden
 	default:

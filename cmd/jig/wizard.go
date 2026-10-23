@@ -159,7 +159,7 @@ func (a *app) pathTaken(dir, slug string) bool {
 	return false
 }
 
-// dirFor is where the project's .sortie directory will be.
+// dirFor is where the project's .jigz directory will be.
 func (a *app) dirFor(p edit.Project) (string, error) {
 	cfg, err := fleetconfig.Load(a.configPath)
 	if err != nil {
@@ -344,12 +344,12 @@ func (a *app) dryRun(view *wizardView, p edit.Project, ag edit.Agent) {
 	view.Dry = append(view.Dry,
 		dryRow{What: "Config entry", Detail: "Add " + p.Repo + " to " + a.configPath + " with enabled: false. It is switched on after setup and validation pass."},
 		dryRow{What: "Project directory", Detail: dir + existsNote(dir)},
-		dryRow{What: "Config overlay", Detail: filepath.Join(dir, ".sortie", "fleetconfig.yaml") + " with the repository, assignee, milestone and filters."})
+		dryRow{What: "Config overlay", Detail: filepath.Join(dir, ".jigz", "fleetconfig.yaml") + " with the repository, assignee, milestone and filters."})
 	if len(p.Workflows) == 0 {
-		view.Dry = append(view.Dry, dryRow{What: "Workflow files", Detail: "Every workflow jig setup ships, under " + filepath.Join(dir, ".sortie", "workflows") + "."})
+		view.Dry = append(view.Dry, dryRow{What: "Workflow files", Detail: "Every workflow jig setup ships, under " + filepath.Join(dir, ".jigz", "workflows") + "."})
 	}
 	for _, n := range p.Workflows {
-		file := filepath.Join(dir, ".sortie", "workflows", "WORKFLOW."+n+".md")
+		file := filepath.Join(dir, ".jigz", "workflows", "WORKFLOW."+n+".md")
 		note := " (added by setup)"
 		if _, err := os.Stat(file); err == nil {
 			note = " (already there, setup keeps it)"

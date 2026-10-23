@@ -140,7 +140,7 @@ func lockCleanup(root string) (*portLock, error) {
 func runCleanup(ctx context.Context, cfg *config.Config, dryRun bool) (cleanupResult, error) {
 	res := cleanupResult{Command: cfg.Cleanup.Command, DryRun: dryRun || cfg.Cleanup.DryRun, Paths: []string{}}
 	if res.Command == "" {
-		return res, errors.New("no cleanup command configured (set cleanup.command in .sortie/config.yaml)")
+		return res, errors.New("no cleanup command configured (set cleanup.command in .jigz/config.yaml)")
 	}
 	lock, err := lockCleanup(cfg.Dir)
 	if err != nil {
@@ -160,7 +160,7 @@ func runCleanup(ctx context.Context, cfg *config.Config, dryRun bool) (cleanupRe
 		"JIG_CLEANUP_DRY_RUN="+dry,
 		"JIG_CLEANUP_MAX_AGE_DAYS="+strconv.Itoa(cfg.Cleanup.MaxAgeDays),
 		"JIG_CLEANUP_WORKSPACE_ROOT="+cfg.Workspaces,
-		"JIG_CLEANUP_DB_DIR="+filepath.Join(cfg.Dir, ".sortie", "workflows"),
+		"JIG_CLEANUP_DB_DIR="+filepath.Join(cfg.Dir, ".jigz", "workflows"),
 	)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }

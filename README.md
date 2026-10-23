@@ -52,9 +52,9 @@ There is no queue and no webhook. Every loop polls GitHub roughly every
    human removes the label.
 
 When a loop claims an issue it clones the repo into
-`.sortie/workspaces/<loop>/`, checks out a branch named
+`.jigz/workspaces/<loop>/`, checks out a branch named
 `auto/<issue-number>`, and renders a prompt template
-(`.sortie/workflows/prompts/*.md`) with the issue title, body, labels,
+(`.jigz/workflows/prompts/*.md`) with the issue title, body, labels,
 and comments. The agent follows that prompt: it re-reads the full
 comment thread with `gh` (comments can override the description), makes
 the change, runs the project's checks, pushes, and posts a structured
@@ -120,10 +120,10 @@ gh pr edit <n> --remove-label "agent:build,in-progress,agent:done" --add-label "
 `agent:done` keeps every loop away from an item, so a trigger meant for
 the next stage is always added in the same command as its removal. No
 agent applies `agent:merge`: an approved PR waits for a person, or for
-the PM prompt in `.sortie/pm-agent.md`, to label it.
+the PM prompt in `.jigz/pm-agent.md`, to label it.
 
 The chained label must land on the item the next loop watches: the `prs`
-loop watches PRs, so label the PR, not the issue it came from. `.sortie/workflows/prompts/review.md` Step 4 and
+loop watches PRs, so label the PR, not the issue it came from. `.jigz/workflows/prompts/review.md` Step 4 and
 `review-fix.md` Step 5 carry these forms.
 
 ## The loops
@@ -156,14 +156,14 @@ the `auto/<issue>` branch only when the run committed something.
 `setup` and the loop startup never change or remove an existing workflow
 or prompt file. While any of `WORKFLOW.plan.md`, `WORKFLOW.build.md`,
 `WORKFLOW.review.md`, `WORKFLOW.review-fix.md` or `WORKFLOW.merge.md`
-exists in `.sortie/workflows/`, `WORKFLOW.issues.md` and `WORKFLOW.prs.md`
+exists in `.jigz/workflows/`, `WORKFLOW.issues.md` and `WORKFLOW.prs.md`
 are not written, because both sets would process the same issues. A
 warning on stderr says so. To migrate:
 
 1. Delete the five old files, and their `.sortie-<name>.db` files if you
    do not need the run history.
 2. Rerun `jig setup` to install the two new files.
-3. In `.sortie/config.yaml`, rename old loop names to `issues` or `prs` in
+3. In `.jigz/config.yaml`, rename old loop names to `issues` or `prs` in
    the `filters:` and `workflows:` (budget) keys.
 4. Existing installs keep their old `prompts/plan.md` and `prompts/build.md`,
    because setup never overwrites a file. Diff them against the shipped
@@ -172,14 +172,14 @@ warning on stderr says so. To migrate:
    issue, so the issue is dispatched again. `setup` prints a note when
    either file differs from the shipped copy.
 5. Add the `agent:plan-build` and `agent:docs` entries to the `labels:` list of an
-   existing `.sortie/config.yaml` (copy them from the list above), then
+   existing `.jigz/config.yaml` (copy them from the list above), then
    rerun `setup`. `setup` only creates the labels in that list and prints a
    note for each shipped label that is missing from it.
 
-The loop set is just every `WORKFLOW.*.md` in `.sortie/workflows/` —
+The loop set is just every `WORKFLOW.*.md` in `.jigz/workflows/` —
 drop in a new file (e.g. `WORKFLOW.triage.md`) and it starts as a loop
 named by its stem on the next run. Per-loop label queries can be
-narrowed via the `filters:` map in `.sortie/config.yaml` without
+narrowed via the `filters:` map in `.jigz/config.yaml` without
 re-running setup.
 
 `JIG_ONLY=issues` narrows the run to the named loops, for a
@@ -392,7 +392,7 @@ your personal name.
    token is simplest; a fine-grained token needs Contents, Issues, and
    Pull requests read/write on the repos you loop over).
 2. Expose it with one of (first set wins: `JIG_TOKEN`, then
-   `token:` in `.sortie/config.yaml`, then `GITHUB_TOKEN`, then
+   `token:` in `.jigz/config.yaml`, then `GITHUB_TOKEN`, then
    `GH_TOKEN`):
    ```sh
    export GITHUB_TOKEN="ghp_..."     # or GH_TOKEN; or JIG_TOKEN to override just the loop
@@ -407,8 +407,8 @@ your personal name.
 
 ```sh
 cd your-repo
-jig setup    # writes .sortie/config.yaml, updates .gitignore, creates the labels,
-             # installs the engine, and installs .sortie/pm-agent.md
+jig setup    # writes .jigz/config.yaml, updates .gitignore, creates the labels,
+             # installs the engine, and installs .jigz/pm-agent.md
              # (a project-manager prompt)
 jig          # run every WORKFLOW.*.md loop (Ctrl-C stops all)
 ```
@@ -461,7 +461,7 @@ precedence over `sleeping`.
 ### Child logs
 
 The stdout and stderr of each engine child are written to
-`<repo-root>/.sortie/logs/<workflow>.log`, interleaved in arrival order and
+`<repo-root>/.jigz/logs/<workflow>.log`, interleaved in arrival order and
 unchanged. They are still printed to the terminal of `jig`. The file
 is opened for appending, so it keeps its content across child recycles and
 supervisor restarts. When a write would take the file over 10 MiB, it is
@@ -512,7 +512,7 @@ all. This is how Jigz picks a per-repo workflow set.
 ## Layout in the target repo
 
 ```
-.sortie/
+.jigz/
   config.yaml      # repo:, token:, milestone:, cleanup:, sleep:, workflows: (all optional — see below)
   workflows/       # installed by setup from the binary; edit freely, loop runs these
   .env.loop        # generated each run (resolved tracker, token, clone URL; mode 0600)
@@ -520,19 +520,19 @@ all. This is how Jigz picks a per-repo workflow set.
   logs/            # engine child output, one <workflow>.log per loop
 ```
 
-`setup` ignores `.sortie/` wholesale in `.gitignore` — run state
+`setup` ignores `.jigz/` wholesale in `.gitignore` — run state
 (env, workspaces, db files, local config) stays untracked. To share
 loop config in git instead (keep `token: ""` and use env for secrets),
-replace `.sortie/` with:
+replace `.jigz/` with:
 
 ```gitignore
-.sortie/*
-!.sortie/config.yaml
-!.sortie/workflows/
+.jigz/*
+!.jigz/config.yaml
+!.jigz/workflows/
 .sortie-*.db
 ```
 
-`.sortie/config.yaml`:
+`.jigz/config.yaml`:
 
 ```yaml
 repo: ""        # empty = detect from git remote; or pin owner/name
@@ -569,7 +569,7 @@ done
 
 ### Workspace cleanup
 
-`cleanup:` in `.sortie/config.yaml` runs a command that removes old
+`cleanup:` in `.jigz/config.yaml` runs a command that removes old
 workspaces:
 
 ```yaml
@@ -593,8 +593,8 @@ The command gets these environment variables and no arguments:
 - `JIG_CLEANUP_DRY_RUN`: `1` or `0`. With `1` the command removes
   nothing and only reports what it would remove.
 - `JIG_CLEANUP_MAX_AGE_DAYS`: `cleanup.max_age_days`.
-- `JIG_CLEANUP_WORKSPACE_ROOT`: `.sortie/workspaces` in the repo root.
-- `JIG_CLEANUP_DB_DIR`: `.sortie/workflows`, which holds the workflow
+- `JIG_CLEANUP_WORKSPACE_ROOT`: `.jigz/workspaces` in the repo root.
+- `JIG_CLEANUP_DB_DIR`: `.jigz/workflows`, which holds the workflow
   SQLite DBs.
 
 Exit code 0 is success and anything else is a failed run. A failed run
@@ -615,7 +615,7 @@ Every run, scheduled or manual, writes its result to
 
 ### Idle sleep
 
-`sleep:` in `.sortie/config.yaml` stops the engine children when there is
+`sleep:` in `.jigz/config.yaml` stops the engine children when there is
 no work and starts them again later:
 
 ```yaml
@@ -654,7 +654,7 @@ schedule and the status document keep running. `stop` ends the run.
 
 ### Spend controls
 
-`workflows:` in `.sortie/config.yaml` caps the tokens one workflow may use
+`workflows:` in `.jigz/config.yaml` caps the tokens one workflow may use
 per period. The key is the loop name (the `WORKFLOW.<name>.md` stem); a name
 without a workflow file is an error at startup.
 
@@ -782,7 +782,7 @@ Checking the provider's terms is your responsibility.
 ## Ad hoc: auto-merge on clean review
 
 To fully automate build → review → merge on one repo (not a template
-default), edit that repo's `.sortie/workflows/prompts/review.md` Step 4
+default), edit that repo's `.jigz/workflows/prompts/review.md` Step 4
 clean branch to chain the merge loop instead of stopping:
 
 ```

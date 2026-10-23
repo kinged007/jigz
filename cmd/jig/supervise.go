@@ -40,7 +40,7 @@ var (
 	// sigRestartIdle replaces every loop, one at a time, each at its
 	// first moment with no work in flight, and stays up.
 	sigRestartIdle = syscall.SIGUSR2
-	// sigReload asks the supervisor to re-read .sortie/config.yaml and
+	// sigReload asks the supervisor to re-read .jigz/config.yaml and
 	// apply supervisor-level settings (sleep, cleanup, budgets) without
 	// restarting children. SIGHUP is preferred over a third SIGUSR* so
 	// the request stays a signal rather than a file. An accidental
@@ -240,7 +240,7 @@ func (s *supervisor) startOne(name string) error {
 	if err != nil {
 		return err
 	}
-	workflow, err := os.ReadFile(filepath.Join(s.root, ".sortie", "workflows", def.file))
+	workflow, err := os.ReadFile(filepath.Join(s.root, ".jigz", "workflows", def.file))
 	if err != nil {
 		return err
 	}
@@ -613,7 +613,7 @@ func (s *supervisor) endpoints() []loopEndpoint {
 		eps = append(eps, loopEndpoint{
 			Repo: s.root, RepoName: repoName(s.root), Loop: p.def.name,
 			Port: p.port, DBPath: dbPathFor(s.root, p.def.file),
-			WorkflowFile: filepath.Join(s.root, ".sortie", "workflows", p.def.file),
+			WorkflowFile: filepath.Join(s.root, ".jigz", "workflows", p.def.file),
 			LoopType:     p.loopType,
 		})
 	}
@@ -705,7 +705,7 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 		if s.procs[name] != nil || s.gone[name] != nil {
 			continue
 		}
-		wf, _ := os.ReadFile(filepath.Join(s.root, ".sortie", "workflows", def.file))
+		wf, _ := os.ReadFile(filepath.Join(s.root, ".jigz", "workflows", def.file))
 		bs := s.budgetStatusLocked(name)
 		st, hold := "paused", gate.holdFor(bs)
 		if s.gateHeld[name] && (bs == nil || !bs.Paused) {

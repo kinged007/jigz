@@ -18,7 +18,7 @@ func cleanupCfg(t *testing.T, script string) *config.Config {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	root := t.TempDir()
 	return &config.Config{
-		Dir: root, Workspaces: filepath.Join(root, ".sortie", "workspaces"),
+		Dir: root, Workspaces: filepath.Join(root, ".jigz", "workspaces"),
 		Cleanup: config.Cleanup{
 			Command: script, Interval: time.Hour, MaxAgeDays: 14, Timeout: time.Minute,
 		},
@@ -60,7 +60,7 @@ echo "removed: /a/b"; echo noise; printf 'removed: /c'`
 		t.Fatalf("res %+v err %v", res, err)
 	}
 	got, _ := os.ReadFile(out)
-	want := "0\n14\n" + cfg.Workspaces + "\n" + filepath.Join(cfg.Dir, ".sortie", "workflows") + "\n"
+	want := "0\n14\n" + cfg.Workspaces + "\n" + filepath.Join(cfg.Dir, ".jigz", "workflows") + "\n"
 	if !strings.HasPrefix(string(got), want) || !strings.HasSuffix(strings.TrimSpace(string(got)), filepath.Base(cfg.Dir)) {
 		t.Errorf("script saw:\n%s\nwant prefix:\n%s", got, want)
 	}
@@ -181,7 +181,7 @@ func TestShutdownKillsRunningCleanup(t *testing.T) {
 
 func writeCleanupConfig(t *testing.T, root, command string) {
 	t.Helper()
-	mustWrite(t, filepath.Join(root, ".sortie", "config.yaml"),
+	mustWrite(t, filepath.Join(root, ".jigz", "config.yaml"),
 		"repo: owner/name\ncleanup:\n  enabled: true\n  interval: 1h\n  max_age_days: 14\n  command: "+strconv.Quote(command)+"\n")
 }
 
@@ -258,7 +258,7 @@ func TestCleanupCommandFailureAndNoCommand(t *testing.T) {
 	}
 
 	bare := t.TempDir()
-	mustWrite(t, filepath.Join(bare, ".sortie", "config.yaml"), "repo: owner/name\n")
+	mustWrite(t, filepath.Join(bare, ".jigz", "config.yaml"), "repo: owner/name\n")
 	if out, err := cleanupOutput(context.Background(), bare, false, true); err == nil || !strings.Contains(out, "no cleanup command") {
 		t.Errorf("no command: err %v out %s", err, out)
 	}

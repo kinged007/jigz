@@ -182,7 +182,7 @@ esac
 
 cat <<'EOF'
 :: next steps (run inside the target repo):
-     jig setup    # writes .sortie/config.yaml, creates labels,
+     jig setup    # writes .jigz/config.yaml, creates labels,
                   # installs the engine and links it onto PATH
      jig          # run every WORKFLOW.*.md loop (Ctrl-C stops all)
 EOF

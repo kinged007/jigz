@@ -23,7 +23,7 @@ func Discover(roots map[string]string) []rollup.Loop {
 	sort.Strings(projects)
 	var out []rollup.Loop
 	for _, p := range projects {
-		dir := filepath.Join(roots[p], ".sortie", "workflows")
+		dir := filepath.Join(roots[p], ".jigz", "workflows")
 		claimed := map[string]bool{}
 		files, _ := filepath.Glob(filepath.Join(dir, "WORKFLOW.*.md"))
 		slices.Sort(files)

@@ -85,9 +85,9 @@ func TestEngineCapabilitiesRows(t *testing.T) {
 func gatedSup(t *testing.T, g engine.Gate) (*supervisor, string) {
 	t.Helper()
 	root := t.TempDir()
-	mustWrite(t, filepath.Join(root, ".sortie", "config.yaml"), "repo: owner/name\n")
-	mustWrite(t, filepath.Join(root, ".sortie", "workflows", "WORKFLOW.issues.md"), flow("github", "pi"))
-	mustWrite(t, filepath.Join(root, ".sortie", "workflows", "WORKFLOW.prs.md"), flow("github-pr", "pi"))
+	mustWrite(t, filepath.Join(root, ".jigz", "config.yaml"), "repo: owner/name\n")
+	mustWrite(t, filepath.Join(root, ".jigz", "workflows", "WORKFLOW.issues.md"), flow("github", "pi"))
+	mustWrite(t, filepath.Join(root, ".jigz", "workflows", "WORKFLOW.prs.md"), flow("github-pr", "pi"))
 	sup := newTestSup(t, root, "issues", "prs")
 	sup.ports["issues"], sup.ports["prs"] = 0, 0
 	sup.bin = writeScript(t, root, "sortie", `echo "$SORTIE_AGENT_KIND $SORTIE_AGENT_COMMAND" >> "`+root+`/agent.log"`+"\nwhile true; do sleep 1; done\n")

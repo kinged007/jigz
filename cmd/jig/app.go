@@ -186,7 +186,7 @@ func validateWorkflow(dir, path string) (plan.FileResult, error) {
 	env := os.Environ()
 	// The env file is what the loops themselves run with, and it keeps
 	// the tracker token even when this process's environment lost it.
-	if raw, err := os.ReadFile(filepath.Join(dir, ".sortie", ".env.loop")); err == nil {
+	if raw, err := os.ReadFile(filepath.Join(dir, ".jigz", ".env.loop")); err == nil {
 		for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
 			if strings.Contains(line, "=") {
 				env = append(env, line)

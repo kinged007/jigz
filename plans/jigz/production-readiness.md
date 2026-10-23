@@ -149,7 +149,7 @@ need.
 ### 5. Argument parsing — done
 
 `jig setup <dir> --repo owner/name` ignored `<dir>` and operated
-on the current working directory, writing `.sortie/` and rewriting
+on the current working directory, writing `.jigz/` and rewriting
 `.gitignore` in the wrong repository. The cause was the last-non-flag-arg
 rule: the `setup` branch skipped `--repo` but not the value after it, so
 `owner/name` became the directory, and `setup.go` hid the symptom with

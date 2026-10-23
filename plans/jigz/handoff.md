@@ -76,9 +76,10 @@ Read, in order:
   `jigz.yaml`; the log file is `jig.log`; the dashboard meta name is
   `jig-dashboard`. Shiftd for the hub. The rename is done
   (`plans/jigz/vision-and-roadmap.md` section 6, "Rename to Jigz").
-- The engine keeps its own names: the `sortie` binary, the `SORTIE_*`
-  variables it owns, and the `.sortie/` directory in a target repository.
-  The user-facing documents do not name it; they say "the engine".
+- The engine keeps its own names: the `sortie` binary and the `SORTIE_*`
+  variables it owns. The scratch workspace keeps its `.sortie/`
+  (`workspacekit.SortieDir`); the repo-local directory is `.jigz/`. The
+  user-facing documents do not name the engine; they say "the engine".
 - The state directories moved from the `sortie-loop` names to the `jigz`
   names. `internal/dirs` moves a directory left by an earlier install into
   place the first time it is looked up, so the registry, the run history
@@ -244,11 +245,12 @@ Known gaps from Phase 1, not scheduled:
   configurable.
 - A dashboard stopped by a signal while a `validate` child hangs may leave
   the child running. Not checked with the real engine.
-- The state directories are not migrated for a target repository: the
-  `.sortie/` directory in a target repo keeps its name, so an install
-  there needs no migration. The workflow files a target repository
-  installed before the rename still name the old variables, and
-  `internal/config` sets those names alongside the new ones, so the
+- A target repository installed before the directory rename keeps its
+  files: `config.MigrateRepoDir` renames `.sortie/` to `.jigz/` on first
+  lookup, when `.jigz` is missing. A repo with both directories keeps
+  `.jigz` and leaves the other alone. The workflow files a target
+  repository installed before the rename still name the old variables,
+  and `internal/config` sets those names alongside the new ones, so the
   loops keep running until `jig setup` refreshes the files.
 - `plans/jigz/enhancements.md` and `production-readiness.md` refer
   to `plans/pm-agent.md`, which does not exist in the repository.

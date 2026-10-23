@@ -226,7 +226,7 @@ func TestSortieValidate(t *testing.T) {
 	}
 	root := t.TempDir()
 	syncWorkflows(root)
-	dir := filepath.Join(root, ".sortie", "workflows")
+	dir := filepath.Join(root, ".jigz", "workflows")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)

@@ -4,7 +4,7 @@
 # defaults of its own, because a default belongs to the thing it
 # defaults and a copy here is how the two drift.
 
-# Where each repository's .sortie/ lives. Empty means
+# Where each repository's .jigz/ lives. Empty means
 # ~/.local/state/jigz. No checkout is made: this directory
 # holds loop configuration and run state, and the agent clones the
 # repository itself into the workspaces where it works.

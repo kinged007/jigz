@@ -375,7 +375,7 @@ func (d StatusDoc) Fleet() rollup.Fleet {
 // db_path front-matter, relative to the workflows directory, else the
 // default file there.
 func dbPath(root, file string) string {
-	dir := filepath.Join(root, ".sortie", "workflows")
+	dir := filepath.Join(root, ".jigz", "workflows")
 	if raw, err := os.ReadFile(filepath.Join(dir, file)); err == nil {
 		for _, line := range strings.Split(string(raw), "\n") {
 			if v, ok := strings.CutPrefix(strings.TrimSpace(line), "db_path:"); ok {

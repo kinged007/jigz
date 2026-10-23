@@ -1,5 +1,5 @@
 // Package plan turns a resolved Jigz config into the on-disk state
-// one repository needs: its .sortie/config.yaml, its installed
+// one repository needs: its .jigz/config.yaml, its installed
 // workflows, and the environment its Jigz child runs with.
 //
 // Validation is layered, and each layer is reported rather than
@@ -408,7 +408,7 @@ func (p Plan) sortieBin() (string, error) {
 	return bin, err
 }
 
-// configFile is what Jigz writes into each repository's .sortie/.
+// configFile is what Jigz writes into each repository's .jigz/.
 // Only settings Jigz actually holds are emitted, so every key left
 // out keeps Jigz's own default: this file is an overlay, not a
 // replacement. Labels are never written for the same reason — an
@@ -425,7 +425,7 @@ type configFile struct {
 // half-written config that Jigz would fail to parse on the next
 // start.
 func Apply(r config.Resolved) error {
-	dir := filepath.Join(r.Dir, ".sortie")
+	dir := filepath.Join(r.Dir, ".jigz")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("%s: %w", r.Repo.Repo, err)
 	}
@@ -541,7 +541,7 @@ func (p Plan) Validate(r config.Resolved) (Diagnostics, error) {
 		return d, err
 	}
 	if len(files) == 0 {
-		return d, fmt.Errorf("%s: no workflows installed under %s", r.Repo.Repo, filepath.Join(r.Dir, ".sortie", "workflows"))
+		return d, fmt.Errorf("%s: no workflows installed under %s", r.Repo.Repo, filepath.Join(r.Dir, ".jigz", "workflows"))
 	}
 	d.Valid = true
 	for _, f := range files {
@@ -653,7 +653,7 @@ func (p Plan) validateFile(bin string, env []string, f string) (FileResult, erro
 // configured selection, or every installed workflow when none is
 // configured.
 func (p Plan) workflowFiles(r config.Resolved) ([]string, error) {
-	dir := filepath.Join(r.Dir, ".sortie", "workflows")
+	dir := filepath.Join(r.Dir, ".jigz", "workflows")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", dir, err)
@@ -680,7 +680,7 @@ func (p Plan) workflowFiles(r config.Resolved) ([]string, error) {
 // TrackerKind is tracker.kind from a workflow's front matter, "" when the
 // file or the key is missing or unreadable.
 func TrackerKind(r config.Resolved, workflow string) string {
-	raw, err := os.ReadFile(filepath.Join(r.Dir, ".sortie", "workflows", "WORKFLOW."+workflow+".md"))
+	raw, err := os.ReadFile(filepath.Join(r.Dir, ".jigz", "workflows", "WORKFLOW."+workflow+".md"))
 	if err != nil {
 		return ""
 	}

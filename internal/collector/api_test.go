@@ -220,7 +220,7 @@ func TestAPIRunsOfOtherWorkflowsInASharedDatabaseAreSkipped(t *testing.T) {
 	e.add(1, 2, "WORKFLOW.build.md")
 	e.add(3, 4, "WORKFLOW.other.md")
 	e.add(5, 5, "")
-	e.add(6, 6, "/repo/.sortie/workflows/WORKFLOW.build.md")
+	e.add(6, 6, "/repo/.jigz/workflows/WORKFLOW.build.md")
 	c, st := apiCollector(t, e.loop(t, "build", ""))
 	c.Once(context.Background())
 	got := storedIDs(t, st)

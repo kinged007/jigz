@@ -255,7 +255,7 @@ func TestAStopWhenIdleEndsTheRunOnlyWhenEmpty(t *testing.T) {
 // with nothing to show for it.
 func TestAReplacedLoopReadsTheConfigOnDisk(t *testing.T) {
 	root := t.TempDir()
-	cfgPath := filepath.Join(root, ".sortie", "config.yaml")
+	cfgPath := filepath.Join(root, ".jigz", "config.yaml")
 	mustWrite(t, cfgPath, "repo: owner/from-boot\n")
 	sup := newTestSup(t, root, "plan")
 
@@ -277,7 +277,7 @@ func TestAReplacedLoopReadsTheConfigOnDisk(t *testing.T) {
 
 func envValue(t *testing.T, root, key string) string {
 	t.Helper()
-	body, err := os.ReadFile(filepath.Join(root, ".sortie", ".env.loop"))
+	body, err := os.ReadFile(filepath.Join(root, ".jigz", ".env.loop"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +305,7 @@ func TestTheDrainSignalsAreDistinctFromStop(t *testing.T) {
 // config and is applied to the environment rather than the file.
 func TestAReplacedLoopCarriesItsFilter(t *testing.T) {
 	root := t.TempDir()
-	mustWrite(t, filepath.Join(root, ".sortie", "config.yaml"),
+	mustWrite(t, filepath.Join(root, ".jigz", "config.yaml"),
 		"repo: owner/name\nfilters:\n  plan: \"label:plan\"\n")
 	sup := newTestSup(t, root, "plan")
 	_, env, _, err := sup.childEnv("plan")
@@ -344,8 +344,8 @@ func mustWrite(t *testing.T, path, body string) {
 func TestStartingALoopPublishesIt(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	mustWrite(t, filepath.Join(root, ".sortie", "config.yaml"), "repo: owner/name\n")
-	mustWrite(t, filepath.Join(root, ".sortie", "workflows", "WORKFLOW.plan.md"), "body\n")
+	mustWrite(t, filepath.Join(root, ".jigz", "config.yaml"), "repo: owner/name\n")
+	mustWrite(t, filepath.Join(root, ".jigz", "workflows", "WORKFLOW.plan.md"), "body\n")
 
 	sup := newTestSup(t, root, "plan")
 	// Port 0 disables the loop's own server, so the child starts without

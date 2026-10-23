@@ -214,7 +214,7 @@ func TestAcceptance(t *testing.T) {
 		if it.State != "open" || len(it.Comments) != 0 {
 			t.Errorf("state %q with %d comments, want open with none (comments.on_completion is off)", it.State, len(it.Comments))
 		}
-		markers, _ := filepath.Glob(filepath.Join(repoDir, ".sortie", "workspaces", "issues", "*", ".after-run"))
+		markers, _ := filepath.Glob(filepath.Join(repoDir, ".jigz", "workspaces", "issues", "*", ".after-run"))
 		if len(markers) != 1 {
 			t.Errorf("after_run marker files: %v, want exactly one", markers)
 		}
@@ -252,7 +252,7 @@ func TestAcceptance(t *testing.T) {
 	t.Run("c_dashboard_reads_the_run_through_the_engine_api", func(t *testing.T) {
 		t0 := time.Now()
 		var schema int
-		db, err := sql.Open("sqlite", "file:"+filepath.Join(repoDir, ".sortie", "workflows", ".sortie-issues.db")+"?mode=ro")
+		db, err := sql.Open("sqlite", "file:"+filepath.Join(repoDir, ".jigz", "workflows", ".sortie-issues.db")+"?mode=ro")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -434,7 +434,7 @@ func TestAcceptance(t *testing.T) {
 			t.Errorf("claude-b state %+v, want not exhausted and last_used set", sb)
 		}
 
-		db, err := sql.Open("sqlite", "file:"+filepath.Join(repoDir, ".sortie", "workflows", ".sortie-issues.db")+"?mode=ro")
+		db, err := sql.Open("sqlite", "file:"+filepath.Join(repoDir, ".jigz", "workflows", ".sortie-issues.db")+"?mode=ro")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -754,20 +754,20 @@ func buildLoop(t *testing.T) string {
 	return bin
 }
 
-// writeAcceptanceRepo creates the target repo's .sortie directory: the
+// writeAcceptanceRepo creates the target repo's .jigz directory: the
 // config, the shipped workflows and prompts, and the acceptance variant of
 // the issues workflow.
 func writeAcceptanceRepo(t *testing.T, dir, slug, token, endpoint string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Join(dir, ".sortie"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".jigz"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cfg := fmt.Sprintf("repo: %s\ntoken: %s\n", slug, token)
-	if err := os.WriteFile(filepath.Join(dir, ".sortie", "config.yaml"), []byte(cfg), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".jigz", "config.yaml"), []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	syncWorkflows(dir)
-	path := filepath.Join(dir, ".sortie", "workflows", "WORKFLOW.issues.md")
+	path := filepath.Join(dir, ".jigz", "workflows", "WORKFLOW.issues.md")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

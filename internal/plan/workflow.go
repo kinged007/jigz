@@ -178,7 +178,7 @@ func (w Workflow) StageLabel() string {
 }
 
 // RepoLabelOrder lists the label names of a repository's
-// .sortie/config.yaml in file order, which is the order the stages are
+// .jigz/config.yaml in file order, which is the order the stages are
 // worked in.
 func RepoLabelOrder(config string) []string {
 	var c struct {

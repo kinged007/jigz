@@ -107,7 +107,7 @@ const (
 // LogTail returns the last lines of a workflow's child log, at most
 // maxLines. Only the last 64 KiB of the file is read. The path comes
 // from the status document and must resolve inside the project's
-// .sortie/logs directory; a missing file wraps os.ErrNotExist.
+// .jigz/logs directory; a missing file wraps os.ErrNotExist.
 func (d StatusDoc) LogTail(project, workflow string, lines int) ([]string, error) {
 	root, err := d.root(project)
 	if err != nil {
@@ -121,7 +121,7 @@ func (d StatusDoc) LogTail(project, workflow string, lines int) ([]string, error
 	if !ok || w.LogPath == "" {
 		return nil, fmt.Errorf("no log for workflow %q", workflow)
 	}
-	logs, err := filepath.EvalSymlinks(filepath.Join(root, ".sortie", "logs"))
+	logs, err := filepath.EvalSymlinks(filepath.Join(root, ".jigz", "logs"))
 	if err != nil {
 		return nil, err
 	}

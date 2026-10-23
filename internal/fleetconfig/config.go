@@ -73,7 +73,7 @@ type Repo struct {
 	// per-repo config it is required here: the state directory is not a
 	// git checkout, so there is no origin remote to detect it from.
 	Repo string `yaml:"repo"`
-	// Path is where this repository's .sortie/ lives. Empty means
+	// Path is where this repository's .jigz/ lives. Empty means
 	// <state_dir>/repos/<owner>/<name>. It holds only loop config and
 	// run state; the agent clones the repository itself into the
 	// workspaces, so no checkout is made.
@@ -284,7 +284,7 @@ type Config struct {
 // child needs.
 type Resolved struct {
 	Repo Repo
-	// Dir is where this repository's .sortie/ goes.
+	// Dir is where this repository's .jigz/ goes.
 	Dir string
 	// Workflows is the resolved loop set. Empty means every installed
 	// workflow, passed through as an unset JIG_ONLY.
@@ -399,7 +399,7 @@ func (r *Repo) validate() error {
 	return nil
 }
 
-// Dir returns the directory holding this repository's .sortie/.
+// Dir returns the directory holding this repository's .jigz/.
 func (c *Config) Dir(r Repo) (string, error) {
 	if r.Path == "" {
 		state, err := c.stateDir()
@@ -533,7 +533,7 @@ func (r Resolved) ValidateEnv() ([]string, error) {
 	return append(env,
 		"SORTIE_TRACKER_PROJECT="+r.Repo.Repo,
 		"SORTIE_TRACKER_API_KEY="+r.Token(),
-		"JIG_WORKSPACES="+filepath.Join(r.Dir, ".sortie", "workspaces"),
+		"JIG_WORKSPACES="+filepath.Join(r.Dir, ".jigz", "workspaces"),
 	), nil
 }
 

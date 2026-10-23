@@ -272,8 +272,10 @@ Done.
   survive the upgrade.
 - GitHub repository renamed to Jigz. GitHub redirects the old URL.
 - README and docs use the new names.
-- Engine-owned names stay: `SORTIE_*` variables, the `.sortie/` directory,
-  and the `sortie` binary.
+- Engine-owned names stay: `SORTIE_*` variables and the `sortie` binary;
+  the scratch workspace keeps `.sortie/`. The repo-local directory is
+  `.jigz/`, and `config.MigrateRepoDir` renames a repo's old `.sortie/`
+  on first lookup.
 - Acceptance: an existing install keeps its registry, history, and
   settings; `internal/dirs` has tests for the move and the merge.
 

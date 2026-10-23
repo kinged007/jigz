@@ -153,13 +153,13 @@ func TestValidateWorkflowUsesTheReposEnv(t *testing.T) {
 		t.Skip("no sortie binary on PATH")
 	}
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".sortie", "workflows"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".jigz", "workflows"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, ".sortie", "config.yaml"), []byte("repo: acme/app\ntoken: test-token\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".jigz", "config.yaml"), []byte("repo: acme/app\ntoken: test-token\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, ".sortie", ".env.loop"), []byte("SORTIE_TRACKER_PROJECT=acme/app\nSORTIE_TRACKER_API_KEY=test-token\nJIG_WORKSPACES="+filepath.Join(dir, ".sortie", "workspaces")+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".jigz", ".env.loop"), []byte("SORTIE_TRACKER_PROJECT=acme/app\nSORTIE_TRACKER_API_KEY=test-token\nJIG_WORKSPACES="+filepath.Join(dir, ".jigz", "workspaces")+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	body := `---
@@ -177,7 +177,7 @@ agent:
 ---
 work the issue.
 `
-	path := filepath.Join(dir, ".sortie", "workflows", "WORKFLOW.build.md")
+	path := filepath.Join(dir, ".jigz", "workflows", "WORKFLOW.build.md")
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}

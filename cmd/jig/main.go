@@ -133,10 +133,10 @@ func usage() {
          jig budget override <workflow> [--json] [repo-root]
          jig reload [--json] [repo-root]
          jig validate [--json] [repo-root]
-  Run every WORKFLOW.*.md loop in .sortie/workflows/ against the repo at repo-root (default: cwd).
+  Run every WORKFLOW.*.md loop in .jigz/workflows/ against the repo at repo-root (default: cwd).
   JIG_ONLY=plan,build  start only these loops (default: all of them)
   --host=ADDR is the address that binds the dashboard, default 127.0.0.1; 0.0.0.0 listens on all interfaces. The dashboard has no authentication.
-  Settings live in <root>/.sortie/config.yaml; repo id defaults to the git remote.
+  Settings live in <root>/.jigz/config.yaml; repo id defaults to the git remote.
   stop/restart act on the run already serving this repo-root, found through the shared registry.
   stop and restart are immediate; --when-idle waits for each loop to finish what it is working on, one loop at a time.
   status prints the state of the run serving this repo-root; --json prints its status document with a liveness field.
@@ -145,8 +145,8 @@ func usage() {
   pause stops one workflow's engine loop and keeps it stopped, also after a budget pause; resume starts it again.
   budget override lifts a budget pause and turns the cap off for the rest of the period (settings: workflows: in config.yaml).
   resume of a loop that is at or over its cap also turns the cap off for the rest of the period, because the loop would otherwise be paused again at the next poll.
-  reload re-reads .sortie/config.yaml without restarting children; supervisor-level settings (sleep, cleanup, budgets) take effect immediately, workflow filter changes need restart --when-idle.
-  validate checks .sortie/config.yaml (sleep, cleanup, budgets) and runs the engine's validation on each workflow.
+  reload re-reads .jigz/config.yaml without restarting children; supervisor-level settings (sleep, cleanup, budgets) take effect immediately, workflow filter changes need restart --when-idle.
+  validate checks .jigz/config.yaml (sleep, cleanup, budgets) and runs the engine's validation on each workflow.
   --version prints the tool version and the engine it drives; --dump-version prints only the engine version.`)
 }
 
@@ -265,7 +265,7 @@ func run() (code int) {
 		fatal(err)
 	}
 	if len(loops) == 0 {
-		fatal(fmt.Errorf("no WORKFLOW.*.md files in %s", filepath.Join(abs, ".sortie", "workflows")))
+		fatal(fmt.Errorf("no WORKFLOW.*.md files in %s", filepath.Join(abs, ".jigz", "workflows")))
 	}
 	for _, l := range loops {
 		fmt.Printf("loop %-10s %s filter %q\n", l.name, l.file, cfg.FilterFor(l.name))

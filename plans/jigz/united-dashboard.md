@@ -49,7 +49,7 @@ One codebase, two modes, same pages:
 ## 3. Design rules (from `AGENTS.md` + the fleet dashboard’s `PLAN.md`)
 
 - No defaults duplicated — every optional field stays `*T`; omission means the engine/supervisor default. Template helpers just format, they do not invent defaults.
-- Secrets never hit a file from the dashboard — `token_env` stays env-only; edit surface is `/.sortie/config.yaml` (no `.env.loop` rewrite).
+- Secrets never hit a file from the dashboard — `token_env` stays env-only; edit surface is `/.jigz/config.yaml` (no `.env.loop` rewrite).
 - `jig` validates workflows; the dashboard does not maintain a hardcoded workflow list.
 - One code path for single and multi — `Unite` is a rendering flag, not a second server. Helpers (`commas`, `usd`, `since`, `at`, `pct`, `cpuPct`, `size`, `gib`, `agentLabel`) are shared between fragments.
 - File+DB data plane stays file+DB — dashboard reads the same registry + status docs + WAL-visible RO SQLite + engine `GET /state`. No new IPC beyond signal/file-queue already implemented.
@@ -113,7 +113,7 @@ Sources per field:
 
 - Fleet + Loops + Per-repo rollup: `Reader.Collect()` exactly as the fleet dashboard does (port probe → DB → HTTP, `known[port]` from registry, stale rule, sort). For single-repo we keep the fast path `sup.endpoints()` but normalize into the same shape so the template doesn’t branch.
 - `repoView.State/Err/Diags/Output/PID/Args/StatusPath` — from `registry entry` + `statusDoc` (`liveness == running|stale|exited` → failure vs running; `doc.State` when present; `Args` + `Version` from registry; `Diags` from validate path if retained).
-- `Disk` — `dirsize` walk of `Repo` root’s `.sortie` + workspaces, sampled every 10 min on a `time.Ticker`, cached in `map[Slug]int64` guarded by mutex (exactly as the fleet dashboard’s `sizes *probe`). Measured out-of-band, never in the render path.
+- `Disk` — `dirsize` walk of `Repo` root’s `.jigz` + workspaces, sampled every 10 min on a `time.Ticker`, cached in `map[Slug]int64` guarded by mutex (exactly as the fleet dashboard’s `sizes *probe`). Measured out-of-band, never in the render path.
 - `Sleep` + per-workflow `Budget` — `statusDoc.Sleep` and `statusDoc.Workflows[].Budget` read from each repo’s status file (not probed).
 - `Cost` — `statePayload.ActiveEstimatedCostUSD`, nil → `usd` prints `—`.
 - `PickUp` — `pickedUp(db, identifier)` query (`MIN(started_at)` since last succeeded on `display_identifier|identifier`) — same SQL as the fleet dashboard.
@@ -130,7 +130,7 @@ Sources per field:
 GET  /                  → page (full, includes fleet + repos + loops + per-repo rollup + active)
 GET  /live              → live  fragment (everything below the header)
 GET  /status            → status fragment (memory/cpu/disk + clock)
-GET  /edit?repo=SLUG    → edit  (textarea with that repo’s .sortie/config.yaml)
+GET  /edit?repo=SLUG    → edit  (textarea with that repo’s .jigz/config.yaml)
 POST /edit?repo=SLUG    → save (+ validate; failure re-renders with Err, success 303 → /edit)
 POST /action            → start|stop|drain|restart per repo, stopall (confirm gated), apply
 ```
@@ -157,15 +157,15 @@ Every button is a `POST /action` handled by the dashboard process, which then ac
 | `cleanup [--dry-run]` | `runCleanupCmd` helper | per-repo POST with flag |
 | `stopall` | confirm page (`confirm{Active,WhenIdle}`) then either `sup.StopAll()` + `shutdown` or `StopAllWhenIdle` + `WaitAll` | `—-unite` variant drains every live repo (`forEachRepo(PIDs)→SIGUSR1 or SIGTERM`), then dashboard process waits and banner says “fleet is gone” |
 | `apply` (`reread config and apply`) | `reloadSupervisor(root, whenIdle)` → signal `SIGHUP` + poll `UpdatedAt`, `StartAll` for ready-stopped | per-repo apply (payload includes `repo`); or fleet-wide `apply` iterates repos |
-| `edit` | read `filepath.Join(root,".sortie/config.yaml")` into textarea; save → `writeFileAtomic` then `reload` gate | per-repo `?repo=slug`; same validate-then-save path |
+| `edit` | read `filepath.Join(root,".jigz/config.yaml")` into textarea; save → `writeFileAtomic` then `reload` gate | per-repo `?repo=slug`; same validate-then-save path |
 
 All L2 commands already have request-file semantics; HTTP just writes the same files/signals the same PIDs the CLI would. No new protocol. Failures surface as `Err` in the redirect (`?err=`) and log on supervisor.
 
 ## 7. Host metrics & disk sizing
 
 - New package `internal/host` — copy from the fleet dashboard's `internal/host` (files: `host.go`, `host_linux.go`, `host_other.go`, `blocks*.go`, `cores*.go`, `dirsize*.go`). `host.Reader` keeps previous `/proc/stat` sample; `Read() Metrics{MemTotal,MemUsed,Cores,CPU(-1 until 2nd sample),DiskTotal,DiskUsed,DiskPath}`. Force-copied verbatim so behavior is identical (MemAvailable, `Bavail`, idle+iowait).
-- Disk probe is by `state_dir` (here: `filepath.Dir(registryPath())`) so the figure tracks where `.sortie` actually fills up.
-- Per-repo disk size: `dirsize(Repo+"/.sortie")` cached 10 min, like the fleet dashboard’s `sizes *probe`. Walk ignores `.git`, does not follow symlinks.
+- Disk probe is by `state_dir` (here: `filepath.Dir(registryPath())`) so the figure tracks where `.jigz` actually fills up.
+- Per-repo disk size: `dirsize(Repo+"/.jigz")` cached 10 min, like the fleet dashboard’s `sizes *probe`. Walk ignores `.git`, does not follow symlinks.
 
 ## 8. Template & frontend
 
@@ -185,7 +185,7 @@ cmd/jig/
   dashboard.go        → resolveRepo, statusDir, serveDashboard: builds the app, starts the
                         server and the history collector, signals self on quit
   web.go + 20 handlers→ the fleet dashboard's, imports rewritten to Jigz; /edit edits this repo's
-                        .sortie/config.yaml
+                        .jigz/config.yaml
   templates/*.html    → the 16 template files, inlined icons, renamed to "Sortie Loop"
   dashboard_data.go   → openRO and fmtTokens (kept: budget reads and the status command use them)
   dashboard.html      → deleted
@@ -309,7 +309,7 @@ every registered repo. `stop all` drains or stops every repo, waits, closes
   config-file writes are reachable but write the fleet YAML shape this
   program does not read. Use `jig setup` in the target repo.
 - Workflow validation runs `sortie validate` in the environment the loops
-  run with (`.sortie/.env.loop`, else `config.Load(dir).Env()`), not the
+  run with (`.jigz/.env.loop`, else `config.Load(dir).Env()`), not the
   fleet cascade, which has no counterpart here.
 - Budget lines on the loops table come from the status document's
   `budget` object: spend against the cap, plus a `paused` chip naming who

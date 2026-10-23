@@ -283,8 +283,8 @@ func (a *app) backupBytes(slug string) int64 {
 // diskSplitOf measures the parts of a project directory's disk use. It is
 // nil when neither part can be read.
 func diskSplitOf(dir string, backups int64) *diskSplit {
-	ws := machine.DirSize(filepath.Join(dir, ".sortie", "workspaces"))
-	db := machine.DirSize(filepath.Join(dir, ".sortie", "workflows"))
+	ws := machine.DirSize(filepath.Join(dir, ".jigz", "workspaces"))
+	db := machine.DirSize(filepath.Join(dir, ".jigz", "workflows"))
 	if ws < 0 && db < 0 {
 		return nil
 	}
@@ -343,7 +343,7 @@ func (a *app) projectBackups(slug string) []backupRow {
 }
 
 // configRows is the effective settings of a project. Jigz reads
-// them from that repository's own .sortie/config.yaml, which is the file
+// them from that repository's own .jigz/config.yaml, which is the file
 // the loops run with; there is no fleet cascade to report an origin from.
 func (a *app) configRows(res fleetconfig.Resolved) []cfgRow {
 	slug := res.Repo.Repo

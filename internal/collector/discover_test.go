@@ -15,7 +15,7 @@ import (
 func repoWithDBs(t *testing.T, files map[string]string, dbs ...string) string {
 	t.Helper()
 	root := t.TempDir()
-	dir := filepath.Join(root, ".sortie", "workflows")
+	dir := filepath.Join(root, ".jigz", "workflows")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestRegisteredLoopIsNotCountedAgainWhenDiscovered(t *testing.T) {
 	}, ".sortie-build.db")
 	live := rollup.Loop{
 		Repo: "acme/app", Loop: "other", Live: true,
-		DBPath: filepath.Join(root, ".sortie", "workflows", ".sortie-build.db"),
+		DBPath: filepath.Join(root, ".jigz", "workflows", ".sortie-build.db"),
 	}
 	c, st := discovering(t, []rollup.Loop{live}, map[string]string{"acme/app": root})
 	c.Once(context.Background())
@@ -115,7 +115,7 @@ func TestDiscoveredDatabasesKeepGainingRuns(t *testing.T) {
 	if n := runCounts(t, st)["acme/app/build"]; n != 16 {
 		t.Fatalf("first pass = %d runs, want 16", n)
 	}
-	db, err := sql.Open("sqlite", filepath.Join(root, ".sortie", "workflows", ".sortie-build.db"))
+	db, err := sql.Open("sqlite", filepath.Join(root, ".jigz", "workflows", ".sortie-build.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestDiscoveredDatabasesKeepGainingRuns(t *testing.T) {
 
 func TestGarbageDiscoveredDatabaseIsSkipped(t *testing.T) {
 	root := repoWithDBs(t, nil, ".sortie-ok.db")
-	bad := filepath.Join(root, ".sortie", "workflows", ".sortie-bad.db")
+	bad := filepath.Join(root, ".jigz", "workflows", ".sortie-bad.db")
 	if err := os.WriteFile(bad, []byte("not a database"), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -23,7 +23,7 @@ func resolved(t *testing.T, dir string, mutate ...func(*config.Resolved)) config
 
 func workflows(t *testing.T, dir string, names ...string) {
 	t.Helper()
-	w := filepath.Join(dir, ".sortie", "workflows")
+	w := filepath.Join(dir, ".jigz", "workflows")
 	if err := os.MkdirAll(w, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestApplyWritesOnlyConfiguredKeys(t *testing.T) {
 	if err := Apply(r); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, ".sortie", "config.yaml"))
+	raw, err := os.ReadFile(filepath.Join(dir, ".jigz", "config.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestApplyIsIdempotent(t *testing.T) {
 	if err := Apply(r); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(dir, ".sortie", "config.yaml")
+	path := filepath.Join(dir, ".jigz", "config.yaml")
 	first, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -97,7 +97,7 @@ func TestApplyNeverWritesAToken(t *testing.T) {
 	if err := Apply(r); err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := os.ReadFile(filepath.Join(dir, ".sortie", "config.yaml"))
+	raw, _ := os.ReadFile(filepath.Join(dir, ".jigz", "config.yaml"))
 	if strings.Contains(string(raw), "ghp_secret") {
 		t.Errorf("token written to config.yaml:\n%s", raw)
 	}
@@ -204,7 +204,7 @@ func TestPatchBlockInsertsAnAbsentKey(t *testing.T) {
 func TestApplySettingsSkipsWhenUnset(t *testing.T) {
 	dir := t.TempDir()
 	workflows(t, dir, "build")
-	path := filepath.Join(dir, ".sortie", "workflows", "WORKFLOW.build.md")
+	path := filepath.Join(dir, ".jigz", "workflows", "WORKFLOW.build.md")
 	before, _ := os.ReadFile(path)
 	if err := (Plan{}).ApplySettings(resolved(t, dir)); err != nil {
 		t.Fatal(err)
@@ -225,7 +225,7 @@ func TestApplySettingsWritesTheModelLine(t *testing.T) {
 	if err := (Plan{}).ApplySettings(r); err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := os.ReadFile(filepath.Join(dir, ".sortie", "workflows", "WORKFLOW.build.md"))
+	raw, _ := os.ReadFile(filepath.Join(dir, ".jigz", "workflows", "WORKFLOW.build.md"))
 	if !strings.Contains(string(raw), "  model: $JIG_MODEL") {
 		t.Errorf("model line not written:\n%s", raw)
 	}
@@ -249,7 +249,7 @@ func TestApplySettingsWritesPerWorkflowKnobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	read := func(n string) string {
-		raw, err := os.ReadFile(filepath.Join(dir, ".sortie", "workflows", "WORKFLOW."+n+".md"))
+		raw, err := os.ReadFile(filepath.Join(dir, ".jigz", "workflows", "WORKFLOW."+n+".md"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -317,7 +317,7 @@ func TestPollingKnobUsesItsBlockKey(t *testing.T) {
 	if err := (Plan{}).ApplySettings(r); err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := os.ReadFile(filepath.Join(dir, ".sortie", "workflows", "WORKFLOW.build.md"))
+	raw, _ := os.ReadFile(filepath.Join(dir, ".jigz", "workflows", "WORKFLOW.build.md"))
 	if !strings.Contains(string(raw), "polling:\n  interval_ms: 15000") {
 		t.Errorf("poll interval not written to the real key:\n%s", raw)
 	}
@@ -338,7 +338,7 @@ func TestAdapterBlockIsCreatedForANonDefaultKind(t *testing.T) {
 	if err := (Plan{}).ApplySettings(r); err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := os.ReadFile(filepath.Join(dir, ".sortie", "workflows", "WORKFLOW.build.md"))
+	raw, _ := os.ReadFile(filepath.Join(dir, ".jigz", "workflows", "WORKFLOW.build.md"))
 	if !strings.Contains(string(raw), "codex:\n  model: $JIG_MODEL\n") {
 		t.Errorf("codex adapter block not created:\n%s", raw)
 	}
@@ -467,7 +467,7 @@ func TestRemovingAModelRestoresTheShippedFile(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			dir := t.TempDir()
 			workflows(t, dir, "plan")
-			path := filepath.Join(dir, ".sortie", "workflows", "WORKFLOW.plan.md")
+			path := filepath.Join(dir, ".jigz", "workflows", "WORKFLOW.plan.md")
 			// The baseline is the file as Jigz leaves it with no
 			// model, not the untouched shipped copy: Jigz always writes
 			// the loop bind address, so that line is not part of what this
@@ -512,7 +512,7 @@ func TestRemovingAModelRestoresTheShippedFile(t *testing.T) {
 func TestNoReferenceSurvivesAnUnsetModel(t *testing.T) {
 	dir := t.TempDir()
 	workflows(t, dir, "plan")
-	path := filepath.Join(dir, ".sortie", "workflows", "WORKFLOW.plan.md")
+	path := filepath.Join(dir, ".jigz", "workflows", "WORKFLOW.plan.md")
 	r := resolved(t, dir)
 	r.Agent.Kind, r.Agent.Model, r.Knobs = "codex", "m", config.Settings{"kind": "codex", "model": "m"}
 	if err := (Plan{}).ApplySettings(r); err != nil {
@@ -538,7 +538,7 @@ func TestNoReferenceSurvivesAnUnsetModel(t *testing.T) {
 func TestAHandWrittenAdapterBlockIsKept(t *testing.T) {
 	dir := t.TempDir()
 	workflows(t, dir, "plan")
-	path := filepath.Join(dir, ".sortie", "workflows", "WORKFLOW.plan.md")
+	path := filepath.Join(dir, ".jigz", "workflows", "WORKFLOW.plan.md")
 	body, _ := os.ReadFile(path)
 	body = append(body, []byte("codex:\n  model: \"hand-written\"\n  reasoning_effort: high\n")...)
 	if err := os.WriteFile(path, body, 0o644); err != nil {
@@ -571,7 +571,7 @@ func TestAHandWrittenAdapterBlockIsKept(t *testing.T) {
 func TestASuffixedModelReferenceIsAlsoPruned(t *testing.T) {
 	dir := t.TempDir()
 	workflows(t, dir, "plan")
-	path := filepath.Join(dir, ".sortie", "workflows", "WORKFLOW.plan.md")
+	path := filepath.Join(dir, ".jigz", "workflows", "WORKFLOW.plan.md")
 	r := resolved(t, dir)
 	r.Agent.Kind = "codex"
 	r.Overrides = map[string]config.Settings{"plan": {"kind": "codex", "model": "m"}}
@@ -593,7 +593,7 @@ func TestASuffixedModelReferenceIsAlsoPruned(t *testing.T) {
 
 func TestTrackerKindReadsTheWorkflowFrontMatter(t *testing.T) {
 	dir := t.TempDir()
-	w := filepath.Join(dir, ".sortie", "workflows")
+	w := filepath.Join(dir, ".jigz", "workflows")
 	if err := os.MkdirAll(w, 0o755); err != nil {
 		t.Fatal(err)
 	}

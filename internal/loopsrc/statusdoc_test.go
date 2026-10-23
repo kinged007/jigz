@@ -189,7 +189,7 @@ func TestFleetProbesOnlyAwakeRunningWorkflowsAndFallsBack(t *testing.T) {
 
 func TestDBPathFromFrontMatter(t *testing.T) {
 	root := t.TempDir()
-	dir := filepath.Join(root, ".sortie", "workflows")
+	dir := filepath.Join(root, ".jigz", "workflows")
 	os.MkdirAll(dir, 0o755)
 	os.WriteFile(filepath.Join(dir, "WORKFLOW.a.md"), []byte("---\ndb_path: .sortie-a.db\n---\nbody"), 0o644)
 	if got := dbPath(root, "WORKFLOW.a.md"); got != filepath.Join(dir, ".sortie-a.db") {
@@ -267,7 +267,7 @@ func TestCleanupDryRunAndFailure(t *testing.T) {
 
 func logEnv(t *testing.T) (*env, string) {
 	e := newEnv(t)
-	logs := filepath.Join(e.root, ".sortie", "logs")
+	logs := filepath.Join(e.root, ".jigz", "logs")
 	os.MkdirAll(logs, 0o755)
 	return e, logs
 }

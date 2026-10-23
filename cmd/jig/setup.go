@@ -12,7 +12,7 @@ import (
 	"github.com/kinged007/jigz/internal/config"
 )
 
-// runSetup creates .sortie/config.yaml if missing, syncs labels via gh,
+// runSetup creates .jigz/config.yaml if missing, syncs labels via gh,
 // and ensures .gitignore covers the loop's local state. dir is the repo
 // root, empty for the current directory; repo is the --repo value, a repo
 // slug and never a directory. asJSON enables non-interactive JSON output.
@@ -28,13 +28,14 @@ func runSetup(dir, repo string, asJSON bool) {
 	if err != nil {
 		fatal(err)
 	}
+	config.MigrateRepoDir(abs)
 	// Dogfooding is supported: setup runs in this checkout like any other
-	// repo. Everything it writes lands under .sortie/, which
+	// repo. Everything it writes lands under .jigz/, which
 	// ensureGitignore keeps untracked.
 	if _, err := exec.LookPath("gh"); err != nil {
 		fatal(fmt.Errorf("gh CLI not found"))
 	}
-	cfgPath := filepath.Join(abs, ".sortie", "config.yaml")
+	cfgPath := filepath.Join(abs, ".jigz", "config.yaml")
 	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
 		if repo == "" {
 			repo = guessRepo(abs)
@@ -88,9 +89,9 @@ func runSetup(dir, repo string, asJSON bool) {
 	}
 	warnLegacy(syncWorkflows(abs))
 	warnStalePrompts(abs)
-	fmt.Println("workflows ready in", filepath.Join(abs, ".sortie", "workflows"))
+	fmt.Println("workflows ready in", filepath.Join(abs, ".jigz", "workflows"))
 	syncPMAgent(abs, askBeforeOverwrite)
-	fmt.Println("project manager prompt ready in", filepath.Join(abs, ".sortie", "pm-agent.md"))
+	fmt.Println("project manager prompt ready in", filepath.Join(abs, ".jigz", "pm-agent.md"))
 	// The engine is resolved here so a working setup leaves a bare
 	// `sortie` on PATH, for go install users and for anyone who only
 	// ever runs setup. A missing engine is a warning: config and labels
@@ -189,6 +190,7 @@ func runSetupJSON(dir, repo string) {
 		}, err)
 		return
 	}
+	config.MigrateRepoDir(abs)
 	res := &setupResult{
 		Created: []setupCreated{}, Skipped: []setupSkipped{},
 		SyncedLabels: []setupLabelResult{}, Warnings: []string{}, Errors: []string{},
@@ -198,7 +200,7 @@ func runSetupJSON(dir, repo string) {
 		printSetupJSONAndFatal(res, fmt.Errorf("gh CLI not found"))
 		return
 	}
-	cfgPath := filepath.Join(abs, ".sortie", "config.yaml")
+	cfgPath := filepath.Join(abs, ".jigz", "config.yaml")
 	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
 		if repo == "" {
 			repo = guessRepo(abs)
@@ -257,19 +259,19 @@ func runSetupJSON(dir, repo string) {
 	// Workflows and prompts.
 	legacy := syncWorkflowsJSON(abs, res)
 	if len(legacy) > 0 {
-		msg := fmt.Sprintf("warning: legacy workflow files found in .sortie/workflows/ (%s).", strings.Join(legacy, ", ")) +
+		msg := fmt.Sprintf("warning: legacy workflow files found in .jigz/workflows/ (%s).", strings.Join(legacy, ", ")) +
 			" WORKFLOW.issues.md and WORKFLOW.prs.md are skipped until the legacy files are deleted. Delete them, then rerun `jig setup`."
 		res.Warnings = append(res.Warnings, msg)
 	}
 	// Stale prompts.
 	for _, name := range []string{"plan.md", "build.md"} {
-		cur, err := os.ReadFile(filepath.Join(abs, ".sortie", "workflows", "prompts", name))
+		cur, err := os.ReadFile(filepath.Join(abs, ".jigz", "workflows", "prompts", name))
 		if err != nil {
 			continue
 		}
 		want, err := embeddedWorkflows.ReadFile("workflows/prompts/" + name)
 		if err == nil && string(cur) != string(want) {
-			msg := fmt.Sprintf("note: .sortie/workflows/prompts/%s differs from the shipped copy; diff it or delete it and rerun setup to take the shipped version.", name)
+			msg := fmt.Sprintf("note: .jigz/workflows/prompts/%s differs from the shipped copy; diff it or delete it and rerun setup to take the shipped version.", name)
 			res.Warnings = append(res.Warnings, msg)
 		}
 	}
@@ -299,7 +301,7 @@ func runSetupJSON(dir, repo string) {
 	}
 	for _, l := range config.DefaultLabels {
 		if !have[l.Name] {
-			msg := fmt.Sprintf("note: label %q is not in the labels list of .sortie/config.yaml, so setup does not create it.", l.Name)
+			msg := fmt.Sprintf("note: label %q is not in the labels list of .jigz/config.yaml, so setup does not create it.", l.Name)
 			res.Warnings = append(res.Warnings, msg)
 		}
 	}
@@ -373,7 +375,7 @@ func printSetupJSONAndFatal(res *setupResult, err error) {
 }
 
 func syncWorkflowsJSON(root string, res *setupResult) []string {
-	dir := filepath.Join(root, ".sortie", "workflows")
+	dir := filepath.Join(root, ".jigz", "workflows")
 	var legacy []string
 	for _, name := range legacyWorkflows {
 		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
@@ -448,7 +450,7 @@ func writeWorkflowJSON(fsys fs.FS, dest, src string, policy writePolicy, kind st
 }
 
 func syncPMAgentJSON(root string, res *setupResult) {
-	writeWorkflowJSON(embeddedPMAgent, filepath.Join(root, ".sortie", "pm-agent.md"), "pm-agent.md", askBeforeOverwrite, "pm-agent", res)
+	writeWorkflowJSON(embeddedPMAgent, filepath.Join(root, ".jigz", "pm-agent.md"), "pm-agent.md", askBeforeOverwrite, "pm-agent", res)
 }
 
 func ensureGitignoreJSON(dir string, res *setupResult) {
@@ -463,16 +465,16 @@ func ensureGitignoreJSON(dir string, res *setupResult) {
 	for _, line := range strings.Split(string(raw), "\n") {
 		t := strings.TrimSpace(line)
 		have[t] = true
-		if strings.HasPrefix(t, "!") && strings.Contains(t, ".sortie") {
+		if strings.HasPrefix(t, "!") && strings.Contains(t, ".jigz") {
 			selective = true
 		}
 	}
 	if selective {
 		res.Skipped = append(res.Skipped, setupSkipped{Path: path, Reason: "selective-tracked"})
-		res.Warnings = append(res.Warnings, ".gitignore tracks parts of .sortie/ — leaving ignore rules alone")
+		res.Warnings = append(res.Warnings, ".gitignore tracks parts of .jigz/ — leaving ignore rules alone")
 		return
 	}
-	want := []string{".sortie/", "jigz"}
+	want := []string{".jigz/", "/jig"}
 	old := map[string]bool{}
 	for _, e := range oldGitignoreEntries {
 		old[e] = true
@@ -544,26 +546,29 @@ func labelOn(repo, name string) (*existingLabel, error) {
 }
 
 // oldGitignoreEntries is the granular scheme setup wrote before ignoring
-// .sortie/ wholesale; dropped as subsumed when seen.
+// .jigz/ wholesale (and its earlier .sortie/ spellings); dropped as
+// subsumed when seen.
 var oldGitignoreEntries = []string{
-	".sortie/.env.loop", ".sortie/workflows/", ".sortie/workspaces/", ".sortie-*.db",
+	".jigz/.env.loop", ".jigz/workflows/", ".jigz/workspaces/", ".sortie-*.db",
+	".sortie/.env.loop", ".sortie/workflows/", ".sortie/workspaces/",
+	"jig", "jigz",
 }
 
-// selectiveGitignore replaces `.sortie/` for teams that share loop config
+// selectiveGitignore replaces `.jigz/` for teams that share loop config
 // in git. Only track config.yaml with `token: ""` — secrets stay in env.
-// (`.sortie/*` rather than `.sortie/` so the `!` re-includes take effect:
+// (`.jigz/*` rather than `.jigz/` so the `!` re-includes take effect:
 // git never descends into an excluded directory.)
 const selectiveGitignore = `# jig: track shared config, ignore run state
-.sortie/*
-!.sortie/config.yaml
-!.sortie/workflows/
+.jigz/*
+!.jigz/config.yaml
+!.jigz/workflows/
 .sortie-*.db`
 
-// ensureGitignore ignores .sortie/ wholesale — generated env, workspaces,
+// ensureGitignore ignores .jigz/ wholesale — generated env, workspaces,
 // db files, and local config all stay untracked — creating .gitignore if
 // missing. Stale lines from the old granular scheme are removed. When the
-// file re-includes parts of .sortie/ via negations the user tracks
-// selectively on purpose, so sortie lines are left alone.
+// file re-includes parts of .jigz/ via negations the user tracks
+// selectively on purpose, so those lines are left alone.
 func ensureGitignore(dir string) {
 	path := filepath.Join(dir, ".gitignore")
 	raw, err := os.ReadFile(path)
@@ -575,15 +580,15 @@ func ensureGitignore(dir string) {
 	for _, line := range strings.Split(string(raw), "\n") {
 		t := strings.TrimSpace(line)
 		have[t] = true
-		if strings.HasPrefix(t, "!") && strings.Contains(t, ".sortie") {
+		if strings.HasPrefix(t, "!") && strings.Contains(t, ".jigz") {
 			selective = true
 		}
 	}
 	if selective {
-		fmt.Println(".gitignore tracks parts of .sortie/ — leaving ignore rules alone")
+		fmt.Println(".gitignore tracks parts of .jigz/ — leaving ignore rules alone")
 		return
 	}
-	want := []string{".sortie/", "jigz"}
+	want := []string{".jigz/", "/jig"}
 	old := map[string]bool{}
 	for _, e := range oldGitignoreEntries {
 		old[e] = true
@@ -604,7 +609,7 @@ func ensureGitignore(dir string) {
 		}
 	}
 	if len(missing) == 0 && !dropped {
-		fmt.Println(".sortie/ is fully ignored")
+		fmt.Println(".jigz/ is fully ignored")
 		return
 	}
 	out := strings.TrimRight(strings.Join(kept, "\n"), "\n")
@@ -620,6 +625,6 @@ func ensureGitignore(dir string) {
 	if err := os.WriteFile(path, []byte(out), 0o644); err != nil {
 		fatal(fmt.Errorf("write .gitignore: %w", err))
 	}
-	fmt.Println("updated", path, "— .sortie/ is now fully ignored")
-	fmt.Println("To share loop config in git instead, replace `.sortie/` with:\n" + selectiveGitignore)
+	fmt.Println("updated", path, "— .jigz/ is now fully ignored")
+	fmt.Println("To share loop config in git instead, replace `.jigz/` with:\n" + selectiveGitignore)
 }

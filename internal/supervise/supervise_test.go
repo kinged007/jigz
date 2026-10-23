@@ -509,7 +509,7 @@ func TestStoppingOneRepositoryLeavesTheFleetAlive(t *testing.T) {
 // the child never picks up.
 func TestPrepareRestartsARunningChildWhoseConfigMoved(t *testing.T) {
 	dir := t.TempDir()
-	w := filepath.Join(dir, ".sortie", "workflows")
+	w := filepath.Join(dir, ".jigz", "workflows")
 	if err := os.MkdirAll(w, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -701,7 +701,7 @@ func TestAgentsOmitsAnUnsetKind(t *testing.T) {
 func newProbeSup(t *testing.T) (*Supervisor, string, string) {
 	t.Helper()
 	dir := t.TempDir()
-	w := filepath.Join(dir, ".sortie", "workflows")
+	w := filepath.Join(dir, ".jigz", "workflows")
 	if err := os.MkdirAll(w, 0o755); err != nil {
 		t.Fatal(err)
 	}

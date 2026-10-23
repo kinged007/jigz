@@ -1,5 +1,5 @@
 # Jigz local state (added by jig setup)
-.sortie/
+.jigz/
 # Anchored: a bare pattern would also match cmd/jig/ in any
 # subdirectory, which ignores the package source itself.
 /jig

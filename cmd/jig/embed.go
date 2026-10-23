@@ -47,7 +47,7 @@ var consolidatedWorkflows = []string{"WORKFLOW.issues.md", "WORKFLOW.prs.md"}
 var promptIn *bufio.Reader
 
 // syncWorkflows installs the embedded workflow files (WORKFLOW.*.md +
-// prompts/) into <root>/.sortie/workflows/ so they sit visible next to
+// prompts/) into <root>/.jigz/workflows/ so they sit visible next to
 // the loop's config, env, and workspaces. A missing file is written and
 // an existing file is never changed or removed, because installed
 // workflows and prompts are hand-edited. It returns the legacy workflow
@@ -56,7 +56,7 @@ var promptIn *bufio.Reader
 // ponytail: no version stamp, so a file left untouched but outdated by a
 // binary upgrade is never noticed; delete it and re-run setup.
 func syncWorkflows(root string) []string {
-	dir := filepath.Join(root, ".sortie", "workflows")
+	dir := filepath.Join(root, ".jigz", "workflows")
 	var legacy []string
 	for _, name := range legacyWorkflows {
 		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
@@ -89,13 +89,13 @@ func syncWorkflows(root string) []string {
 // issue.
 func warnStalePrompts(root string) {
 	for _, name := range []string{"plan.md", "build.md"} {
-		cur, err := os.ReadFile(filepath.Join(root, ".sortie", "workflows", "prompts", name))
+		cur, err := os.ReadFile(filepath.Join(root, ".jigz", "workflows", "prompts", name))
 		if err != nil {
 			continue
 		}
 		want, err := embeddedWorkflows.ReadFile("workflows/prompts/" + name)
 		if err == nil && string(cur) != string(want) {
-			fmt.Fprintf(os.Stderr, "note: .sortie/workflows/prompts/%s differs from the shipped copy; diff it or delete it and rerun setup to take the shipped version.\n", name)
+			fmt.Fprintf(os.Stderr, "note: .jigz/workflows/prompts/%s differs from the shipped copy; diff it or delete it and rerun setup to take the shipped version.\n", name)
 		}
 	}
 }
@@ -109,7 +109,7 @@ func warnMissingLabels(labels []config.Label) {
 	}
 	for _, l := range config.DefaultLabels {
 		if !have[l.Name] {
-			fmt.Fprintf(os.Stderr, "note: label %q is not in the labels list of .sortie/config.yaml, so setup does not create it.\n", l.Name)
+			fmt.Fprintf(os.Stderr, "note: label %q is not in the labels list of .jigz/config.yaml, so setup does not create it.\n", l.Name)
 		}
 	}
 }
@@ -120,16 +120,16 @@ func warnLegacy(legacy []string) {
 	if len(legacy) == 0 {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "warning: legacy workflow files found in .sortie/workflows/ (%s).\n"+
+	fmt.Fprintf(os.Stderr, "warning: legacy workflow files found in .jigz/workflows/ (%s).\n"+
 		"  WORKFLOW.issues.md and WORKFLOW.prs.md are skipped until the legacy files are deleted.\n"+
 		"  Delete them, then rerun `jig setup`.\n", strings.Join(legacy, ", "))
 }
 
-// syncPMAgent installs the project-manager prompt into <root>/.sortie/
+// syncPMAgent installs the project-manager prompt into <root>/.jigz/
 // beside config.yaml, so every repo that runs setup gets a PM ready to
 // use. Hand-edited copies follow the same rules as the workflows.
 func syncPMAgent(root string, policy writePolicy) {
-	writeWorkflow(embeddedPMAgent, filepath.Join(root, ".sortie", "pm-agent.md"), "pm-agent.md", policy)
+	writeWorkflow(embeddedPMAgent, filepath.Join(root, ".jigz", "pm-agent.md"), "pm-agent.md", policy)
 }
 
 func writeWorkflow(fsys fs.FS, dest, src string, policy writePolicy) {
@@ -185,11 +185,11 @@ func displayPath(dest string) string {
 }
 
 // workflowPath returns the repo-local workflow file, filling gaps from the
-// embedded copies so checkouts set up before workflows moved into .sortie
+// embedded copies so checkouts set up before workflows moved into .jigz
 // still run.
 func workflowPath(root, name string) string {
 	syncWorkflows(root)
-	return filepath.Join(root, ".sortie", "workflows", name)
+	return filepath.Join(root, ".jigz", "workflows", name)
 }
 
 // discoverWorkflows lists the installed WORKFLOW.*.md files in name order,
@@ -199,7 +199,7 @@ func workflowPath(root, name string) string {
 // name is the filename stem ("triage").
 func discoverWorkflows(root string) []loopDef {
 	warnLegacy(syncWorkflows(root))
-	entries, err := os.ReadDir(filepath.Join(root, ".sortie", "workflows"))
+	entries, err := os.ReadDir(filepath.Join(root, ".jigz", "workflows"))
 	if err != nil {
 		fatal(err)
 	}

@@ -63,7 +63,7 @@ func collectValidateChecks(root string) ([]validateCheck, []string, []string) {
 }
 
 func listWorkflows(root string) []loopDef {
-	dir := filepath.Join(root, ".sortie", "workflows")
+	dir := filepath.Join(root, ".jigz", "workflows")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
@@ -87,7 +87,7 @@ func workflowValidateChecks(root string, cfg *config.Config) ([]validateCheck, [
 		files = append(files, l.file)
 	}
 	if len(loops) == 0 {
-		return []validateCheck{{Name: "workflows", OK: false, Error: fmt.Sprintf("no WORKFLOW.*.md files in %s", filepath.Join(root, ".sortie", "workflows"))}}, files
+		return []validateCheck{{Name: "workflows", OK: false, Error: fmt.Sprintf("no WORKFLOW.*.md files in %s", filepath.Join(root, ".jigz", "workflows"))}}, files
 	}
 
 	bin, err := resolveSortieBin()
@@ -100,7 +100,7 @@ func workflowValidateChecks(root string, cfg *config.Config) ([]validateCheck, [
 	}
 
 	var checks []validateCheck
-	dir := filepath.Join(root, ".sortie", "workflows")
+	dir := filepath.Join(root, ".jigz", "workflows")
 	for _, l := range loops {
 		out, err := runSortieValidate(bin, dir, l, cfg)
 		name := "workflow:" + l.file

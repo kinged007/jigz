@@ -14,7 +14,7 @@ const (
 
 // childLogPath is where the output of one workflow's engine child is written.
 func childLogPath(root, workflow string) string {
-	return filepath.Join(root, ".sortie", "logs", workflow+".log")
+	return filepath.Join(root, ".jigz", "logs", workflow+".log")
 }
 
 // rotatingLog appends to a file and rotates it by size. It is shared by the

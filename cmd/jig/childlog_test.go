@@ -102,9 +102,9 @@ func TestRotatingLogOpenFailsInUnwritableDir(t *testing.T) {
 func TestChildStartsWhenLogCannotBeOpened(t *testing.T) {
 	root2 := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	mustWrite(t, filepath.Join(root2, ".sortie", "config.yaml"), "repo: owner/name\n")
-	mustWrite(t, filepath.Join(root2, ".sortie", "workflows", "WORKFLOW.plan.md"), "body\n")
-	mustWrite(t, filepath.Join(root2, ".sortie", "logs"), "not a directory")
+	mustWrite(t, filepath.Join(root2, ".jigz", "config.yaml"), "repo: owner/name\n")
+	mustWrite(t, filepath.Join(root2, ".jigz", "workflows", "WORKFLOW.plan.md"), "body\n")
+	mustWrite(t, filepath.Join(root2, ".jigz", "logs"), "not a directory")
 	s2 := newTestSup(t, root2, "plan")
 	s2.ports["plan"] = 0
 	s2.bin = writeScript(t, root2, "sortie", "while true; do sleep 1; done\n")
@@ -120,7 +120,7 @@ func TestStatusReportsLogPath(t *testing.T) {
 	if len(doc.Workflows) != 1 {
 		t.Fatalf("%d workflows", len(doc.Workflows))
 	}
-	want := filepath.Join(root, ".sortie", "logs", "plan.log")
+	want := filepath.Join(root, ".jigz", "logs", "plan.log")
 	if doc.Workflows[0].LogPath != want {
 		t.Errorf("log_path = %q, want %q", doc.Workflows[0].LogPath, want)
 	}
@@ -137,8 +137,8 @@ func TestChildOutputReachesLogAndTerminal(t *testing.T) {
 
 	root := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	mustWrite(t, filepath.Join(root, ".sortie", "config.yaml"), "repo: owner/name\n")
-	mustWrite(t, filepath.Join(root, ".sortie", "workflows", "WORKFLOW.plan.md"), "body\n")
+	mustWrite(t, filepath.Join(root, ".jigz", "config.yaml"), "repo: owner/name\n")
+	mustWrite(t, filepath.Join(root, ".jigz", "workflows", "WORKFLOW.plan.md"), "body\n")
 	sup := newTestSup(t, root, "plan")
 	sup.ports["plan"] = 0
 	sup.bin = writeScript(t, root, "sortie", "echo to-out\necho to-err >&2\n")

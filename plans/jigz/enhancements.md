@@ -46,7 +46,7 @@ L9-L11 live verification: `/tmp/l9-l11-live-verify.md` (no supervisor) + `/tmp/l
 
 ### Next actions
 
-1. Engine re-pin done (`9b790ff`, v0.3.0): `engineTag` v1.27.0, staged chain shipped, legacy `.sortie/workflows` patched to `[closed]` locally.
+1. Engine re-pin done (`9b790ff`, v0.3.0): `engineTag` v1.27.0, staged chain shipped, legacy `.jigz/workflows` patched to `[closed]` locally.
 2. L12 only if Windows is a target. Status: optional; ~60% parity — `wake`/`cleanup`/`validate`/`status` already file-based; `stop`/`restart`/`reload` still need request-file/poll alternative (see `/tmp/windows-stage-chain-note.md` §1).
 3. Fleet dashboard items 5-6 remain in the other repo.
 4. End-to-end live-supervisor run already done (`/tmp/live-supervisor-verify.md`); repeat only after engine re-pin or workflow changes.
@@ -84,7 +84,7 @@ Files and formats:
 | Budget state and requests | `<hash>.budget.json` (per workflow: `period_start`, `paused`, `paused_by`, `override`, `warned`) and one `<hash>.budget.request.<time>-<pid>` file per request from `pause`, `resume` and `budget override`, next to the status file. |
 | Cleanup record and lock | `<hash>.cleanup.json` and `<hash>.cleanup.lock` next to the status file. |
 | Registry and locks | `registry.json` in `<user cache dir>/jigz/`, with `.lock` (port claim) and `.update.lock` (registry read-modify-write) beside it. |
-| Child logs | `<repo>/.sortie/logs/<workflow>.log`, rotated at 10 MiB, 3 files kept. |
+| Child logs | `<repo>/.jigz/logs/<workflow>.log`, rotated at 10 MiB, 3 files kept. |
 | Schema | `schema_version` is 1. Changes are additive: the top-level `cleanup` and `sleep` sections and the workflow field `log_path` were added without changing existing fields. |
 
 ### Decisions already made
@@ -371,19 +371,19 @@ described in section 4.
 or prompt file, and the overwrite prompt for them is gone.
 - While any legacy file (`WORKFLOW.plan.md`, `WORKFLOW.build.md`,
 `WORKFLOW.review.md`, `WORKFLOW.review-fix.md`, `WORKFLOW.merge.md`) exists
-in `.sortie/workflows/`, `WORKFLOW.issues.md` and `WORKFLOW.prs.md` are not
+in `.jigz/workflows/`, `WORKFLOW.issues.md` and `WORKFLOW.prs.md` are not
 written, because both sets would process the same issues. A warning on
 stderr names the files. A fresh repo gets the two new files.
 - Migration is manual: delete the five old files (and their DB files if the
 history is not needed), rerun `setup`, and rename old loop names to `issues`
-or `prs` in the `filters:` and `workflows:` keys of `.sortie/config.yaml`.
+or `prs` in the `filters:` and `workflows:` keys of `.jigz/config.yaml`.
 - Existing installs keep their old `prompts/plan.md` and `prompts/build.md`.
 An old `build.md` does not remove `agent:plan-build`, so a finished
 `agent:plan-build` issue would be dispatched again. `setup` prints a note
 when either file differs from the shipped copy; the user diffs or deletes
 them.
 - `setup` creates only the labels in `labels:` of an existing
-`.sortie/config.yaml`. The user adds `agent:plan-build` and `agent:docs` there;
+`.jigz/config.yaml`. The user adds `agent:plan-build` and `agent:docs` there;
 `setup` prints a note for each shipped label missing from the list.
 - The `setup --json` result (L11) lists each skipped workflow file.
 - CI does not run `sortie validate`: the stock engine on a CI runner has
@@ -440,7 +440,7 @@ Captured stdout and stderr are limited to the last 4 KB.
   - `JIG_CLEANUP_MAX_AGE_DAYS`: integer number of days.
   - `JIG_CLEANUP_WORKSPACE_ROOT`: workspace root directory.
   - `JIG_CLEANUP_DB_DIR`: directory holding the workflow SQLite DBs
-  (`.sortie/workflows/`).
+  (`.jigz/workflows/`).
 - With `JIG_CLEANUP_DRY_RUN=1` the script removes nothing and prints what
 it would remove.
 - It may print `removed: <path>` lines on stdout, one path per line. At
@@ -472,7 +472,7 @@ supervisor.
 **Goal.** Cap token use per workflow per week or month. The project cap is
 the sum of the workflow caps. There is no separate project cap key.
 
-**Facts from the sortie SQLite DBs in `.sortie/workflows/`.**
+**Facts from the sortie SQLite DBs in `.jigz/workflows/`.**
 
 - `run_history` stores `input_tokens`, `output_tokens`, `total_tokens`,
 `cache_read_tokens`, `tokens_measured`, `agent_adapter`, `rule_name`,
@@ -625,7 +625,7 @@ engine request and is deferred.
 | L5  | Run attributes derived by the fleet dashboard (table below). | fleet dashboard | C4, C5 |
 | L6  | Run timeline derived by the fleet dashboard (below). | fleet dashboard | C5 |
 | L7  | Cost per run: the engine records dollar cost per run when the adapter reports it, with a flag for estimated or reported. Deferred until the engine provides cost. Tokens remain the unit. Same item as the `max_usd` open question. | `engine (deferred)` | C6 |
-| L8  | Run log access: `jig` writes engine stdout and stderr to `.sortie/logs/<workflow>.log` with size rotation: the file is rotated at 10 MiB and 3 rotated files are kept (`.log.1` to `.log.3`). The terminal output is unchanged, and the status document has `log_path` per workflow. Implemented. The per-run transcript part of L8 is not implemented. | `jig` | C5 |
+| L8  | Run log access: `jig` writes engine stdout and stderr to `.jigz/logs/<workflow>.log` with size rotation: the file is rotated at 10 MiB and 3 rotated files are kept (`.log.1` to `.log.3`). The terminal output is unchanged, and the status document has `log_path` per workflow. Implemented. The per-run transcript part of L8 is not implemented. | `jig` | C5 |
 | L9  | `jig validate [--json]`: runs `sortie validate` on all workflow files and checks repo config and the sleep, cleanup, and budget rules (for example `cleanup.max_age_days` less than `workspace.retention_days`). | `jig` | C7 |
 | L10 | Safe apply: `jig restart --when-idle` for workflow changes and a reload for repo config. Both return success or failure. The L1 status document carries the config hash of what each child runs. | `jig` | C7 |
 | L11 | `jig setup --json`: non-interactive setup that reports what was created, skipped, and why (labels, workflow files, `.env.loop`), and fails clearly on a bad token, missing repo, or missing permissions. | `jig` | C8 |

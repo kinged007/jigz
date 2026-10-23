@@ -79,7 +79,7 @@ func registryPath() (string, error) {
 // repoName is the identity recorded in the shared registry, so it has
 // to agree with the slug a caller asked for. It resolves through
 // configRepo, which prefers the repo: already written in
-// .sortie/config.yaml, then the git remote. Reading the git remote
+// .jigz/config.yaml, then the git remote. Reading the git remote
 // directly is wrong for a state directory that is not a checkout: it is
 // not a git repository, so the remote lookup failed and the fallback
 // kept only filepath.Base, recording "myxon-beta" where every caller
@@ -256,9 +256,9 @@ func dropRegistry(root string) {
 // engine does: relative paths join with the workflow directory (the repo root
 // here, since the engine runs with Dir=root). Falls back to .sortie.db.
 func dbPathFor(root, file string) string {
-	data, err := os.ReadFile(filepath.Join(root, ".sortie", "workflows", file))
+	data, err := os.ReadFile(filepath.Join(root, ".jigz", "workflows", file))
 	if err != nil {
-		return filepath.Join(root, ".sortie", "workflows", ".sortie.db")
+		return filepath.Join(root, ".jigz", "workflows", ".sortie.db")
 	}
 	for _, line := range strings.Split(string(data), "\n") {
 		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "db_path:"); ok {
@@ -269,10 +269,10 @@ func dbPathFor(root, file string) string {
 			if filepath.IsAbs(v) {
 				return v
 			}
-			return filepath.Join(root, ".sortie", "workflows", v)
+			return filepath.Join(root, ".jigz", "workflows", v)
 		}
 	}
-	return filepath.Join(root, ".sortie", "workflows", ".sortie.db")
+	return filepath.Join(root, ".jigz", "workflows", ".sortie.db")
 }
 
 // pidAlive reports whether pid names a running process.

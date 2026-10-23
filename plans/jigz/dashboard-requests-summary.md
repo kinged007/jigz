@@ -31,7 +31,7 @@ after a failed run, with state `exited`. Proposed key fields (names are not fina
 and exits non-zero on failure.
 - L3 registry additions: workflow file path, loop type, `jig` version,
 supervisor start time, status endpoint.
-- L8 child logs: `.sortie/logs/<workflow>.log`, rotated at 10 MiB with 3 rotated files kept (`.log.1` to `.log.3`). The path is `log_path` in each status workflow entry. The per-run transcript is not implemented.
+- L8 child logs: `.jigz/logs/<workflow>.log`, rotated at 10 MiB with 3 rotated files kept (`.log.1` to `.log.3`). The path is `log_path` in each status workflow entry. The per-run transcript is not implemented.
 - L9 `jig validate [--json]`: runs `sortie validate` on all workflow
 files and checks sleep, cleanup, and budget rules.
 - L10 safe apply: `restart --when-idle` for workflow changes, and a reload for
@@ -41,7 +41,7 @@ repo config. The `config_hash` field shows what each child runs.
 
 ## What the dashboard derives from the existing DBs
 
-All workflow DBs (`.sortie/workflows/.sortie-<workflow>.db`, one hidden file per workflow) share one schema,
+All workflow DBs (`.jigz/workflows/.sortie-<workflow>.db`, one hidden file per workflow) share one schema,
 `schema_migrations` version 16. Open them read-only, pin the supported
 versions, check columns with `PRAGMA table_info`, and hide a feature when its
 column is missing.

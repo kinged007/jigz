@@ -15,8 +15,8 @@ import (
 func startedSup(t *testing.T, script string) (*supervisor, string) {
 	t.Helper()
 	root := t.TempDir()
-	mustWrite(t, filepath.Join(root, ".sortie", "config.yaml"), "repo: owner/name\n")
-	mustWrite(t, filepath.Join(root, ".sortie", "workflows", "WORKFLOW.plan.md"),
+	mustWrite(t, filepath.Join(root, ".jigz", "config.yaml"), "repo: owner/name\n")
+	mustWrite(t, filepath.Join(root, ".jigz", "workflows", "WORKFLOW.plan.md"),
 		"---\ntracker:\n  kind: github-pr\n---\nbody\n")
 	sup := newTestSup(t, root, "plan")
 	sup.ports["plan"] = 0
@@ -161,7 +161,7 @@ func TestRegistryEntryHasStatusFields(t *testing.T) {
 		t.Errorf("unexpected entry fields: %+v", entry)
 	}
 	l := entry.Loops[0]
-	if l.WorkflowFile != filepath.Join(root, ".sortie", "workflows", "WORKFLOW.plan.md") || l.LoopType != "prs" {
+	if l.WorkflowFile != filepath.Join(root, ".jigz", "workflows", "WORKFLOW.plan.md") || l.LoopType != "prs" {
 		t.Errorf("unexpected endpoint fields: %+v", l)
 	}
 }

@@ -25,8 +25,8 @@ func TestNormalizeRepo(t *testing.T) {
 
 func TestLoadEnvAndMilestone(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, ".sortie"), 0o755)
-	os.WriteFile(filepath.Join(dir, ".sortie", "config.yaml"),
+	os.MkdirAll(filepath.Join(dir, ".jigz"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".jigz", "config.yaml"),
 		[]byte("repo: file/o\ntoken: filetok\n"), 0o644)
 	t.Setenv("JIG_REPO", "o/r")
 	t.Setenv("JIG_TOKEN", "tok")
@@ -53,8 +53,8 @@ func TestLoadEnvAndMilestone(t *testing.T) {
 
 func TestLoadAssigneeDefaultAndOptOut(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, ".sortie"), 0o755)
-	os.WriteFile(filepath.Join(dir, ".sortie", "config.yaml"),
+	os.MkdirAll(filepath.Join(dir, ".jigz"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".jigz", "config.yaml"),
 		[]byte("repo: file/o\ntoken: filetok\n"), 0o644)
 	t.Setenv("JIG_REPO", "o/r")
 	t.Setenv("JIG_TOKEN", "tok")
@@ -85,8 +85,8 @@ func TestLoadAssigneeDefaultAndOptOut(t *testing.T) {
 
 func TestLoadConfigFile(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, ".sortie"), 0o755)
-	os.WriteFile(filepath.Join(dir, ".sortie", "config.yaml"),
+	os.MkdirAll(filepath.Join(dir, ".jigz"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".jigz", "config.yaml"),
 		[]byte("repo: file/o\ntoken: filetok\n"), 0o644)
 	t.Setenv("JIG_REPO", "")
 	t.Setenv("JIG_TOKEN", "")
@@ -108,8 +108,8 @@ func TestLoadConfigFile(t *testing.T) {
 
 func TestLoadFilterOverrides(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, ".sortie"), 0o755)
-	os.WriteFile(filepath.Join(dir, ".sortie", "config.yaml"),
+	os.MkdirAll(filepath.Join(dir, ".jigz"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".jigz", "config.yaml"),
 		[]byte("repo: file/o\ntoken: filetok\nfilters:\n  triage: label:agent:triage\n  issues: label:agent:custom\n"), 0o644)
 	t.Setenv("JIG_REPO", "")
 	t.Setenv("JIG_TOKEN", "")
@@ -180,7 +180,7 @@ func TestDefaultLabelPrefix(t *testing.T) {
 }
 
 func TestLoadMissingConfigFails(t *testing.T) {
-	dir := t.TempDir() // no .sortie/config.yaml, git remote irrelevant
+	dir := t.TempDir() // no .jigz/config.yaml, git remote irrelevant
 	t.Setenv("JIG_REPO", "o/r")
 	if _, err := Load(dir); err == nil {
 		t.Error("expected error with no config file")
@@ -198,10 +198,10 @@ func TestLoadNoRepoFails(t *testing.T) {
 func loadWithConfig(t *testing.T, yaml string, workflows map[string]string) (*Config, error) {
 	t.Helper()
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, ".sortie", "workflows"), 0o755)
-	os.WriteFile(filepath.Join(dir, ".sortie", "config.yaml"), []byte("repo: o/r\n"+yaml), 0o644)
+	os.MkdirAll(filepath.Join(dir, ".jigz", "workflows"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".jigz", "config.yaml"), []byte("repo: o/r\n"+yaml), 0o644)
 	for name, body := range workflows {
-		os.WriteFile(filepath.Join(dir, ".sortie", "workflows", name), []byte(body), 0o644)
+		os.WriteFile(filepath.Join(dir, ".jigz", "workflows", name), []byte(body), 0o644)
 	}
 	cfg, err := Load(dir)
 	if err != nil {
@@ -351,5 +351,31 @@ func TestBudgetUnknownLoop(t *testing.T) {
 	}
 	if err := cfg.CheckBudgets(); err == nil || !strings.Contains(err.Error(), "nope") {
 		t.Errorf("error %v, want the unknown loop named", err)
+	}
+}
+
+func TestMigrateRepoDirMovesLegacyDirectory(t *testing.T) {
+	dir := t.TempDir()
+	old := filepath.Join(dir, ".sortie")
+	if err := os.MkdirAll(filepath.Join(old, "workflows"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(old, "config.yaml"), []byte("repo: o/r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	MigrateRepoDir(dir)
+	if _, err := os.Stat(filepath.Join(dir, ".jigz", "config.yaml")); err != nil {
+		t.Fatalf("config not moved: %v", err)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Fatalf(".sortie still present after move")
+	}
+	// A second run leaves an existing .jigz alone.
+	if err := os.MkdirAll(old, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	MigrateRepoDir(dir)
+	if _, err := os.Stat(old); err != nil {
+		t.Fatalf("a leftover .sortie must not be moved over an existing .jigz: %v", err)
 	}
 }

@@ -63,7 +63,7 @@ func (a *app) workflows(w http.ResponseWriter, r *http.Request) {
 				wp.Files = append(wp.Files, f)
 			}
 		}
-		raw, _ := os.ReadFile(filepath.Join(p.Dir, ".sortie", "fleetconfig.yaml"))
+		raw, _ := os.ReadFile(filepath.Join(p.Dir, ".jigz", "fleetconfig.yaml"))
 		wp.Pipeline = pipelineOf(all, plan.RepoLabelOrder(string(raw)))
 		v.Projects = append(v.Projects, wp)
 	}

@@ -14,14 +14,14 @@ import (
 
 func TestSetupSeedsLabelsIntoFreshConfig(t *testing.T) {
 	root := t.TempDir()
-	os.MkdirAll(filepath.Join(root, ".sortie"), 0o755)
+	os.MkdirAll(filepath.Join(root, ".jigz"), 0o755)
 	// Simulate the config body setup writes for a fresh repo, then check
 	// it parses and carries every default label.
 	var body string
 	for _, l := range config.DefaultLabels {
 		body += "- {name: \"" + l.Name + "\", color: \"" + l.Color + "\", description: \"x\"}\n"
 	}
-	os.WriteFile(filepath.Join(root, ".sortie", "config.yaml"),
+	os.WriteFile(filepath.Join(root, ".jigz", "config.yaml"),
 		[]byte("repo: o/r\ntoken: tok\nlabels:\n"+body), 0o644)
 	cfg, err := config.Load(root)
 	if err != nil {
@@ -40,19 +40,19 @@ func TestSyncWorkflowsKeepsEditsFillsGaps(t *testing.T) {
 	if legacy := syncWorkflows(root); len(legacy) != 0 {
 		t.Fatalf("fresh repo reported legacy files %v", legacy)
 	}
-	issues := filepath.Join(root, ".sortie", "workflows", "WORKFLOW.issues.md")
-	if _, err := os.Stat(filepath.Join(root, ".sortie", "workflows", "WORKFLOW.prs.md")); err != nil {
+	issues := filepath.Join(root, ".jigz", "workflows", "WORKFLOW.issues.md")
+	if _, err := os.Stat(filepath.Join(root, ".jigz", "workflows", "WORKFLOW.prs.md")); err != nil {
 		t.Fatalf("setup did not install the prs workflow: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".sortie", "workflows", "prompts", "docs.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, ".jigz", "workflows", "prompts", "docs.md")); err != nil {
 		t.Fatalf("setup did not install prompts: %v", err)
 	}
 	f, _ := os.OpenFile(issues, os.O_APPEND|os.O_WRONLY, 0o644)
 	f.WriteString("\n# local tweak")
 	f.Close()
-	promptFile := filepath.Join(root, ".sortie", "workflows", "prompts", "docs.md")
+	promptFile := filepath.Join(root, ".jigz", "workflows", "prompts", "docs.md")
 	os.WriteFile(promptFile, []byte("mine\n"), 0o644)
-	os.Remove(filepath.Join(root, ".sortie", "workflows", "prompts", "quick.md"))
+	os.Remove(filepath.Join(root, ".jigz", "workflows", "prompts", "quick.md"))
 	if got := workflowPath(root, "WORKFLOW.issues.md"); got != issues {
 		t.Fatalf("workflowPath = %q, want %q", got, issues)
 	}
@@ -63,14 +63,14 @@ func TestSyncWorkflowsKeepsEditsFillsGaps(t *testing.T) {
 	if got, _ := os.ReadFile(promptFile); string(got) != "mine\n" {
 		t.Error("sync overwrote local prompt edit")
 	}
-	if _, err := os.Stat(filepath.Join(root, ".sortie", "workflows", "prompts", "quick.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, ".jigz", "workflows", "prompts", "quick.md")); err != nil {
 		t.Error("sync did not restore missing prompt file")
 	}
 }
 
 func TestSyncWorkflowsSkipsConsolidatedFilesWhileLegacyExist(t *testing.T) {
 	root := t.TempDir()
-	dir := filepath.Join(root, ".sortie", "workflows")
+	dir := filepath.Join(root, ".jigz", "workflows")
 	os.MkdirAll(dir, 0o755)
 	const old = "---\n# old plan\n"
 	os.WriteFile(filepath.Join(dir, "WORKFLOW.plan.md"), []byte(old), 0o644)
@@ -136,7 +136,7 @@ func TestWarnStalePrompts(t *testing.T) {
 	if got := captureStderr(t, func() { warnStalePrompts(root) }); got != "" {
 		t.Errorf("shipped prompts warned: %q", got)
 	}
-	os.WriteFile(filepath.Join(root, ".sortie", "workflows", "prompts", "build.md"), []byte("old\n"), 0o644)
+	os.WriteFile(filepath.Join(root, ".jigz", "workflows", "prompts", "build.md"), []byte("old\n"), 0o644)
 	got := captureStderr(t, func() { warnStalePrompts(root) })
 	if strings.Count(got, "note:") != 1 || !strings.Contains(got, "prompts/build.md") {
 		t.Errorf("message = %q", got)
@@ -193,7 +193,7 @@ func withStdin(t *testing.T, input string, fn func()) {
 func TestSyncPMAgentInstallsPrompt(t *testing.T) {
 	root := t.TempDir()
 	syncPMAgent(root, keepEdits)
-	dest := filepath.Join(root, ".sortie", "pm-agent.md")
+	dest := filepath.Join(root, ".jigz", "pm-agent.md")
 	raw, err := os.ReadFile(dest)
 	if err != nil {
 		t.Fatalf("setup did not install the pm prompt: %v", err)
@@ -215,12 +215,14 @@ func TestEnsureGitignoreIgnoresSortieWholesale(t *testing.T) {
 	// Fresh repo: .gitignore is created with the wholesale entry only.
 	ensureGitignore(root)
 	raw, _ := os.ReadFile(filepath.Join(root, ".gitignore"))
-	if !strings.Contains(string(raw), ".sortie/\n") {
-		t.Fatalf(".gitignore = %q, want wholesale .sortie/ entry", raw)
+	if !strings.Contains(string(raw), ".jigz/\n") {
+		t.Fatalf(".gitignore = %q, want wholesale .jigz/ entry", raw)
 	}
-	for _, e := range oldGitignoreEntries {
-		if strings.Contains(string(raw), e+"\n") {
-			t.Errorf(".gitignore still has granular entry %q", e)
+	for _, line := range strings.Split(string(raw), "\n") {
+		for _, e := range oldGitignoreEntries {
+			if strings.TrimSpace(line) == e {
+				t.Errorf(".gitignore still has granular entry %q", e)
+			}
 		}
 	}
 	// Old granular scheme is migrated to wholesale on re-run.
@@ -231,15 +233,15 @@ func TestEnsureGitignoreIgnoresSortieWholesale(t *testing.T) {
 	if !strings.Contains(string(raw), "node_modules\n") {
 		t.Errorf("existing entries lost: %q", raw)
 	}
-	if !strings.Contains(string(raw), ".sortie/\n") {
+	if !strings.Contains(string(raw), ".jigz/\n") {
 		t.Errorf("no wholesale entry after migration: %q", raw)
 	}
 	// Selective tracking (negations) is left alone.
 	os.WriteFile(filepath.Join(root, ".gitignore"),
-		[]byte(".sortie/*\n!.sortie/config.yaml\n"), 0o644)
+		[]byte(".jigz/*\n!.jigz/config.yaml\n"), 0o644)
 	ensureGitignore(root)
 	raw, _ = os.ReadFile(filepath.Join(root, ".gitignore"))
-	if strings.Contains(string(raw), ".sortie/\n") {
+	if strings.Contains(string(raw), ".jigz/\n") {
 		t.Errorf("selective gitignore overwritten: %q", raw)
 	}
 }
@@ -317,9 +319,9 @@ func TestDiscoverWorkflowsPicksUpNewFile(t *testing.T) {
 	root := t.TempDir()
 	syncWorkflows(root)
 	// A hand-added workflow (no rebuild, no code change) is discovered.
-	os.WriteFile(filepath.Join(root, ".sortie", "workflows", "WORKFLOW.triage.md"), []byte("---\n"), 0o644)
+	os.WriteFile(filepath.Join(root, ".jigz", "workflows", "WORKFLOW.triage.md"), []byte("---\n"), 0o644)
 	// Non-workflow files are ignored.
-	os.WriteFile(filepath.Join(root, ".sortie", "workflows", "notes.md"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(root, ".jigz", "workflows", "notes.md"), []byte("x"), 0o644)
 	got := discoverWorkflows(root)
 	var names []string
 	for _, l := range got {
@@ -490,14 +492,14 @@ func TestSamePath(t *testing.T) {
 // checkout, so the git remote lookup fails and the old fallback kept
 // only filepath.Base: the registry said "myxon-beta" where every caller
 // keys on "kinged007/myxon-beta", and the match silently found nothing.
-// The repo: written into .sortie/config.yaml is authoritative.
+// The repo: written into .jigz/config.yaml is authoritative.
 func TestRepoNameUsesTheConfiguredSlugForANonCheckout(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "repos", "kinged007", "myxon-beta")
-	if err := os.MkdirAll(filepath.Join(root, ".sortie"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, ".jigz"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	body := "repo: kinged007/myxon-beta\ntoken: \"\"\nassignee: \"@me\"\n"
-	if err := os.WriteFile(filepath.Join(root, ".sortie", "config.yaml"), []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, ".jigz", "config.yaml"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	// No git remote here, which is the whole point.
@@ -512,7 +514,7 @@ func TestRepoNameUsesTheConfiguredSlugForANonCheckout(t *testing.T) {
 // A real checkout still resolves through the git remote.
 func TestRepoNameStillUsesTheGitRemote(t *testing.T) {
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, ".sortie"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, ".jigz"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range [][]string{

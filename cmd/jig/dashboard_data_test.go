@@ -47,10 +47,10 @@ func TestOpenRORepositoryPathWithQueryCharacters(t *testing.T) {
 
 func TestTokenCheckNamesEverySource(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".sortie"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".jigz"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, ".sortie", "config.yaml"),
+	if err := os.WriteFile(filepath.Join(dir, ".jigz", "config.yaml"),
 		[]byte("repo: owner/name\ntoken: \"\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

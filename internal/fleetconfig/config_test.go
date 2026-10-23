@@ -508,7 +508,7 @@ repos:
 	for k, want := range map[string]string{
 		"SORTIE_TRACKER_PROJECT": "owner/alpha",
 		"SORTIE_TRACKER_API_KEY": "ghp_secret",
-		"JIG_WORKSPACES":         filepath.Join(r.Dir, ".sortie", "workspaces"),
+		"JIG_WORKSPACES":         filepath.Join(r.Dir, ".jigz", "workspaces"),
 		"JIG_MODEL":              "gpt-5.6-luna",
 	} {
 		if env[k] != want {

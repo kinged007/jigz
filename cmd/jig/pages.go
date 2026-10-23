@@ -29,7 +29,7 @@ func (a *app) projects() []fleetconfig.Resolved {
 
 // installedWorkflows lists the workflow names installed for a project.
 func installedWorkflows(r fleetconfig.Resolved) []string {
-	files, _ := filepath.Glob(filepath.Join(r.Dir, ".sortie", "workflows", "WORKFLOW.*.md"))
+	files, _ := filepath.Glob(filepath.Join(r.Dir, ".jigz", "workflows", "WORKFLOW.*.md"))
 	var out []string
 	for _, f := range files {
 		out = append(out, strings.TrimSuffix(strings.TrimPrefix(filepath.Base(f), "WORKFLOW."), ".md"))

@@ -71,7 +71,7 @@ func (a *app) project(slug string) (fleetconfig.Resolved, bool) {
 }
 
 func (a *app) workflowPath(r fleetconfig.Resolved, workflow string) string {
-	return filepath.Join(r.Dir, ".sortie", "workflows", "WORKFLOW."+workflow+".md")
+	return filepath.Join(r.Dir, ".jigz", "workflows", "WORKFLOW."+workflow+".md")
 }
 
 func slugOf(id string) string {
@@ -91,7 +91,7 @@ func (a *app) spec(kind, id string) (*editSpec, bool) {
 	case "jigz", "project", "agent":
 		// The Jigz, project and agent editors edit a fleet config
 		// file, which Jigz does not have: its settings live in
-		// .sortie/config.yaml with a different shape, and a form built for
+		// .jigz/config.yaml with a different shape, and a form built for
 		// the fleet document would replace them. Workflow files are the
 		// one document both programs share.
 		return nil, false

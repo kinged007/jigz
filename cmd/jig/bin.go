@@ -19,10 +19,10 @@ func resolveSortieBin() (string, error) {
 	return bin, err
 }
 
-// writeEnvFile writes the resolved settings to .sortie/.env.loop so the
+// writeEnvFile writes the resolved settings to .jigz/.env.loop so the
 // workflows can load them via --env-file without touching the user's env.
 func writeEnvFile(dir string, cfg *config.Config) (string, error) {
-	path := filepath.Join(dir, ".sortie", ".env.loop")
+	path := filepath.Join(dir, ".jigz", ".env.loop")
 	body := "SORTIE_TRACKER_PROJECT=" + cfg.Tracker + "\n" +
 		"JIG_WORKSPACES=" + cfg.Workspaces + "\n" +
 		"SORTIE_TRACKER_API_KEY=" + cfg.Token + "\n"

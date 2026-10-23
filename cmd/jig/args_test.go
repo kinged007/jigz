@@ -7,7 +7,7 @@ import (
 )
 
 // The reported bug: `setup DIR --repo owner/name` treated the slug as the
-// directory, so setup wrote .sortie/ and rewrote .gitignore in whatever
+// directory, so setup wrote .jigz/ and rewrote .gitignore in whatever
 // directory the user happened to be standing in. Both orders must target
 // DIR.
 func TestParseArgsSetupDirectoryIsNotTheRepoSlug(t *testing.T) {

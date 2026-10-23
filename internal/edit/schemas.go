@@ -31,7 +31,7 @@ type Agent struct {
 // Project is one entry of repos.
 type Project struct {
 	Repo      string            `f:"repo" label:"Repository" hint:"owner/name" group:"Project"`
-	Path      string            `f:"path" label:"Local path" hint:"Where the project's .sortie directory lives. Empty uses the state directory." group:"Project"`
+	Path      string            `f:"path" label:"Local path" hint:"Where the project's .jigz directory lives. Empty uses the state directory." group:"Project"`
 	Enabled   *bool             `f:"enabled" label:"Enabled" hint:"Empty means enabled. A disabled project is never started." group:"Project"`
 	Workflows []string          `f:"workflows" label:"Workflows" hint:"Comma separated. Empty starts every installed workflow." group:"Project"`
 	TokenEnv  string            `f:"token_env" label:"Token variable" hint:"The name of the environment variable holding the GitHub token, never the token itself." group:"Tracker"`
