@@ -85,8 +85,9 @@ this form:
   escalation to `needs-human` that waits for an answer carries at least one
   blocking question in its comment. An escalation with no question (for
   example, a PR that a person must review) has no block.
-- The agent keeps its `agent:*` trigger label when it escalates, so
-  removing `needs-human` returns the item to dispatch.
+- The agent keeps its `agent:*` trigger label when it escalates. On a
+  clean exit the engine adds `agent:done` because the trigger is still
+  on the item.
 
 Answers are comments in this form, written by the hub, by `jig`,
 or by a human:
@@ -98,9 +99,10 @@ or by a human:
 ```
 
 - When an item has at least one blocking question and every blocking
-  question has an answer, the writer of the last answer removes
-  `needs-human`. `needs-human` is never removed from an item that has no
-  question blocks.
+  question has an answer, the writer of the last answer removes both
+  `needs-human` and `agent:done` in one operation. The trigger label is
+  still on the item, so the next poll dispatches it as a new run. Neither
+  label is removed from an item that has no blocking question.
 - Prompts instruct agents to read answers before acting and to treat an
   unanswered non-blocking question as answered with its suggestion.
 

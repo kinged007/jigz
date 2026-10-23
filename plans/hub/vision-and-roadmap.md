@@ -280,8 +280,9 @@ Actions such as a release or the promotion of `dev` to `main`:
 - Questions are parsed from provider comments (`hub-protocol.md` 4) and
   open a thread addressed to the product or project role.
 - The role's agent and subscribed humans can both reply. The hub writes
-  the chosen answer back to the issue and clears `needs-human` when every
-  blocking question on the item has an answer.
+  the chosen answer back to the issue and removes `needs-human` and
+  `agent:done` together when every blocking question on the item has an
+  answer.
 - Approvals (plans, merges, releases, governed actions) are inbox messages
   with actions.
 - Limits on agent messages, including `send_message` between agents: per
@@ -351,7 +352,7 @@ protocol schemas, so it does not wait for `jig` releases.
 ### Phase 2: Questions, inbox, approvals
 
 - Question parsing, threads by role, answers written back, `needs-human`
-  cleared.
+  and `agent:done` removed together.
 - Approvals in the inbox; daily digest.
 
 ### Phase 3: Verification and previews
