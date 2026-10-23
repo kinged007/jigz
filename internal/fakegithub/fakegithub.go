@@ -183,6 +183,38 @@ func (s *Server) SetAssignees(slug string, n int, assignees ...string) {
 	it.touch()
 }
 
+// EngineHandoff applies the label writes the engine performs at the end of
+// a run: it adds the agent:done result label, then removes the labels named
+// in remove (the dispatch trigger and in-progress). Any other label, such as
+// needs-human, stays. Every change is recorded as a label event, additions
+// first, like the requests would be.
+func (s *Server) EngineHandoff(slug string, n int, remove ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rp := s.repo(slug)
+	it := s.item(slug, n)
+	if it == nil {
+		panic(fmt.Sprintf("fakegithub: no item %s#%d", slug, n))
+	}
+	rp.ensureLabel("agent:done")
+	if !containsFold(it.Labels, "agent:done") {
+		it.Labels = append(it.Labels, "agent:done")
+		s.events = append(s.events, LabelEvent{slug, it.Number, "agent:done", true, time.Now()})
+	}
+	for _, l := range remove {
+		if strings.EqualFold(l, "agent:done") {
+			continue
+		}
+		i := slices.IndexFunc(it.Labels, func(x string) bool { return strings.EqualFold(x, l) })
+		if i < 0 {
+			continue
+		}
+		s.events = append(s.events, LabelEvent{slug, it.Number, it.Labels[i], false, time.Now()})
+		it.Labels = slices.Delete(it.Labels, i, i+1)
+	}
+	it.touch()
+}
+
 // Get returns a copy of one issue or pull request, or false when there is none.
 func (s *Server) Get(slug string, n int) (Item, bool) {
 	s.mu.Lock()
@@ -214,6 +246,21 @@ func (s *Server) LabelEvents(slug string, n int) []LabelEvent {
 	for _, e := range s.events {
 		if strings.EqualFold(e.Repo, slug) && e.Number == n {
 			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// LabelRequests returns the requests for the label routes of one item, in
+// order, so a test can assert the exact sequence of its label traffic.
+func (s *Server) LabelRequests(slug string, n int) []Request {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	prefix := strings.ToLower(fmt.Sprintf("/repos/%s/issues/%d/labels", slug, n))
+	var out []Request
+	for _, r := range s.requests {
+		if p := strings.ToLower(r.Path); p == prefix || strings.HasPrefix(p, prefix+"/") {
+			out = append(out, r)
 		}
 	}
 	return out

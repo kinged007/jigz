@@ -109,6 +109,90 @@ func TestAddLabelCreatesRepoLabel(t *testing.T) {
 	}
 }
 
+func eventStrings(events []LabelEvent) []string {
+	var out []string
+	for _, e := range events {
+		prefix := "-"
+		if e.Added {
+			prefix = "+"
+		}
+		out = append(out, prefix+e.Label)
+	}
+	return out
+}
+
+func TestDeleteEncodedLabelName(t *testing.T) {
+	s, ts := newServer(t)
+	s.Add(Item{Repo: "o/r", Title: "t", Labels: []string{"agent:done", "needs-human"}})
+	code, body, _ := call(t, ts, "DELETE", "/repos/o/r/issues/1/labels/agent%3Adone", "")
+	if code != 200 || !reflect.DeepEqual(names(t, body), []string{"needs-human"}) {
+		t.Fatalf("delete agent%%3Adone: %d %s", code, body)
+	}
+	if !reflect.DeepEqual(eventStrings(s.LabelEvents("o/r", 1)), []string{"-agent:done"}) {
+		t.Errorf("events %v", s.LabelEvents("o/r", 1))
+	}
+	if code, _, _ = call(t, ts, "DELETE", "/repos/o/r/issues/1/labels/agent%3Adone", ""); code != 404 {
+		t.Errorf("missing label: %d, want 404", code)
+	}
+}
+
+func TestEngineHandoff(t *testing.T) {
+	s, ts := newServer(t)
+	s.Add(Item{Repo: "o/r", Title: "t", Labels: []string{"agent:plan", "in-progress", "needs-human"}})
+	s.EngineHandoff("o/r", 1, "agent:plan", "in-progress")
+
+	if it, _ := s.Get("o/r", 1); !reflect.DeepEqual(it.Labels, []string{"needs-human", "agent:done"}) {
+		t.Errorf("labels %v", it.Labels)
+	}
+	want := []string{"+agent:done", "-agent:plan", "-in-progress"}
+	if got := eventStrings(s.LabelEvents("o/r", 1)); !reflect.DeepEqual(got, want) {
+		t.Errorf("events %v, want %v", got, want)
+	}
+
+	_, body, _ := call(t, ts, "GET", "/repos/o/r/issues/1/labels?per_page=100", "")
+	if !reflect.DeepEqual(names(t, body), []string{"needs-human", "agent:done"}) {
+		t.Errorf("labels via GET %s", body)
+	}
+	for q, want := range map[string]int{
+		"repo:o/r state:open label:agent:done -label:needs-human": 0,
+		"repo:o/r state:open label:agent:done label:needs-human":  1,
+	} {
+		code, body, _ := call(t, ts, "GET", "/search/issues?"+url.Values{"q": {q}, "per_page": {"10"}}.Encode(), "")
+		var res struct {
+			TotalCount int `json:"total_count"`
+		}
+		if code != 200 || json.Unmarshal([]byte(body), &res) != nil || res.TotalCount != want {
+			t.Errorf("search %q: %d %s, want %d", q, code, body, want)
+		}
+	}
+}
+
+func TestLabelRequestSequence(t *testing.T) {
+	s, ts := newServer(t)
+	s.Add(Item{Repo: "o/r", Title: "t", Labels: []string{"agent:done"}})
+	s.Add(Item{Repo: "o/r", Title: "other", Labels: []string{"agent:done"}})
+	call(t, ts, "DELETE", "/repos/o/r/issues/1/labels/agent%3Adone", "")
+	call(t, ts, "POST", "/repos/o/r/issues/1/labels", `{"labels":["agent:plan","needs-human"]}`)
+	call(t, ts, "PUT", "/repos/o/r/issues/1/labels", `{"labels":["agent:plan"]}`)
+	call(t, ts, "DELETE", "/repos/o/r/issues/2/labels/agent%3Adone", "")
+
+	var got []string
+	for _, r := range s.LabelRequests("o/r", 1) {
+		got = append(got, r.Method+" "+r.Path+" "+r.Body)
+	}
+	want := []string{
+		"DELETE /repos/o/r/issues/1/labels/agent:done ",
+		"POST /repos/o/r/issues/1/labels {\"labels\":[\"agent:plan\",\"needs-human\"]}",
+		"PUT /repos/o/r/issues/1/labels {\"labels\":[\"agent:plan\"]}",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("requests %q, want %q", got, want)
+	}
+	if u := s.Unexpected(); len(u) != 1 || !strings.Contains(u[0], "PUT") {
+		t.Errorf("unexpected %v", u)
+	}
+}
+
 func TestComments(t *testing.T) {
 	s, ts := newServer(t)
 	s.Add(Item{Repo: "o/r", Title: "t"})
