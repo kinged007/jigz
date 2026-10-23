@@ -1,6 +1,6 @@
 # Jigz: handoff
 
-Status: 2026-10-22, updated after the Jigz rename. Read this first in a new
+Status: 2026-10-23, updated after the repo directory rename. Read this first in a new
 session working on Jigz. The hub is a separate stream; its plans are in
 `plans/hub/` and it has no code yet.
 
@@ -8,10 +8,12 @@ session working on Jigz. The hub is a separate stream; its plans are in
 
 Build Jigz as a free, open-source tool that is complete without
 the hub, following `plans/jigz/vision-and-roadmap.md` section 6.
-Phase 0 is done except the merge. Phases 1 and 2 are complete in code,
-tests, and docs. Neither has a release or release notes; releases are
-deferred until the user asks. The rename to Jigz is done. The next steps
-are the acceptance test in CI and Phase 3.
+Phase 0 is merged into `main` and pushed to `github.com/kinged007/jigz`.
+Phases 1 and 2 are complete in code, tests, and docs. Neither has a
+release or release notes; releases are deferred until the user asks. The
+rename to Jigz is done, including the repo directory `.sortie/` to
+`.jigz/`. The next steps are pushing the commits still local on `main`,
+the acceptance test in CI, and Phase 3.
 
 Read, in order:
 
@@ -105,8 +107,13 @@ Open decisions (do not decide them; ask):
 
 ## 4. State of the work
 
-Branch `feat/rename-jigz` (renamed from `feat/united-dashboard`), 38 commits
-ahead of `main`, not pushed, no PR open. Phase 1 (working hours, account pool,
+The rename branch `feat/rename-jigz` was merged into `main` as `ba56ec1`
+and pushed to `github.com/kinged007/jigz`; no PR was opened. `main` carries
+two commits that are not pushed: `0e1e741` (the repo directory `.sortie/`
+to `.jigz/` and `config.MigrateRepoDir`) and `d52a73c` (setup reports a
+workflow file that differs from the shipped copy). `feat/jigz-db-names`
+(2 commits on top of `main`, not merged) renames the workflow databases
+to `jigz-<name>.db`. Phase 1 (working hours, account pool,
 `agent-exec`, runtime failover, dashboard pages) is in `internal/machine`,
 `cmd/jig/gate.go` and `cmd/jig/agentexec.go`. Phase 2 commits:
 
@@ -122,12 +129,13 @@ ahead of `main`, not pushed, no PR open. Phase 1 (working hours, account pool,
 Commits `f5d9b45`, `cb566b6`, `8bc988b` (hub plans), `1d5ce19`, and
 `14919dd` (product names, rename schedule) are plan changes on the branch.
 
-The rename to Jigz is in the working tree, not committed:
+The rename to Jigz is committed on `main` (merged as `ba56ec1`) and
+pushed:
 
 - The command package moved to `cmd/jig`, the module path is
   `github.com/kinged007/jigz`, and the plans moved to `plans/jigz/`.
 - The tool-owned environment variables are `JIG_*`: `JIG_TOKEN`, `JIG_REPO`,
-  `JIG_ONLY`, `JIG_CLONE_URL`, `JIG_WORKSPACES`, `JIG_MILESTONE`,
+  `JIG_ONLY`, `JIG_WORKSPACES`, `JIG_MILESTONE`,
   `JIG_ASSIGNEE`, `JIG_BIN`, `JIG_ENGINE_REPO`, `JIG_ENGINE_VERSION`,
   `JIG_ENGINE_URL`, `JIG_ENGINE_SHA256`, `JIG_ENGINE_BIN`, `JIG_CLEANUP_*`,
   `JIG_MODEL`, `JIG_MODEL_BUILD`, `JIG_MODEL_REVIEW` and `JIG_TEST_*`. The
@@ -167,10 +175,11 @@ Outside this repository:
   (`TestAcceptance` about 105 s, `TestAcceptanceUpstreamEngine` about 65 s;
   about 3 minutes in total). The acceptance tests download each engine
   (about 25 MB) on first run per machine and fail if the download fails.
-- After the rename, on the working tree of 2026-10-22: `gofmt -l cmd
-  internal` is empty, `go vet ./...` and `go test ./...` pass. The
-  acceptance tests were not run: they download both engines and take about
-  three minutes.
+- On `main` at `d52a73c` (2026-10-23): `gofmt -l cmd internal` is empty,
+  `go vet ./...`, `go vet -tags acceptance ./...` and `go build ./...` pass,
+  and `go test ./...` passes. The acceptance tests were not re-run after
+  the directory rename: they download both engines and take about three
+  minutes.
 - `TestAcceptance` runs the real `jig` binary and engine v1.28.1.
   Scenarios: an `agent:plan` issue is claimed and handed off;
   `needs-human` and other-assignee issues are not dispatched; the dashboard
@@ -185,8 +194,8 @@ Outside this repository:
 
 ## 6. Outstanding work
 
-1. Merge `feat/rename-jigz` into `main` through a PR (the user does
-   this, or asks for it).
+1. Push the two local `main` commits `0e1e741` and `d52a73c`, then
+   confirm CI (the user asks for pushes).
 2. Add the acceptance test to CI (approved).
 3. Phase 3: Questions (roadmap section 6).
 4. Phase 1 and Phase 2 releases and release notes: deferred; only when
