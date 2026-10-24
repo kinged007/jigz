@@ -901,7 +901,11 @@ working hours), not the credentials.
 
 - Linux: systemd user unit `~/.config/systemd/user/jigd.service`. The
   unit records the `PATH` of the shell that ran `join`, so the agent CLIs,
-  `gh` and `git` are found. A user service stops at logout unless
+  `gh` and `git` are found (`/usr/local/bin:/usr/bin:/bin` when it is
+  empty), and `HOME` and `XDG_CONFIG_HOME`, `XDG_STATE_HOME`,
+  `XDG_DATA_HOME` and `XDG_CACHE_HOME` when they are set, so the service
+  reads the `hub.json` that `join` wrote. The launchd agent records the
+  same variables. A user service stops at logout unless
   lingering is on; when it is off, `join` prints
   `loginctl enable-linger <user>` and does not run it.
 - macOS: launchd agent `io.github.kinged007.jigd` in
@@ -911,7 +915,10 @@ working hours), not the credentials.
 `jig daemon` runs the daemon in the foreground and logs to `jigd.log`.
 SIGTERM stops every loop it started.
 
-`jig leave` removes the service and `hub.json`. The loop roots are kept.
+`jig leave` removes the service, `hub.json` and the daemon state in
+`<state>/jigz/hub` (stored config, pause state, status document and
+history database). The loop roots are kept. `join` removes the same
+daemon state when the new enrollment has another hub URL or daemon id.
 A daemon started by hand keeps running until you stop it.
 
 `jig status --json` with no repo root prints the daemon's status

@@ -234,7 +234,11 @@ func (c *Client) do(ctx context.Context, method, route string, body any, extra h
 	if hc == nil {
 		hc = &http.Client{Timeout: defaultTimeout}
 	}
-	resp, err := hc.Do(req)
+	// A followed redirect would resend the enrollment token or the
+	// credential to another URL, so a 3xx is returned as a status error.
+	noRedirect := *hc
+	noRedirect.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := noRedirect.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
 			return 0, nil, c.fail(method, route, false, ctx.Err(), secrets...)

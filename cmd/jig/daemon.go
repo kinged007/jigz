@@ -111,7 +111,9 @@ type daemon struct {
 	revoked  bool
 	hubDown  bool
 	badProto bool
-	lastErr  string
+	// endpointWarned is set once a refused tracker endpoint is logged.
+	endpointWarned bool
+	lastErr        string
 	// pending holds loops with staged files, applied when each is idle.
 	pending map[string]source.Loop
 	// retired loops are no longer in the config; they drain, then are
@@ -150,11 +152,7 @@ func runDaemon(args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: jig daemon")
 		return 2
 	}
-	st, err := hubstate.Load()
-	if errors.Is(err, fs.ErrNotExist) {
-		fmt.Fprintln(os.Stderr, "jig daemon: this machine is not enrolled with a hub; run jig join <hub-url> <token>")
-		return 1
-	}
+	st, err := loadDaemonHub()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "jig daemon:", err)
 		return 1
@@ -204,6 +202,21 @@ func runDaemon(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return d.run(ctx)
+}
+
+// loadDaemonHub reads hub.json and refuses a hub URL that join would refuse.
+func loadDaemonHub() (hubstate.State, error) {
+	st, err := hubstate.Load()
+	if errors.Is(err, fs.ErrNotExist) {
+		return st, errors.New("this machine is not enrolled with a hub; run jig join <hub-url> <token>")
+	}
+	if err != nil {
+		return st, err
+	}
+	if _, err := checkHubURL(st.HubURL); err != nil {
+		return hubstate.State{}, fmt.Errorf("hub.json: %w", err)
+	}
+	return st, nil
 }
 
 // daemonSecrets are the values no log line, error or status may contain.
@@ -1560,6 +1573,20 @@ func (d *daemon) fallbackSearch(ctx context.Context) {
 	}
 	if len(byProject) == 0 {
 		return
+	}
+	if base != "" {
+		// The endpoint comes from the hub, and the tracker token is sent
+		// to it, so it gets the same check as the hub URL.
+		if _, err := checkHubURL(base); err != nil {
+			d.mu.Lock()
+			warned := d.endpointWarned
+			d.endpointWarned = true
+			d.mu.Unlock()
+			if !warned {
+				d.log.Printf("fallback search: tracker endpoint refused, using %s: %v", defaultGitHubAPI, err)
+			}
+			base = ""
+		}
 	}
 	if base == "" {
 		base = defaultGitHubAPI

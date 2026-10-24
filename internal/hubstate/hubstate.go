@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -32,21 +33,49 @@ func Path() (string, error) {
 }
 
 // Load reads hub.json. It reports fs.ErrNotExist when the machine is not
-// enrolled and refuses a file that group or others can access.
+// enrolled. It refuses a symlink, a file another user owns, a file that
+// group or others can access and a directory that group or others can write.
 func Load() (State, error) {
 	var s State
 	path, err := Path()
 	if err != nil {
 		return s, err
 	}
-	info, err := os.Stat(path)
+	dir := filepath.Dir(path)
+	dinfo, err := os.Stat(dir)
 	if err != nil {
+		return s, err
+	}
+	if dinfo.Mode().Perm()&0o022 != 0 {
+		return s, fmt.Errorf("%s is writable by group or others (mode %04o): run chmod 700 on it", dir, dinfo.Mode().Perm())
+	}
+	linfo, err := os.Lstat(path)
+	if err != nil {
+		return s, err
+	}
+	if !linfo.Mode().IsRegular() {
+		return s, fmt.Errorf("%s is not a regular file", path)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return s, err
+	}
+	defer f.Close()
+	// The checks apply to the opened file, so a swap after Lstat is seen.
+	info, err := f.Stat()
+	if err != nil {
+		return s, err
+	}
+	if !os.SameFile(linfo, info) {
+		return s, fmt.Errorf("%s changed while it was opened", path)
+	}
+	if err := checkOwner(path, info); err != nil {
 		return s, err
 	}
 	if info.Mode().Perm()&0o077 != 0 {
 		return s, fmt.Errorf("%s is accessible by group or others (mode %04o): run chmod 600 on it", path, info.Mode().Perm())
 	}
-	data, err := os.ReadFile(path)
+	data, err := io.ReadAll(f)
 	if err != nil {
 		return s, err
 	}

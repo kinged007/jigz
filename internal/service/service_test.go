@@ -38,6 +38,40 @@ func TestRenderUnitQuotes(t *testing.T) {
 	}
 }
 
+func TestRenderUnitEnvironment(t *testing.T) {
+	got := RenderUnit(Spec{Exe: "/usr/local/bin/jig", Env: []string{
+		"XDG_CONFIG_HOME=/home/u/cfg", `HOME=/home/a $b%c"d\e`,
+	}})
+	for _, w := range []string{
+		"Environment=PATH=" + DefaultPath + "\n",
+		"Environment=XDG_CONFIG_HOME=/home/u/cfg\n",
+		`Environment="HOME=/home/a $b%%c\"d\\e"` + "\n",
+	} {
+		if !strings.Contains(got, w) {
+			t.Errorf("missing %q in\n%s", w, got)
+		}
+	}
+	if strings.Contains(got, "$$") {
+		t.Errorf("$ doubled in Environment=:\n%s", got)
+	}
+}
+
+func TestRenderPlistEnvironment(t *testing.T) {
+	got := RenderPlist(Spec{Exe: "/usr/local/bin/jig", Env: []string{"XDG_STATE_HOME=/s&t"}})
+	want := "\t\t<key>PATH</key>\n\t\t<string>" + DefaultPath + "</string>\n\t\t<key>XDG_STATE_HOME</key>\n\t\t<string>/s&amp;t</string>\n"
+	if !strings.Contains(got, want) {
+		t.Errorf("plist environment:\n%s", got)
+	}
+}
+
+func TestInstallRefusesABadEnvEntry(t *testing.T) {
+	m := manager("linux", &recorder{})
+	m.Home = t.TempDir()
+	if _, err := m.Install(Spec{Exe: "/jig", Env: []string{"novalue"}}); err == nil {
+		t.Error("entry without = accepted")
+	}
+}
+
 func TestRenderPlist(t *testing.T) {
 	want := `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

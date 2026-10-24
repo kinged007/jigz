@@ -27,8 +27,10 @@ func TestSaveLoadPermissions(t *testing.T) {
 	path, _ := Path()
 	for p, mode := range map[string]os.FileMode{path: 0o600, filepath.Dir(path): 0o700} {
 		info, err := os.Stat(p)
-		if err != nil || info.Mode().Perm() != mode {
-			t.Errorf("%s: %v %v", p, info.Mode().Perm(), err)
+		if err != nil {
+			t.Errorf("%s: %v", p, err)
+		} else if info.Mode().Perm() != mode {
+			t.Errorf("%s: mode %04o", p, info.Mode().Perm())
 		}
 	}
 	entries, _ := os.ReadDir(filepath.Dir(path))
@@ -60,5 +62,39 @@ func TestLoadMissingAndRemove(t *testing.T) {
 	}
 	if err := Remove(); err != nil {
 		t.Error(err)
+	}
+}
+
+func TestLoadRefusesASymlink(t *testing.T) {
+	setup(t)
+	if err := Save(State{HubURL: "https://h"}); err != nil {
+		t.Fatal(err)
+	}
+	path, _ := Path()
+	target := filepath.Join(filepath.Dir(path), "real.json")
+	if err := os.Rename(path, target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, path); err != nil {
+		t.Skip(err)
+	}
+	if _, err := Load(); err == nil {
+		t.Error("symlinked hub.json accepted")
+	}
+}
+
+func TestLoadRefusesAWritableDirectory(t *testing.T) {
+	setup(t)
+	if err := Save(State{HubURL: "https://h"}); err != nil {
+		t.Fatal(err)
+	}
+	path, _ := Path()
+	for _, mode := range []os.FileMode{0o770, 0o702} {
+		if err := os.Chmod(filepath.Dir(path), mode); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(); err == nil {
+			t.Errorf("directory mode %04o accepted", mode)
+		}
 	}
 }

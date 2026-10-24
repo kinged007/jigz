@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/url"
 	"os"
@@ -24,6 +25,7 @@ import (
 	"github.com/kinged007/jigz/internal/hubproto"
 	"github.com/kinged007/jigz/internal/hubstate"
 	"github.com/kinged007/jigz/internal/service"
+	"github.com/kinged007/jigz/internal/store"
 )
 
 const maxEnrollName = 40
@@ -140,17 +142,23 @@ func trackerToken(d joinDeps) (string, error) {
 	return "", errors.New("no tracker token: set JIG_TOKEN, GITHUB_TOKEN or GH_TOKEN, or run gh auth login")
 }
 
-func (d joinDeps) confirm(prompt string, r **bufio.Reader) bool {
+// confirm asks a yes/no question. An empty end of input means no one can
+// answer, which is an error that names --yes.
+func (d joinDeps) confirm(prompt string, r **bufio.Reader) (bool, error) {
 	fmt.Fprint(d.out, prompt+" [y/N] ")
 	if *r == nil {
 		*r = bufio.NewReader(d.stdin)
 	}
-	line, _ := (*r).ReadString('\n')
+	line, err := (*r).ReadString('\n')
+	if err != nil && strings.TrimSpace(line) == "" {
+		fmt.Fprintln(d.out)
+		return false, errors.New("stdin is not a terminal or was used for the token: pass --yes to replace the existing enrollment")
+	}
 	switch strings.ToLower(strings.TrimSpace(line)) {
 	case "y", "yes":
-		return true
+		return true, nil
 	}
-	return false
+	return false, nil
 }
 
 func joinRun(ctx context.Context, d joinDeps, args []string) (err error) {
@@ -179,7 +187,11 @@ func joinRun(ctx context.Context, d joinDeps, args []string) (err error) {
 
 	var reader *bufio.Reader
 	if !o.yes && (hubstate.Exists() || (!o.noService && d.service != nil && d.service.Installed())) {
-		if !d.confirm("This machine is already enrolled. Replace hub.json and the service?", &reader) {
+		ok, err := d.confirm("This machine is already enrolled. Replace hub.json and the service?", &reader)
+		if err != nil {
+			return fmt.Errorf("join cancelled: %w", err)
+		}
+		if !ok {
 			return errors.New("join cancelled: the existing enrollment is unchanged")
 		}
 	}
@@ -233,6 +245,9 @@ func joinRun(ctx context.Context, d joinDeps, args []string) (err error) {
 		return fmt.Errorf("enrolling: %w", err)
 	}
 	secrets = append(secrets, resp.Credential)
+	if err := clearStaleHubState(hubURL, resp.DaemonID); err != nil {
+		return fmt.Errorf("removing the state of the previous enrollment: %w", err)
+	}
 	if err := hubstate.Save(hubstate.State{
 		HubURL:       hubURL,
 		DaemonID:     resp.DaemonID,
@@ -256,7 +271,7 @@ func joinRun(ctx context.Context, d joinDeps, args []string) (err error) {
 	if err != nil {
 		return fmt.Errorf("enrolled, but the service was not installed: %w", err)
 	}
-	res, err := d.service.Install(service.Spec{Exe: exe, Path: d.getenv("PATH"), LogPath: logPath})
+	res, err := d.service.Install(service.Spec{Exe: exe, Path: d.getenv("PATH"), Env: serviceEnv(d.getenv), LogPath: logPath})
 	if err != nil {
 		return fmt.Errorf("enrolled, but the service was not installed: %w; run `jig daemon` instead", err)
 	}
@@ -266,6 +281,18 @@ func joinRun(ctx context.Context, d joinDeps, args []string) (err error) {
 		fmt.Fprintf(d.out, "The service stops when you log out. To keep it running, run:\n  %s\n", res.LingerHint)
 	}
 	return nil
+}
+
+// serviceEnv returns the variables that locate hub.json and the state,
+// data and cache directories, so the service reads what join wrote.
+func serviceEnv(getenv func(string) string) []string {
+	var out []string
+	for _, k := range []string{"HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"} {
+		if v := getenv(k); v != "" {
+			out = append(out, k+"="+v)
+		}
+	}
+	return out
 }
 
 func leaveRun(d joinDeps) error {
@@ -284,8 +311,37 @@ func leaveRun(d joinDeps) error {
 	if err := hubstate.Remove(); err != nil {
 		return err
 	}
-	fmt.Fprintln(d.out, "Left the hub: hub.json removed. Loop roots are kept. A daemon started by hand keeps running until you stop it.")
+	if err := removeHubState(); err != nil {
+		return err
+	}
+	fmt.Fprintln(d.out, "Left the hub: hub.json and the daemon state removed. Loop roots are kept. A daemon started by hand keeps running until you stop it.")
 	return nil
+}
+
+// removeHubState deletes the daemon files that belong to one enrollment
+// from <state>/jigz/hub: the stored config, the pause state, the status
+// document and the history database with its cursor. Loop roots are kept.
+func removeHubState() error {
+	root, err := dirs.State()
+	if err != nil {
+		return err
+	}
+	dir := filepath.Join(root, "hub")
+	for _, name := range []string{"config.json", "state.json", "status.json", store.FileName, store.FileName + "-wal", store.FileName + "-shm"} {
+		if err := os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+// clearStaleHubState removes the daemon state unless hub.json names the
+// same hub and daemon id.
+func clearStaleHubState(hubURL, daemonID string) error {
+	if prev, err := hubstate.Load(); err == nil && prev.HubURL == hubURL && prev.DaemonID == daemonID {
+		return nil
+	}
+	return removeHubState()
 }
 
 func realJoinDeps() joinDeps {

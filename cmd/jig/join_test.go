@@ -95,12 +95,13 @@ func TestParseArgsJoinLeave(t *testing.T) {
 }
 
 func TestCheckHubURL(t *testing.T) {
-	for _, ok := range []string{"https://hub.example", "https://hub.example/", "http://127.0.0.1:8080", "http://localhost:9", "http://[::1]:80"} {
+	for _, ok := range []string{"https://hub.example", "https://hub.example/", "http://127.0.0.1:8080", "http://localhost:9", "http://[::1]:80", "http://[::1]"} {
 		if _, err := checkHubURL(ok); err != nil {
 			t.Errorf("%s: %v", ok, err)
 		}
 	}
-	for _, bad := range []string{"http://hub.example", "http://10.0.0.5", "ftp://hub.example", "hub.example", "https://", "https://user:pw@hub.example", "https://hub.example/?a=b"} {
+	for _, bad := range []string{"http://hub.example", "http://10.0.0.5", "ftp://hub.example", "hub.example", "https://", "https://user:pw@hub.example", "https://hub.example/?a=b",
+		"http://localhost.evil.com", "http://127.0.0.1@evil.com", "http://[2001:db8::1]", "http://0x7f.1"} {
 		_, err := checkHubURL(bad)
 		if err == nil {
 			t.Errorf("%s accepted", bad)
@@ -358,5 +359,132 @@ func TestStatusJSONWithoutRootUsesHubStatus(t *testing.T) {
 	}
 	if got, err := hubStatusOutput(); err != nil || got != `{"paused":false}` {
 		t.Errorf("got %q, %v", got, err)
+	}
+}
+
+// writeHubState writes every per-enrollment daemon file and returns the
+// hub state directory.
+func writeHubState(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(os.Getenv("XDG_STATE_HOME"), "jigz", "hub")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"config.json", "state.json", "status.json", "history.db", "history.db-wal", "registry.json"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("{}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func assertHubStateGone(t *testing.T, dir string) {
+	t.Helper()
+	for _, name := range []string{"config.json", "state.json", "status.json", "history.db", "history.db-wal"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s left: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "registry.json")); err != nil {
+		t.Errorf("registry.json removed: %v", err)
+	}
+}
+
+func TestLeaveRemovesTheHubState(t *testing.T) {
+	r := newJoinRig(t, "")
+	if err := hubstate.Save(hubstate.State{HubURL: "https://h", DaemonID: "d1"}); err != nil {
+		t.Fatal(err)
+	}
+	dir := writeHubState(t)
+	loops := filepath.Join(r.home, "data", "jigz", "hub", "loops")
+	if err := os.MkdirAll(loops, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := leaveRun(r.d); err != nil {
+		t.Fatal(err)
+	}
+	assertHubStateGone(t, dir)
+	if _, err := os.Stat(loops); err != nil {
+		t.Errorf("loop roots removed: %v", err)
+	}
+}
+
+func TestJoinWithAnotherHubRemovesTheHubState(t *testing.T) {
+	for _, prev := range []*hubstate.State{{HubURL: "https://other.example", DaemonID: "d1"}, nil} {
+		r := newJoinRig(t, "")
+		if prev != nil {
+			if err := hubstate.Save(*prev); err != nil {
+				t.Fatal(err)
+			}
+		}
+		dir := writeHubState(t)
+		srv := httptest.NewServer(fakehub.New(canaryEnroll))
+		err := joinRun(context.Background(), r.d, []string{srv.URL, canaryEnroll, "--no-service", "--yes"})
+		srv.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertHubStateGone(t, dir)
+	}
+}
+
+func TestJoinWithTheSameEnrollmentKeepsTheHubState(t *testing.T) {
+	newJoinRig(t, "")
+	if err := hubstate.Save(hubstate.State{HubURL: "https://h", DaemonID: "d1"}); err != nil {
+		t.Fatal(err)
+	}
+	dir := writeHubState(t)
+	if err := clearStaleHubState("https://h", "d1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "config.json")); err != nil {
+		t.Errorf("config.json removed for the same enrollment: %v", err)
+	}
+	if err := clearStaleHubState("https://h", "d2"); err != nil {
+		t.Fatal(err)
+	}
+	assertHubStateGone(t, dir)
+}
+
+func TestJoinServiceGetsTheDirectoryVariables(t *testing.T) {
+	r := newJoinRig(t, "")
+	env := map[string]string{"JIG_TOKEN": canaryTracker, "PATH": "", "HOME": r.home,
+		"XDG_CONFIG_HOME": filepath.Join(r.home, "config"), "XDG_STATE_HOME": filepath.Join(r.home, "state"), "XDG_DATA_HOME": filepath.Join(r.home, "data")}
+	r.d.getenv = func(k string) string { return env[k] }
+	srv := httptest.NewServer(fakehub.New(canaryEnroll))
+	defer srv.Close()
+	if err := joinRun(context.Background(), r.d, []string{srv.URL, canaryEnroll}); err != nil {
+		t.Fatal(err)
+	}
+	unit, err := os.ReadFile(filepath.Join(r.home, ".config/systemd/user/jigd.service"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range []string{"Environment=PATH=" + service.DefaultPath + "\n", "Environment=HOME=" + r.home + "\n",
+		"Environment=XDG_CONFIG_HOME=" + env["XDG_CONFIG_HOME"] + "\n", "Environment=XDG_STATE_HOME=" + env["XDG_STATE_HOME"] + "\n",
+		"Environment=XDG_DATA_HOME=" + env["XDG_DATA_HOME"] + "\n"} {
+		if !strings.Contains(string(unit), w) {
+			t.Errorf("unit lacks %q:\n%s", w, unit)
+		}
+	}
+	if strings.Contains(string(unit), "XDG_CACHE_HOME") {
+		t.Errorf("unset variable written:\n%s", unit)
+	}
+}
+
+func TestJoinTokenFromStdinNeedsYesWhenEnrolled(t *testing.T) {
+	r := newJoinRig(t, canaryEnroll+"\n")
+	if err := hubstate.Save(hubstate.State{HubURL: "https://h", DaemonID: "d1"}); err != nil {
+		t.Fatal(err)
+	}
+	hub := fakehub.New(canaryEnroll)
+	srv := httptest.NewServer(hub)
+	defer srv.Close()
+	err := joinRun(context.Background(), r.d, []string{srv.URL, "-", "--no-service"})
+	if err == nil || !strings.Contains(err.Error(), "--yes") {
+		t.Fatalf("err %v, want one that names --yes", err)
+	}
+	if len(hub.Enrollments()) != 0 {
+		t.Error("enrolled without confirmation")
 	}
 }

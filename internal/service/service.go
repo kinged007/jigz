@@ -20,6 +20,9 @@ const (
 	Label = "io.github.kinged007.jigd"
 )
 
+// DefaultPath is the daemon's PATH when Spec.Path is empty.
+const DefaultPath = "/usr/local/bin:/usr/bin:/bin"
+
 // ErrNoSession means no systemd user session is reachable.
 var ErrNoSession = errors.New("no systemd user session is available")
 
@@ -30,8 +33,10 @@ type Runner func(name string, args ...string) (string, error)
 type Spec struct {
 	// Exe is the absolute path of the jig binary.
 	Exe string
-	// Path is the PATH value the daemon runs with.
+	// Path is the PATH value the daemon runs with; empty is DefaultPath.
 	Path string
+	// Env holds further KEY=value variables the daemon runs with.
+	Env []string
 	// LogPath is the daemon log, used by launchd.
 	LogPath string
 }
@@ -174,12 +179,26 @@ func (s Spec) check() error {
 	if !filepath.IsAbs(s.Exe) {
 		return fmt.Errorf("service: executable path %q is not absolute", s.Exe)
 	}
-	for _, v := range []string{s.Exe, s.Path, s.LogPath} {
+	for _, v := range append([]string{s.Exe, s.Path, s.LogPath}, s.Env...) {
 		if strings.ContainsAny(v, "\n\r\x00") {
 			return errors.New("service: path contains a control character")
 		}
 	}
+	for _, kv := range s.Env {
+		if k, _, ok := strings.Cut(kv, "="); !ok || k == "" {
+			return fmt.Errorf("service: %q is not KEY=value", kv)
+		}
+	}
 	return nil
+}
+
+// env returns the daemon's environment as KEY=value, PATH first.
+func (s Spec) env() []string {
+	path := s.Path
+	if path == "" {
+		path = DefaultPath
+	}
+	return append([]string{"PATH=" + path}, s.Env...)
 }
 
 func writeFile(path, content string) error {
@@ -197,16 +216,33 @@ Description=Jigz daemon (jigd)
 [Service]
 ExecStart=%s daemon
 Restart=on-failure
-Environment=%s
-KillMode=mixed
+%sKillMode=mixed
 TimeoutStopSec=120
 
 [Install]
 WantedBy=default.target
-`, unitQuote(s.Exe), unitQuote("PATH="+s.Path))
+`, unitQuote(s.Exe), unitEnv(s.env()))
 }
 
-// unitQuote quotes a word for a systemd unit when it needs it.
+// unitEnv returns one Environment= line per assignment. systemd expands
+// specifiers and C escapes in Environment= but not $, so only % and the
+// quoting characters are escaped, and an assignment with any of them or
+// with whitespace is quoted whole.
+func unitEnv(env []string) string {
+	var b strings.Builder
+	for _, kv := range env {
+		kv = strings.ReplaceAll(kv, "%", "%%")
+		if strings.ContainsAny(kv, " \t\"'\\") {
+			kv = strings.ReplaceAll(kv, `\`, `\\`)
+			kv = strings.ReplaceAll(kv, `"`, `\"`)
+			kv = `"` + kv + `"`
+		}
+		b.WriteString("Environment=" + kv + "\n")
+	}
+	return b.String()
+}
+
+// unitQuote quotes an ExecStart word for a systemd unit when it needs it.
 func unitQuote(v string) string {
 	v = strings.ReplaceAll(v, "%", "%%")
 	if !strings.ContainsAny(v, " \t\"'\\$") {
@@ -242,16 +278,23 @@ func RenderPlist(s Spec) string {
 	<integer>120</integer>
 	<key>EnvironmentVariables</key>
 	<dict>
-		<key>PATH</key>
-		<string>%s</string>
-	</dict>
+%s	</dict>
 	<key>StandardOutPath</key>
 	<string>%s</string>
 	<key>StandardErrorPath</key>
 	<string>%s</string>
 </dict>
 </plist>
-`, Label, xmlEscape(s.Exe), xmlEscape(s.Path), xmlEscape(s.LogPath), xmlEscape(s.LogPath))
+`, Label, xmlEscape(s.Exe), plistEnv(s.env()), xmlEscape(s.LogPath), xmlEscape(s.LogPath))
+}
+
+func plistEnv(env []string) string {
+	var b strings.Builder
+	for _, kv := range env {
+		k, v, _ := strings.Cut(kv, "=")
+		fmt.Fprintf(&b, "\t\t<key>%s</key>\n\t\t<string>%s</string>\n", xmlEscape(k), xmlEscape(v))
+	}
+	return b.String()
 }
 
 func xmlEscape(v string) string {

@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io/fs"
@@ -1230,7 +1231,20 @@ func TestAcceptanceConnected(t *testing.T) {
 		if runtime.GOOS != "linux" {
 			t.Skip("listening sockets are read from /proc")
 		}
-		if l := listeningSockets(pid); len(l) != 0 {
+		// The engine serves its state API, so a running engine shows that
+		// the check sees a listening socket.
+		eng := engines()
+		if len(eng) == 0 {
+			t.Fatal("no engine process for the listening socket control")
+		}
+		if l, err := listeningSockets(eng[0].pid); err != nil || len(l) == 0 {
+			t.Errorf("engine pid %d listening sockets %v, %v; want at least one", eng[0].pid, l, err)
+		}
+		l, err := listeningSockets(pid)
+		if err != nil {
+			t.Fatalf("reading the daemon's sockets: %v", err)
+		}
+		if len(l) != 0 {
 			t.Errorf("the daemon listens on %v", l)
 		}
 	})
@@ -1651,17 +1665,34 @@ func descendants(pid int) []proc {
 
 // listeningSockets lists the TCP sockets in LISTEN state that pid holds,
 // as local addresses from /proc (Linux only).
-func listeningSockets(pid int) []string {
-	fds, _ := filepath.Glob(fmt.Sprintf("/proc/%d/fd/*", pid))
+func listeningSockets(pid int) ([]string, error) {
+	fds, err := filepath.Glob(fmt.Sprintf("/proc/%d/fd/*", pid))
+	if err != nil {
+		return nil, err
+	}
+	if len(fds) == 0 {
+		return nil, fmt.Errorf("no file descriptors readable for pid %d", pid)
+	}
 	held := map[string]bool{}
 	for _, fd := range fds {
-		if link, err := os.Readlink(fd); err == nil && strings.HasPrefix(link, "socket:[") {
+		link, err := os.Readlink(fd)
+		if errors.Is(err, fs.ErrNotExist) {
+			// The descriptor was closed after the listing.
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if strings.HasPrefix(link, "socket:[") {
 			held[strings.TrimSuffix(strings.TrimPrefix(link, "socket:["), "]")] = true
 		}
 	}
 	var out []string
 	for _, table := range []string{"tcp", "tcp6"} {
-		raw, _ := os.ReadFile(fmt.Sprintf("/proc/%d/net/%s", pid, table))
+		raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/net/%s", pid, table))
+		if err != nil {
+			return nil, err
+		}
 		for _, line := range strings.Split(string(raw), "\n") {
 			f := strings.Fields(line)
 			// local_address is field 1, st field 3 (0A is LISTEN), inode field 9.
@@ -1670,7 +1701,7 @@ func listeningSockets(pid int) []string {
 			}
 		}
 	}
-	return out
+	return out, nil
 }
 
 func sha256Hex(s string) string {

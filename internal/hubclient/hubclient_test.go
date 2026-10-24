@@ -174,6 +174,26 @@ func TestErrorClasses(t *testing.T) {
 	}
 }
 
+func TestRedirectsRefused(t *testing.T) {
+	var hits atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+	}))
+	defer target.Close()
+	for _, code := range []int{http.StatusFound, http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+		ts := httptest.NewServer(http.RedirectHandler(target.URL+"/v1/enroll", code))
+		c := &Client{URL: ts.URL, Version: "1"}
+		_, err := c.Enroll(context.Background(), enrollReq(enrollToken))
+		ts.Close()
+		if err == nil || Retryable(err) {
+			t.Errorf("%d: err %v", code, err)
+		}
+	}
+	if n := hits.Load(); n != 0 {
+		t.Errorf("redirect followed %d times", n)
+	}
+}
+
 // TestNoSecretInErrors uses a hub that echoes every header and the request
 // body into its error messages.
 func TestNoSecretInErrors(t *testing.T) {

@@ -444,6 +444,42 @@ func TestDaemonFallbackSearchWakesMatchingLoops(t *testing.T) {
 	r.hub.SetDown(false)
 }
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestDaemonFallbackSearchRefusesAnInsecureEndpoint(t *testing.T) {
+	r := newRig(t)
+	r.hub.SetConfig(hubConfig("http://gh.example", "", testProject))
+	var mu sync.Mutex
+	hosts := map[string]int{}
+	r.opt.http = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Host == "gh.example" || req.URL.Host == "api.github.com" {
+			mu.Lock()
+			hosts[req.URL.Host]++
+			mu.Unlock()
+			return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}},
+				Body: io.NopCloser(strings.NewReader(`{"items":[]}`)), Request: req}, nil
+		}
+		return http.DefaultTransport.RoundTrip(req)
+	})}
+	r.opt.fallback = defaultFallbackInterval
+	r.start()
+	r.eventually("two searches", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return hosts["api.github.com"] >= 2
+	})
+	mu.Lock()
+	defer mu.Unlock()
+	if hosts["gh.example"] != 0 {
+		t.Errorf("the tracker token went to an http endpoint %d times", hosts["gh.example"])
+	}
+	if n := strings.Count(r.logs.String(), "tracker endpoint refused"); n != 1 {
+		t.Errorf("refusal logged %d times, want once:\n%s", n, r.logs.String())
+	}
+}
+
 func TestFallbackQueriesStayUnderTheLimit(t *testing.T) {
 	var projects []string
 	for i := range 20 {
@@ -603,6 +639,93 @@ func TestDaemonRefusesAGroupReadableHubFile(t *testing.T) {
 	}
 	if ack := supervise.Key("a/b", "c"); ack != "a/b/c" {
 		t.Errorf("Key = %q", ack)
+	}
+}
+
+func TestDaemonRefusesAnInsecureHubURL(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	if err := hubstate.Save(hubstate.State{HubURL: "http://hub.example", Credential: "c"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadDaemonHub(); err == nil || !strings.Contains(err.Error(), "https") {
+		t.Errorf("err %v, want a refusal of the http URL", err)
+	}
+	if err := hubstate.Save(hubstate.State{HubURL: "https://hub.example", Credential: "c"}); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := loadDaemonHub(); err != nil || st.HubURL != "https://hub.example" {
+		t.Errorf("got %+v, %v", st, err)
+	}
+}
+
+func TestDaemonLoopCommands(t *testing.T) {
+	r := newRig(t)
+	r.start()
+	root := r.root(testProject)
+	send := func(typ hubproto.CommandType) {
+		t.Helper()
+		if ack := r.send(typ, loopArgs(testProject)); !ack.OK {
+			t.Fatalf("%s = %+v", typ, ack)
+		}
+	}
+	send(hubproto.CmdStart)
+	r.eventually("start to start the child", func() bool { return len(r.childPids()) == 1 })
+	send(hubproto.CmdRestartWhenIdle)
+	r.eventually("restart_when_idle to reach the child", func() bool { return strings.Contains(r.record("signals"), "usr2 "+root) })
+	send(hubproto.CmdDrain)
+	r.eventually("drain to reach the child", func() bool { return strings.Contains(r.record("signals"), "usr1 "+root) })
+	r.eventually("a heartbeat with the drained loop stopped", r.loopState(testProject, hubproto.LoopStopped))
+	send(hubproto.CmdStart)
+	r.eventually("start to start the child again", func() bool { return len(r.childPids()) == 2 })
+	send(hubproto.CmdStop)
+	r.eventually("stop to reach the child", func() bool { return strings.Contains(r.record("signals"), "term "+root) })
+}
+
+// TestDaemonHubRefusals covers a 403 answer, which drains every loop like
+// a 401, and an unsupported_version answer, which keeps the loops running.
+func TestDaemonHubRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		status     int
+		drains     bool
+		lastErr    string
+	}{
+		{"forbidden", `{"code":"forbidden","message":"no"}`, http.StatusForbidden, true, "jig join"},
+		{"unsupported_version", `{"code":"unsupported_version","message":"no","supported":{"min":0,"max":0}}`, http.StatusBadRequest, false, "unsupported_version"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newRig(t)
+			var refuse atomic.Bool
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if refuse.Load() {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(tc.status)
+					io.WriteString(w, tc.body)
+					return
+				}
+				r.hub.ServeHTTP(w, req)
+			}))
+			t.Cleanup(srv.Close)
+			r.opt.hub.HubURL = srv.URL
+			r.start()
+			r.wake(testProject)
+			refuse.Store(true)
+			r.eventually("a 10 minute retry", func() bool {
+				r.smu.Lock()
+				defer r.smu.Unlock()
+				return slices.Contains(r.sleeps, hubRefusedRetry)
+			})
+			r.eventually("status.json to name the refusal", func() bool {
+				var doc hubproto.StatusRequest
+				raw, err := os.ReadFile(filepath.Join(r.opt.stateDir, "status.json"))
+				return err == nil && json.Unmarshal(raw, &doc) == nil && strings.Contains(doc.LastError, tc.lastErr)
+			})
+			if tc.drains {
+				r.eventually("the loop to drain", func() bool { return strings.Contains(r.record("signals"), "usr1 ") })
+			} else if strings.Contains(r.record("signals"), "usr1 ") {
+				t.Error("an unsupported version drained the loop")
+			}
+		})
 	}
 }
 

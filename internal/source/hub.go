@@ -66,8 +66,12 @@ func AppliedFiles(root string) ([]hubproto.FileHash, error) {
 // files the hub served. The check must run with env as its whole process
 // environment (exec.Cmd.Env = env): env carries PATH, HOME, the project, a
 // placeholder tracker key and a scratch workspace directory, and no token
-// or other variable of the daemon. It must not run workflow hooks;
-// `sortie validate` reads the file and runs none.
+// or other variable of the daemon. It must not run workflow hooks.
+// `sortie validate` (cmd/sortie/validate.go runValidate, engine v1.28.1
+// and v1.29.0) runs none: hooks run only through workspace.RunHook, which
+// workspace.Prepare and orchestrator.RunReactionTriage call during
+// dispatch. Its preflight creates workspace.root and a probe file in it,
+// which is why env names a scratch workspace directory.
 type ValidateFunc func(workflowFile string, env []string) error
 
 // Hub writes one loop root per (project, workflow) of the hub config under
