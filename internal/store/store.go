@@ -177,6 +177,12 @@ var migrations = []string{
 	ignored_answers TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (project, number, qid)
 	);`,
+	`CREATE TABLE hub_cursor (
+		project  TEXT    NOT NULL,
+		workflow TEXT    NOT NULL,
+		run_id   INTEGER NOT NULL,
+		PRIMARY KEY (project, workflow)
+	);`,
 }
 
 // Open opens dir/history.db, creating the directory and the database, and

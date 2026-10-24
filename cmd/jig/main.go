@@ -176,6 +176,9 @@ func run() (code int) {
 		fmt.Fprintln(os.Stderr, "jig:", fe.err)
 		code = 1
 	}()
+	if len(os.Args) > 1 && os.Args[1] == "daemon" {
+		return runDaemon(os.Args[2:])
+	}
 	c, err := parseArgs(os.Args[1:])
 	if errors.Is(err, errHelp) {
 		usage()
