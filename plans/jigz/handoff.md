@@ -1,6 +1,6 @@
 # Jigz: handoff
 
-Status: 2026-10-23, updated after the repo directory rename. Read this first in a new
+Status: 2026-10-24, Phase 3 (Questions) in progress. Read this first in a new
 session working on Jigz. The hub is a separate stream; its plans are in
 `plans/hub/` and it has no code yet.
 
@@ -12,8 +12,8 @@ Phase 0 is merged into `main` and pushed to `github.com/kinged007/jigz`.
 Phases 1 and 2 are complete in code, tests, and docs. Neither has a
 release or release notes; releases are deferred until the user asks. The
 rename to Jigz is done, including the repo directory `.sortie/` to
-`.jigz/`. The next steps are pushing the commits still local on `main`,
-the acceptance test in CI, and Phase 3.
+`.jigz/`. CI runs the acceptance test. Phase 3 (Questions) is in progress
+on the local branch `feat/questions`; its plan is `plans/jigz/questions.md`.
 
 Read, in order:
 
@@ -97,23 +97,74 @@ Read, in order:
 - The dashboard counts succeeded and failed runs by status name from
   `/api/v1/stats` `by_status`. The engine's `summary.failed` counts every
   non-success status except cancelled, needs_person, and budget_stopped.
-- The user approved running the acceptance test in CI (2026-10-22). It is
-  not implemented yet.
+- CI (`.github/workflows/ci.yml`) has a separate `acceptance` job that
+  runs `make acceptance` on every push to `main` and every PR.
+- The default agent runtime is `claude-code` with model
+  `claude-haiku-5-5`. The shipped workflow files set `agent.kind:
+  claude-code` and `command: claude`; the `pi:` block stays in them. A loop
+  whose agent kind the engine lacks does not start; there is no fallback
+  from `pi` to `claude-code`. Users switch runtime by editing `agent.kind`
+  and `model:` in the workflow files, or through the pool in `machine.yaml`.
+- The shipped issues and prs workflows use `db_path: jigz-<name>.db`.
+  Discovery lists only `jigz-*.db` files. Legacy `.sortie-*.db` files are
+  ignored and not migrated. `jig setup` and `jig setup --json` append
+  `jigz-*.db` once to a selective `.gitignore` (one that re-includes parts
+  of `.jigz/`).
+- `needs-human` is the label for blocking questions. There is no
+  `needs-answer` label.
 - Releases are deferred until the user asks.
 
-Open decisions (do not decide them; ask):
-
-- Default agent runtime for new users: `claude-code` or `pi`.
+Open decisions (do not decide them; ask): none at the time of writing.
 
 ## 4. State of the work
 
-The rename branch `feat/rename-jigz` was merged into `main` as `ba56ec1`
-and pushed to `github.com/kinged007/jigz`; no PR was opened. `main` carries
-two commits that are not pushed: `0e1e741` (the repo directory `.sortie/`
-to `.jigz/` and `config.MigrateRepoDir`) and `d52a73c` (setup reports a
-workflow file that differs from the shipped copy). `feat/jigz-db-names`
-(2 commits on top of `main`, not merged) renames the workflow databases
-to `jigz-<name>.db`. Phase 1 (working hours, account pool,
+`main` is pushed to `github.com/kinged007/jigz`. These PRs were merged by
+squash, with CI green (check, acceptance, four builds):
+
+- #13: workflow databases named `jigz-<name>.db`, discovery of
+  `jigz-*.db` only, and the `.gitignore` append in `jig setup`.
+- #15: the two fleetconfig example tests set `GH_TOKEN` themselves, because
+  CI runners have no token.
+- #16: the CI `acceptance` job.
+- #17, #19, #21: plans. `needs-human` for blocking questions, engine
+  findings, and `plans/jigz/questions.md` as the Phase 3 plan.
+- #18: the default agent runtime `claude-code` with `claude-haiku-5-5`,
+  and removal of the `pi` to `claude-code` fallback.
+
+PR #12 and issue #14 are closed. Issue #20 is open: prompts and the
+scanner should trust only comments from authorized authors. PR #10 is open
+and unrelated to this work.
+
+`gh` defaults to `kinged007/jigz` in this clone (`gh repo set-default`). A
+second remote, `upstream`, points to `sortie-ai/sortie`. Never push to it
+or open PRs or issues against it.
+
+Engine facts verified at the pinned tag (also in
+`plans/jigz/questions.md`): at handoff the engine adds `agent:done` and
+removes every other configured state label, including the trigger and
+`in-progress`. Other labels, such as `needs-human`, stay. `agent:done`
+outranks the trigger. A run that exits 0 is `succeeded`. Poll dispatch
+does not pass comments to the prompt.
+
+Phase 3 (Questions) is on the local branch `feat/questions`: 7 commits on
+top of `main`, not pushed, no PR. The work packages (WP) are in
+`plans/jigz/questions.md` section 3. Done and committed on the branch:
+
+| WP | Change |
+| -- | ------ |
+| WP1 | `internal/questions` parser. An independent review found two blockers; both are fixed and tested. |
+| WP2 | `internal/github` Post, Delete and User; `internal/store` tables `question_items` and `questions`; `internal/fleetconfig` keys `questions_interval` and `questions_window`. |
+| WP3 | `internal/fakegithub`: comments with ETag, `/user`, assignees, label DELETE and POST, PUT rejected, and the `EngineHandoff` helper. |
+| WP6 | The five prompts with the question block and `resume`, the prs workflow comment, and prompt tests. |
+
+Not done: the review of WP2 and WP3 (pending at the time of writing), WP4
+(scanner and answer path), WP5 (Questions page), WP7 (acceptance
+scenario), WP8 (README and docs). There is no scanner or Questions page
+yet, so the only change a user can see on the branch is in the prompts.
+The worktrees `/home/coder/sortie-loop-wt/wp1`, `wp2`, `wp3` and `wp6`
+(branches `wp/questions-1` and so on) can be removed after the PR.
+
+Phase 1 (working hours, account pool,
 `agent-exec`, runtime failover, dashboard pages) is in `internal/machine`,
 `cmd/jig/gate.go` and `cmd/jig/agentexec.go`. Phase 2 commits:
 
@@ -122,15 +173,11 @@ to `jigz-<name>.db`. Phase 1 (working hours, account pool,
 | `b69906d` | `internal/store/outcome.go` maps runs to the classes `succeeded`, `failed_agent`, `failed_workspace`, `failed_limit`, `cancelled`, `timeout`, `handoff_withheld`. The account-limit pattern is `machine.BuiltinLimit`. The CSV outcome column and the API `error_class.key` carry the class key. |
 | `6940822` | `internal/engine` has one resolver with a configurable repository and version: the `engine:` block in `machine.yaml`, overridden by `JIG_ENGINE_REPO` and `JIG_ENGINE_VERSION`; `JIG_ENGINE_BIN` wins. Cache files are named `sortie-<owner>+<name>-<version>`. |
 | `250d045` | `internal/collector/api.go` reads runs from `/api/v1/runs` (paged by run id, filtered by `workflow_file`), events from `/api/v1/state`, and rollup counts from `/api/v1/stats` `by_status`. A SQLite fallback serves stopped loops; its schema range is 18 to 43, with `rollup.EngineReleases` {1.28.1: 38, 1.29.0: 43}. Store migration 8 drops `workspace`, `template_id`, `api_requests`, `handoff_reset`, and `review_metadata`. A replaced engine database with a lower newest run id re-copies that workflow's runs. |
-| `59d2ba2` | Capability detection (`internal/engine/probe.go`, `gate.go`, `internal/plan/gating.go`, `cmd/jig/capabilities.go`). The version comes from `-dumpversion`; kinds come from `validate` on a workflow with unknown kinds. Without `github-pr` the PR loop is disabled (state `disabled`, reason in `hold`). Without `pi` the shipped workflows run with `claude-code`. Engine below 1.27.0 runs no loops. An explicitly set unsupported agent is an error. Pool entries for a missing runtime are not picked. One alert is shown per disabled feature. Settings lists the kinds. The status document `engine_version` is the binary's version. |
+| `59d2ba2` | Capability detection (`internal/engine/probe.go`, `gate.go`, `internal/plan/gating.go`, `cmd/jig/capabilities.go`). The version comes from `-dumpversion`; kinds come from `validate` on a workflow with unknown kinds. Without `github-pr` the PR loop is disabled (state `disabled`, reason in `hold`). Engine below 1.27.0 runs no loops. A loop whose agent kind the engine lacks does not start and is reported as an error. Pool entries for a missing runtime are not picked. One alert is shown per disabled feature. Settings lists the kinds. The status document `engine_version` is the binary's version. |
 | `01a0ad0` | The dashboard reads parked and budget-hold alerts from `/api/v1/state` while the engine runs. Settings shows the schema range. |
 | `3accb2b` | `TestAcceptanceUpstreamEngine` runs upstream `sortie-ai/sortie` v1.29.0 selected through `machine.yaml`: the issue is handed off, the PR loop is disabled with no PR requests, `validate` passes, the alert and kinds are shown, and a run arrives through the API. The Makefile acceptance target runs both tests. |
 
-Commits `f5d9b45`, `cb566b6`, `8bc988b` (hub plans), `1d5ce19`, and
-`14919dd` (product names, rename schedule) are plan changes on the branch.
-
-The rename to Jigz is committed on `main` (merged as `ba56ec1`) and
-pushed:
+The rename to Jigz is on `main`:
 
 - The command package moved to `cmd/jig`, the module path is
   `github.com/kinged007/jigz`, and the plans moved to `plans/jigz/`.
@@ -170,16 +217,13 @@ Outside this repository:
 
 ## 5. Checks
 
-- `make verify` passed on `3accb2b`: gofmt, `go vet` (also with
-  `-tags acceptance`), build, `go test ./...`, and both acceptance tests
-  (`TestAcceptance` about 105 s, `TestAcceptanceUpstreamEngine` about 65 s;
-  about 3 minutes in total). The acceptance tests download each engine
-  (about 25 MB) on first run per machine and fail if the download fails.
-- On `main` at `d52a73c` (2026-10-23): `gofmt -l cmd internal` is empty,
-  `go vet ./...`, `go vet -tags acceptance ./...` and `go build ./...` pass,
-  and `go test ./...` passes. The acceptance tests were not re-run after
-  the directory rename: they download both engines and take about three
-  minutes.
+- CI on `main` is green after the merges of #13 to #21: check, acceptance,
+  and the four cross-builds.
+- `make verify` passed on `feat/questions` with no token set: gofmt,
+  `go vet` (also with `-tags acceptance`), build, `go test ./...`, and both
+  acceptance tests (about 3 minutes in total). The acceptance tests
+  download each engine (about 25 MB) on first run per machine and fail if
+  the download fails.
 - `TestAcceptance` runs the real `jig` binary and engine v1.28.1.
   Scenarios: an `agent:plan` issue is claimed and handed off;
   `needs-human` and other-assignee issues are not dispatched; the dashboard
@@ -194,12 +238,16 @@ Outside this repository:
 
 ## 6. Outstanding work
 
-1. Push the two local `main` commits `0e1e741` and `d52a73c`, then
-   confirm CI (the user asks for pushes).
-2. Add the acceptance test to CI (approved).
-3. Phase 3: Questions (roadmap section 6).
-4. Phase 1 and Phase 2 releases and release notes: deferred; only when
+1. Finish the review of WP2 and WP3 and fix any blockers.
+2. WP4 to WP8 per `plans/jigz/questions.md` section 3.
+3. One PR for Phase 3 with the focused commits (the user asks for pushes
+   and PRs). Then remove the worktrees under `/home/coder/sortie-loop-wt/`.
+4. Phase 4 is not started.
+5. Phase 1 and Phase 2 releases and release notes: deferred; only when
    the user asks.
+
+Issue #20 (trust only comments from authorized authors in prompts and the
+scanner) is open and applies to WP4.
 
 The upstream PRs for the `pi` adapter and the `github-pr` tracker are in
 progress and owned by the user.
@@ -276,14 +324,17 @@ Known gaps from Phase 1, not scheduled:
 
 ## 7. Processes on this machine
 
-A real instance of the old binary (`sortie-loop --host=0.0.0.0 --unite`)
-serves its dashboard on port 7677 and runs engine 1.28.1 children on 7679
-and 7680, using the registry in `~/.cache/sortie-loop/`. It predates the
-rename and keeps writing there. The first run of the renamed binary moves
-that directory to `~/.cache/jigz/`, which leaves the old instance without
-a registry; stop it when the switch happens. Do not write to its registry
-before that. Tests isolate `HOME` and `XDG_*` to temporary directories;
+No dashboard or loop process was listening on ports 7677 to 7680 on
+2026-10-24. Both cache directories exist: `~/.cache/sortie-loop/` (before
+the rename) and `~/.cache/jigz/`. Check with `ss -ltnp` before starting a
+dashboard, because an earlier instance used 7677 with engine children on
+7679 and 7680. Tests isolate `HOME` and `XDG_*` to temporary directories;
 keep doing that.
+
+Installed binaries: `~/.local/bin/jig` is a local build from 2026-10-23
+and is older than `main`. There is no `make install` target; build it with
+`go build -o ~/.local/bin/jig ./cmd/jig`. `~/.local/bin/sortie-loop` is
+the binary from before the rename.
 
 ## 8. Lessons for routing work
 
@@ -307,17 +358,30 @@ keep doing that.
   hunks; workers list which hunks are theirs.
 - A worker hit a usage limit mid-task; resuming the same worker kept its
   progress.
+- The delegate lanes are configured globally in
+  `~/.config/delegate-skills/config.json`: feature, tests, ui, mechanical,
+  docs and research on pi; complex and plan on claude opus; review on
+  codex; review2 on claude sonnet, read-only. The `review` lane cannot run
+  because `codex-delegate` is not installed. Claude lanes can edit files
+  but cannot run commands in this container (bubblewrap loopback error),
+  so code work that needs `go test` goes to pi lanes or subagents.
+- A pi run can report `completed` with no edits when its reasoning uses
+  the whole output limit (`stopReason: length`, empty `touchedFiles`).
+  Check both fields on every result. Split large briefs into steps of one
+  package each, give the exact text to insert, and tell the worker to
+  write files early.
+- A research lane with read-only tools has no `git`. Give it a path it can
+  read, or use a subagent with a shell for `git show` on tags.
+- A new migration breaks tests that assume "the last migration". Look for
+  such tests when adding one.
+- Independent review before dependent work found real blockers twice: the
+  store cursor sharing in the rename, and the author checks in the parser.
+  Keep it for security-relevant code.
+- Parallel workers in worktrees with disjoint files, merged by
+  cherry-pick, had no conflicts.
 
 ## 9. Next action
 
-1. Run `make verify`, which adds the acceptance tests to the checks that
-   already pass (`gofmt`, `go vet`, `go test ./...`). The acceptance tests
-   download both engines and take about three minutes.
-2. Add the acceptance test to CI in `.github/workflows/ci.yml`. It needs
-   network to download both engines and takes about 3 minutes. Consider
-   caching the engines in `~/.local/share/jigz`, keyed on
-   repository and version. Ask the user before adding any action or tool
-   beyond what the workflow already uses.
-3. Phase 3 (Questions).
-
-The default agent runtime in section 3 remains open.
+1. Read the result of the WP2 and WP3 review and fix any blockers.
+2. Start WP4 (scanner and answer path) per `plans/jigz/questions.md`
+   section 3.
