@@ -376,6 +376,11 @@ func (a *app) routes(g hostGuard) http.Handler {
 	mux.HandleFunc("GET /usage", a.usage)
 	mux.HandleFunc("GET /runs", a.runs)
 	mux.HandleFunc("GET /runs.csv", a.runsCSV)
+	mux.HandleFunc("GET /questions", a.questionsPage)
+	mux.HandleFunc("POST /questions/refresh", a.questionsRefresh)
+	mux.HandleFunc("POST /questions/answer", a.questionsAnswer)
+	mux.HandleFunc("POST /questions/retry", a.questionsRetry)
+	mux.HandleFunc("POST /questions/remove-labels", a.questionsRemoveLabels)
 	mux.HandleFunc("GET /runs/{owner}/{name}/{workflow}/{id}", a.runDetail)
 	mux.HandleFunc("GET /runs/{owner}/{name}/{workflow}/log", a.runLog)
 	mux.HandleFunc("GET /logs/{owner}/{name}/{workflow}", a.loopLog)
@@ -402,6 +407,7 @@ func (a *app) routes(g hostGuard) http.Handler {
 	mux.HandleFunc("GET /api/v1/usage", a.apiUsage)
 	mux.HandleFunc("GET /api/v1/metrics", a.apiMetrics)
 	mux.HandleFunc("GET /api/v1/audit", a.apiAudit)
+	mux.HandleFunc("GET /api/v1/questions", a.apiQuestions)
 	return g.guard(func(w http.ResponseWriter, r *http.Request) {
 		if !sameOrigin(r) {
 			http.Error(w, "this page does not answer a request from another origin", http.StatusForbidden)

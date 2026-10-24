@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kinged007/jigz/internal/collector"
 	"github.com/kinged007/jigz/internal/loopsrc"
 	"github.com/kinged007/jigz/internal/rollup"
 	"github.com/kinged007/jigz/internal/store"
@@ -308,4 +309,83 @@ func (a *app) apiAudit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, struct {
 		Audit []store.AuditEntry `json:"audit"`
 	}{rows})
+}
+
+type apiQuestion struct {
+	Project          string             `json:"project"`
+	Number           int                `json:"number"`
+	Title            string             `json:"title"`
+	URL              string             `json:"url"`
+	QID              string             `json:"qid"`
+	State            string             `json:"state"`
+	Audience         string             `json:"audience"`
+	Blocking         bool               `json:"blocking"`
+	Resume           string             `json:"resume"`
+	Question         string             `json:"question"`
+	Suggested        string             `json:"suggested"`
+	AskedCommentURL  string             `json:"asked_comment_url"`
+	AskedAt          string             `json:"asked_at"`
+	AskedCount       int                `json:"asked_count"`
+	Answer           string             `json:"answer"`
+	AnsweredBy       string             `json:"answered_by"`
+	AnswerCommentURL string             `json:"answer_comment_url"`
+	AnsweredAt       string             `json:"answered_at"`
+	IgnoredAnswers   []apiIgnoredAnswer `json:"ignored_answers"`
+}
+
+type apiIgnoredAnswer struct {
+	Author     string `json:"author"`
+	CommentURL string `json:"comment_url"`
+}
+
+type apiQuestionItem struct {
+	Project   string                  `json:"project"`
+	Number    int                     `json:"number"`
+	IsPR      bool                    `json:"is_pr"`
+	Title     string                  `json:"title"`
+	URL       string                  `json:"url"`
+	Labels    []string                `json:"labels"`
+	ScannedAt string                  `json:"scanned_at"`
+	Malformed bool                    `json:"malformed"`
+	Problems  []collector.ItemProblem `json:"problems"`
+}
+
+// apiQuestions serves the Questions page's data. The filters are those of
+// the page: audience, blocking, project and state (default open).
+func (a *app) apiQuestions(w http.ResponseWriter, r *http.Request) {
+	f := questionFilter(r.URL.Query())
+	rows, items, err := a.questionsData(f, false)
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	body := struct {
+		Enrich    bool              `json:"enrich"`
+		Questions []apiQuestion     `json:"questions"`
+		Items     []apiQuestionItem `json:"items"`
+	}{Enrich: a.questionsOn(), Questions: []apiQuestion{}, Items: []apiQuestionItem{}}
+	for _, q := range rows {
+		state := "open"
+		if q.AnsweredAt != "" {
+			state = "answered"
+		}
+		aq := apiQuestion{
+			Project: q.Project, Number: q.Number, Title: q.Title, URL: q.URL, QID: q.QID, State: state,
+			Audience: q.Audience, Blocking: q.Blocking, Resume: q.Resume, Question: q.Question.Question,
+			Suggested: q.Suggested, AskedCommentURL: q.AskedCommentURL, AskedAt: q.AskedAt, AskedCount: q.AskedCount,
+			Answer: q.Answer, AnsweredBy: q.AnsweredBy, AnswerCommentURL: q.AnswerCommentURL, AnsweredAt: q.AnsweredAt,
+			IgnoredAnswers: []apiIgnoredAnswer{},
+		}
+		for _, ig := range q.IgnoredAnswers {
+			aq.IgnoredAnswers = append(aq.IgnoredAnswers, apiIgnoredAnswer{ig.Author, ig.CommentURL})
+		}
+		body.Questions = append(body.Questions, aq)
+	}
+	for _, it := range items {
+		body.Items = append(body.Items, apiQuestionItem{
+			Project: it.Project, Number: it.Number, IsPR: it.IsPR, Title: it.Title, URL: it.URL,
+			Labels: it.Labels, ScannedAt: it.ScannedAt, Malformed: it.Malformed, Problems: it.Problems,
+		})
+	}
+	writeJSON(w, http.StatusOK, body)
 }

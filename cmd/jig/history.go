@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kinged007/jigz/internal/collector"
+	"github.com/kinged007/jigz/internal/config"
 	fleetconfig "github.com/kinged007/jigz/internal/fleetconfig"
 	machine "github.com/kinged007/jigz/internal/host"
 	"github.com/kinged007/jigz/internal/loopsrc"
@@ -36,6 +37,7 @@ func (a *app) startHistory() (stop func()) {
 		Host:     machine.New(a.stateDir).Read,
 	}
 	a.enricher = &collector.Enricher{Store: st, Settings: a.githubSettings, Targets: a.githubTargets}
+	a.questions = newQuestionsState(&collector.Scanner{Store: st, Settings: a.githubSettings, Targets: a.githubTargets})
 	go func() {
 		defer close(done)
 		c.Run(ctx)
@@ -45,10 +47,15 @@ func (a *app) startHistory() (stop func()) {
 		defer close(enrichDone)
 		a.enricher.Run(ctx)
 	}()
+	questionsDone := make(chan struct{})
+	go func() {
+		defer close(questionsDone)
+		a.questions.scanner.Run(ctx)
+	}()
 	return func() {
 		cancel()
 		wait := time.After(10 * time.Second)
-		for _, ch := range []chan struct{}{done, enrichDone} {
+		for _, ch := range []chan struct{}{done, enrichDone, questionsDone} {
 			select {
 			case <-ch:
 			case <-wait:
@@ -89,10 +96,45 @@ func (a *app) workflowKind(project, workflow string) string {
 	return ""
 }
 
+// githubSettings is the github block of the projects' .jigz/config.yaml,
+// read on each call so an edit applies without a restart. A --unite page
+// spans several projects but runs one enricher and one scanner: the first
+// project by slug that turns enrich on supplies the whole block, else the
+// first project that has a readable block. a.github applies only when no
+// project config can be read.
 func (a *app) githubSettings() fleetconfig.GitHub {
+	var dirs []string
+	for _, r := range a.projects() {
+		dirs = append(dirs, r.Dir)
+	}
+	if g, ok := githubFrom(dirs); ok {
+		return g
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.github
+}
+
+// githubFrom picks the github block of the first dir that enables it, else
+// of the first dir with a readable config.
+func githubFrom(dirs []string) (fleetconfig.GitHub, bool) {
+	var first *fleetconfig.GitHub
+	for _, dir := range dirs {
+		g, err := config.LoadGitHub(dir)
+		if err != nil {
+			continue
+		}
+		if g.Enrich {
+			return g, true
+		}
+		if first == nil {
+			first = &g
+		}
+	}
+	if first == nil {
+		return fleetconfig.GitHub{}, false
+	}
+	return *first, true
 }
 
 // githubOn reports whether GitHub enrichment is turned on.
@@ -103,9 +145,22 @@ func (a *app) githubTargets() []collector.Target {
 	projects := a.projects()
 	out := make([]collector.Target, 0, len(projects))
 	for _, r := range projects {
-		out = append(out, collector.Target{Project: r.Repo.Repo, Token: r.Token(), TokenEnv: r.TokenEnv})
+		out = append(out, projectTarget(r))
 	}
 	return out
+}
+
+// projectTarget resolves a project's token the way its loops do (JIG_TOKEN,
+// then token: in .jigz/config.yaml, then GITHUB_TOKEN and GH_TOKEN), and
+// falls back to the environment alone when the config cannot be read.
+func projectTarget(r fleetconfig.Resolved) collector.Target {
+	t := collector.Target{Project: r.Repo.Repo, Token: r.Token(), TokenEnv: r.TokenEnv}
+	if r.TokenEnv == "" && r.Dir != "" {
+		if tok, err := config.LoadToken(r.Dir); err == nil && tok != "" {
+			t.Token = tok
+		}
+	}
+	return t
 }
 
 // githubStatus is the last enrichment outcome of a project as the pages

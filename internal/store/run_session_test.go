@@ -1,6 +1,9 @@
 package store
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestFreshAndV5DatabasesMigrateToV6KeepingRows(t *testing.T) {
 	fresh := open(t)
@@ -70,7 +73,18 @@ func TestMigrationDropsTheColumnsWithoutAnAPISource(t *testing.T) {
 func TestMigrationRemovesHandoffResetEvents(t *testing.T) {
 	dir := t.TempDir()
 	saved := migrations
-	migrations = saved[:len(saved)-1]
+	// locate the handoff_reset deletion by content, not position
+	idx := -1
+	for i, m := range saved {
+		if strings.Contains(m, "DELETE FROM events WHERE kind IN ('handoff_reset'") {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		t.Fatal("handoff_reset deletion migration not found")
+	}
+	migrations = saved[:idx]
 	old, err := Open(dir)
 	migrations = saved
 	if err != nil {

@@ -143,6 +143,40 @@ var migrations = []string{
 	ALTER TABLE runs_cache DROP COLUMN handoff_reset;
 	ALTER TABLE runs_cache DROP COLUMN review_metadata;
 	DELETE FROM events WHERE kind IN ('handoff_reset', 'handoff_reset_cleared');`,
+	`CREATE TABLE question_items (
+	project TEXT NOT NULL,
+	number INTEGER NOT NULL,
+	is_pr INTEGER NOT NULL DEFAULT 0,
+	title TEXT NOT NULL DEFAULT '',
+	url TEXT NOT NULL DEFAULT '',
+	labels TEXT NOT NULL DEFAULT '',
+	assignees TEXT NOT NULL DEFAULT '',
+	first_labels TEXT NOT NULL DEFAULT '',
+	issue_etag TEXT NOT NULL DEFAULT '',
+	comments_etag TEXT NOT NULL DEFAULT '',
+	scanned_at TEXT NOT NULL DEFAULT '',
+	problems TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (project, number)
+	);
+	CREATE TABLE questions (
+	project TEXT NOT NULL,
+	number INTEGER NOT NULL,
+	qid TEXT NOT NULL,
+	audience TEXT NOT NULL DEFAULT '',
+	blocking INTEGER NOT NULL DEFAULT 0,
+	resume TEXT NOT NULL DEFAULT '',
+	question TEXT NOT NULL DEFAULT '',
+	suggested TEXT NOT NULL DEFAULT '',
+	asked_comment_url TEXT NOT NULL DEFAULT '',
+	asked_at TEXT NOT NULL DEFAULT '',
+	asked_count INTEGER NOT NULL DEFAULT 0,
+	answer TEXT NOT NULL DEFAULT '',
+	answered_by TEXT NOT NULL DEFAULT '',
+	answer_comment_url TEXT NOT NULL DEFAULT '',
+	answered_at TEXT NOT NULL DEFAULT '',
+	ignored_answers TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (project, number, qid)
+	);`,
 }
 
 // Open opens dir/history.db, creating the directory and the database, and

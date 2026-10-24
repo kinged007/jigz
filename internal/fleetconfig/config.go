@@ -221,6 +221,12 @@ type GitHub struct {
 	Interval string `yaml:"interval"`
 	// APIURL is DefaultGitHubAPI when empty.
 	APIURL string `yaml:"api_url"`
+	// QuestionsInterval is a Go duration, DefaultQuestionsInterval when
+	// empty. It is the time between question scan passes.
+	QuestionsInterval string `yaml:"questions_interval"`
+	// QuestionsWindow is a Go duration, DefaultQuestionsWindow when empty.
+	// It is how far back a scan looks for stored runs.
+	QuestionsWindow string `yaml:"questions_window"`
 	// Details also reads commits, changed files and check runs of each
 	// cached pull request. It has no effect unless Enrich is set.
 	Details bool `yaml:"details"`
@@ -231,9 +237,12 @@ func (g GitHub) DetailsOn() bool { return g.Enrich && g.Details }
 
 // Defaults of the github section.
 const (
-	DefaultGitHubInterval = 10 * time.Minute
-	MinGitHubInterval     = time.Minute
-	DefaultGitHubAPI      = "https://api.github.com"
+	DefaultGitHubInterval    = 10 * time.Minute
+	MinGitHubInterval        = time.Minute
+	DefaultGitHubAPI         = "https://api.github.com"
+	DefaultQuestionsInterval = 2 * time.Minute
+	MinQuestionsInterval     = time.Minute
+	DefaultQuestionsWindow   = 168 * time.Hour
 )
 
 // PassInterval is the time between enrichment passes.
@@ -241,6 +250,24 @@ func (g GitHub) PassInterval() time.Duration {
 	d, err := time.ParseDuration(g.Interval)
 	if err != nil || d < MinGitHubInterval {
 		return DefaultGitHubInterval
+	}
+	return d
+}
+
+// QuestionPassInterval is the time between question scan passes.
+func (g GitHub) QuestionPassInterval() time.Duration {
+	d, err := time.ParseDuration(g.QuestionsInterval)
+	if err != nil || d < MinQuestionsInterval {
+		return DefaultQuestionsInterval
+	}
+	return d
+}
+
+// QuestionWindow is how far back a scan looks for stored runs.
+func (g GitHub) QuestionWindow() time.Duration {
+	d, err := time.ParseDuration(g.QuestionsWindow)
+	if err != nil || d <= 0 {
+		return DefaultQuestionsWindow
 	}
 	return d
 }
@@ -253,11 +280,31 @@ func (g GitHub) BaseURL() string {
 	return strings.TrimRight(g.APIURL, "/")
 }
 
+// Validate checks the block's durations and API URL.
+func (g GitHub) Validate() error {
+	if fe := g.validate(); fe != nil {
+		return fe
+	}
+	return nil
+}
+
 func (g GitHub) validate() *FieldError {
 	if g.Interval != "" {
 		d, err := time.ParseDuration(g.Interval)
 		if err != nil || d < MinGitHubInterval {
 			return &FieldError{Path: "github.interval", Err: fmt.Errorf("github.interval %q is not a duration of at least %s, such as 10m", g.Interval, MinGitHubInterval)}
+		}
+	}
+	if g.QuestionsInterval != "" {
+		d, err := time.ParseDuration(g.QuestionsInterval)
+		if err != nil || d < MinQuestionsInterval {
+			return &FieldError{Path: "github.questions_interval", Err: fmt.Errorf("github.questions_interval %q is not a duration of at least %s, such as 2m", g.QuestionsInterval, MinQuestionsInterval)}
+		}
+	}
+	if g.QuestionsWindow != "" {
+		d, err := time.ParseDuration(g.QuestionsWindow)
+		if err != nil || d <= 0 {
+			return &FieldError{Path: "github.questions_window", Err: fmt.Errorf("github.questions_window %q is not a positive duration, such as 168h", g.QuestionsWindow)}
 		}
 	}
 	if g.APIURL != "" {

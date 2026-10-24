@@ -138,7 +138,8 @@ code in `internal/store/questions.go`:
   and comment URL). Primary key (project, number, qid).
 
 `question_items.first_labels` (JSON list) holds the item's labels from
-the first pass that finds a question on it; later passes do not change
+the first pass that finds a question or a problem (such as a malformed
+block) on it; later passes do not change
 it. It is the fallback for an old blocking block without `resume` (2.4)
 and may already lack the trigger. The rest is a cache of GitHub: each
 pass replaces an item's rows (`github_cache` holds one row per item).
@@ -186,14 +187,17 @@ pass replaces an item's rows (`github_cache` holds one row per item).
    the markers. A text that contains `<!-- ` is rejected so it cannot
    close or open a block.
 4. Rescan the item's comments and labels and apply rule 2. If it holds,
-   send `DELETE /repos/<slug>/issues/<n>/labels/needs-human`, then
-   `DELETE .../labels/agent%3Adone` (colon URL-encoded); a 404 means the
-   label is already gone and counts as success. Then `POST .../labels`
-   adds the item's resume trigger (2.2), unless the item already carries
-   a trigger (a person added one). Each call changes only its own label,
-   so another writer's change to other labels is kept. GitHub has no
-   PATCH for labels; `PUT .../labels` replaces the whole set and is not
-   used.
+   `POST /repos/<slug>/issues/<n>/labels` adds the item's resume trigger
+   (2.2), unless the item already carries a trigger (a person added one).
+   Then `DELETE .../labels/agent%3Adone` (colon URL-encoded), and last
+   `DELETE .../labels/needs-human`; a 404 means the label is already gone
+   and counts as success. `agent:done` outranks the trigger and
+   `needs-human` keeps the item out of the dispatch query, so a failure
+   at any call dispatches nothing and leaves `needs-human` or
+   `agent:done`, which the scanner reports as "labels not removed". Each
+   call changes only its own label, so another writer's change to other
+   labels is kept. GitHub has no PATCH for labels; `PUT .../labels`
+   replaces the whole set and is not used.
 5. If step 3 fails nothing changed; the form is shown again with the
    text and the error. If step 4 fails, the page says "answer posted,
    labels not removed" with the error and a Retry button for step 4 only.
@@ -368,8 +372,8 @@ comments and edits no labels, so the test adds the comment and the
 6. Answer: fetch `/questions`, read the form token, `POST
    /questions/answer` for `q-1`; submit the same form a second time.
 7. The fake shows on A one new comment containing `<!-- agent-answer
-   id="q-1" by="<token login>"`, one `DELETE` each for `needs-human` and
-   `agent:done`, one `POST` adding `agent:plan`, their events, and no
+   id="q-1" by="<token login>"`, one `POST` adding `agent:plan`, then one
+   `DELETE` each for `agent:done` and `needs-human`, their events, and no
    label `PUT`. A has `agent:plan` and neither of the other two.
 8. Resume: A gets `+in-progress` and reaches its handoff again
    (`+agent:done`). `GET /api/v1/runs` lists a second `succeeded` run of

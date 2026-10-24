@@ -379,3 +379,75 @@ func TestMigrateRepoDirMovesLegacyDirectory(t *testing.T) {
 		t.Fatalf("a leftover .sortie must not be moved over an existing .jigz: %v", err)
 	}
 }
+
+func TestGitHubBlock(t *testing.T) {
+	cfg, err := loadWithConfig(t, "github:\n  enrich: true\n  api_url: http://127.0.0.1:9/\n  interval: 5m\n  details: true\n  questions_interval: 3m\n  questions_window: 24h\n", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := cfg.GitHub
+	if !g.Enrich || !g.DetailsOn() || g.BaseURL() != "http://127.0.0.1:9" || g.PassInterval() != 5*time.Minute ||
+		g.QuestionPassInterval() != 3*time.Minute || g.QuestionWindow() != 24*time.Hour {
+		t.Errorf("unexpected github block: %+v", g)
+	}
+	dir := filepath.Dir(filepath.Dir(cfg.Workspaces))
+	if lg, err := LoadGitHub(dir); err != nil || lg != g {
+		t.Errorf("LoadGitHub = %+v, %v; want %+v", lg, err, g)
+	}
+}
+
+func TestGitHubBlockDefaults(t *testing.T) {
+	cfg, err := loadWithConfig(t, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := cfg.GitHub
+	if g.Enrich || g.BaseURL() != "https://api.github.com" || g.PassInterval() != 10*time.Minute ||
+		g.QuestionPassInterval() != 2*time.Minute || g.QuestionWindow() != 168*time.Hour {
+		t.Errorf("unexpected default github block: %+v", g)
+	}
+}
+
+func TestGitHubBlockInvalid(t *testing.T) {
+	cases := []struct{ name, yaml, want string }{
+		{"unknown key", "github:\n  enrich: true\n  enrichh: true\n", "enrichh"},
+		{"bad api url", "github:\n  api_url: ftp://x\n", "github.api_url"},
+		{"short interval", "github:\n  interval: 10s\n", "github.interval"},
+		{"bad questions window", "github:\n  questions_window: soon\n", "github.questions_window"},
+	}
+	for _, tc := range cases {
+		_, err := loadWithConfig(t, tc.yaml, nil)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: error %v, want %q", tc.name, err, tc.want)
+		}
+	}
+}
+
+func TestLoadTokenHasNoSideEffects(t *testing.T) {
+	t.Setenv("JIG_TOKEN", "")
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".jigz"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".jigz", "config.yaml"), []byte("token: filetok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// No repo: and no git checkout, so Load would fail on detectRepo.
+	if tok, err := LoadToken(dir); err != nil || tok != "filetok" {
+		t.Errorf("LoadToken = %q, %v; want filetok", tok, err)
+	}
+	t.Setenv("JIG_TOKEN", "jigtok")
+	if tok, _ := LoadToken(dir); tok != "jigtok" {
+		t.Errorf("LoadToken = %q, want JIG_TOKEN first", tok)
+	}
+	old := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(old, ".sortie"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadToken(old); err == nil {
+		t.Error("LoadToken read a config from a dir without .jigz/config.yaml")
+	}
+	if _, err := os.Stat(filepath.Join(old, ".sortie")); err != nil {
+		t.Errorf("LoadToken moved .sortie: %v", err)
+	}
+}

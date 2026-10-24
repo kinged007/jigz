@@ -21,12 +21,16 @@ import (
 	"time"
 )
 
-// Comment is one issue or pull request comment.
+// Comment is one issue or pull request comment. Association is the
+// author_association GitHub reports for the author; empty means NONE.
+// Updated empty means Created.
 type Comment struct {
-	ID      int64
-	Author  string
-	Body    string
-	Created time.Time
+	ID          int64
+	Author      string
+	Association string
+	Body        string
+	Created     time.Time
+	Updated     time.Time
 }
 
 // Item is an issue or, when PR is set, a pull request. Both share one
@@ -45,7 +49,8 @@ type Item struct {
 	Created   time.Time
 	Updated   time.Time
 
-	version int
+	version        int
+	commentVersion int
 }
 
 // LabelEvent is one label write the server accepted.
@@ -112,6 +117,7 @@ func New(user, token string) *Server {
 	s.mux.HandleFunc("GET "+r+"/pulls/{n}", s.getPull)
 	s.mux.HandleFunc("PATCH "+r+"/pulls/{n}", s.patchItem)
 	s.mux.HandleFunc("GET /search/issues", s.search)
+	s.mux.HandleFunc("GET /user", s.getUser)
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { s.reject(w, r, "unsupported route") })
 	return s
 }
@@ -147,6 +153,70 @@ func (s *Server) Add(it Item) int {
 	return it.Number
 }
 
+// AddComment stores a comment on an existing issue or pull request as if
+// GitHub had accepted it, and returns its ID. Created zero means now.
+func (s *Server) AddComment(slug string, n int, c Comment) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	it := s.item(slug, n)
+	if it == nil {
+		panic(fmt.Sprintf("fakegithub: no item %s#%d", slug, n))
+	}
+	s.nextComm++
+	c.ID = s.nextComm
+	if c.Created.IsZero() {
+		c.Created = time.Now().UTC()
+	}
+	it.Comments = append(it.Comments, c)
+	it.commentVersion++
+	it.touch()
+	return c.ID
+}
+
+// SetAssignees replaces the assignees of a seeded issue or pull request.
+func (s *Server) SetAssignees(slug string, n int, assignees ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	it := s.item(slug, n)
+	if it == nil {
+		panic(fmt.Sprintf("fakegithub: no item %s#%d", slug, n))
+	}
+	it.Assignees = slices.Clone(assignees)
+	it.touch()
+}
+
+// EngineHandoff applies the label writes the engine performs at the end of
+// a run: it adds the agent:done result label, then removes the labels named
+// in remove (the dispatch trigger and in-progress). Any other label, such as
+// needs-human, stays. Every change is recorded as a label event, additions
+// first, like the requests would be.
+func (s *Server) EngineHandoff(slug string, n int, remove ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rp := s.repo(slug)
+	it := s.item(slug, n)
+	if it == nil {
+		panic(fmt.Sprintf("fakegithub: no item %s#%d", slug, n))
+	}
+	rp.ensureLabel("agent:done")
+	if !containsFold(it.Labels, "agent:done") {
+		it.Labels = append(it.Labels, "agent:done")
+		s.events = append(s.events, LabelEvent{slug, it.Number, "agent:done", true, time.Now()})
+	}
+	for _, l := range remove {
+		if strings.EqualFold(l, "agent:done") {
+			continue
+		}
+		i := slices.IndexFunc(it.Labels, func(x string) bool { return strings.EqualFold(x, l) })
+		if i < 0 {
+			continue
+		}
+		s.events = append(s.events, LabelEvent{slug, it.Number, it.Labels[i], false, time.Now()})
+		it.Labels = slices.Delete(it.Labels, i, i+1)
+	}
+	it.touch()
+}
+
 // Get returns a copy of one issue or pull request, or false when there is none.
 func (s *Server) Get(slug string, n int) (Item, bool) {
 	s.mu.Lock()
@@ -178,6 +248,21 @@ func (s *Server) LabelEvents(slug string, n int) []LabelEvent {
 	for _, e := range s.events {
 		if strings.EqualFold(e.Repo, slug) && e.Number == n {
 			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// LabelRequests returns the requests for the label routes of one item, in
+// order, so a test can assert the exact sequence of its label traffic.
+func (s *Server) LabelRequests(slug string, n int) []Request {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	prefix := strings.ToLower(fmt.Sprintf("/repos/%s/issues/%d/labels", slug, n))
+	var out []Request
+	for _, r := range s.requests {
+		if p := strings.ToLower(r.Path); p == prefix || strings.HasPrefix(p, prefix+"/") {
+			out = append(out, r)
 		}
 	}
 	return out
@@ -228,7 +313,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.mux.ServeHTTP(rec, r)
 	}
 	s.mu.Lock()
-	s.requests = append(s.requests, Request{r.Method, r.URL.Path, r.URL.RawQuery, string(body), rec.status})
+	s.requests = append(s.requests, Request{r.Method, r.URL.EscapedPath(), r.URL.RawQuery, string(body), rec.status})
 	s.mu.Unlock()
 }
 
@@ -464,13 +549,23 @@ func (s *Server) getIssue(w http.ResponseWriter, r *http.Request) {
 	if it == nil {
 		return
 	}
-	etag := fmt.Sprintf(`"%x"`, sha1.Sum([]byte(fmt.Sprint(it.Number, it.version))))
-	w.Header().Set("ETag", etag)
-	if r.Header.Get("If-None-Match") == etag {
+	w.Header().Set("ETag", etag(it))
+	if r.Header.Get("If-None-Match") == etag(it) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
 	writeJSON(w, http.StatusOK, itemJSON(it))
+}
+
+func etag(it *Item) string {
+	return fmt.Sprintf(`"%x"`, sha1.Sum([]byte(fmt.Sprint(it.Number, it.version))))
+}
+
+func (s *Server) getUser(w http.ResponseWriter, r *http.Request) {
+	if !s.checkParams(w, r) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"login": s.user})
 }
 
 func (s *Server) getPull(w http.ResponseWriter, r *http.Request) {
@@ -518,6 +613,11 @@ func (it *Item) touch() {
 	it.Updated = time.Now().UTC()
 }
 
+func commentsETag(it *Item, r *http.Request) string {
+	q := r.URL.Query()
+	return fmt.Sprintf(`"%x"`, sha1.Sum([]byte(fmt.Sprint(it.Number, it.commentVersion, q.Get("page"), q.Get("per_page")))))
+}
+
 func (s *Server) listComments(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -528,17 +628,39 @@ func (s *Server) listComments(w http.ResponseWriter, r *http.Request) {
 	if !s.checkParams(w, r, "per_page", "page") {
 		return
 	}
+	tag := commentsETag(it, r)
+	if r.Header.Get("If-None-Match") == tag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("ETag", tag)
 	out := []map[string]any{}
 	for _, c := range page(w, r, it.Comments) {
-		out = append(out, commentJSON(c))
+		out = append(out, commentJSON(it, c))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
 
-func commentJSON(c Comment) map[string]any {
+func commentJSON(it *Item, c Comment) map[string]any {
+	kind := "issues"
+	if it.PR {
+		kind = "pull"
+	}
+	updated := c.Updated
+	if updated.IsZero() {
+		updated = c.Created
+	}
+	assoc := c.Association
+	if assoc == "" {
+		assoc = "NONE"
+	}
 	return map[string]any{
 		"id": c.ID, "user": map[string]string{"login": c.Author},
-		"body": c.Body, "created_at": c.Created.Format(time.RFC3339),
+		"author_association": assoc,
+		"body":               c.Body,
+		"html_url":           fmt.Sprintf("https://github.com/%s/%s/%d#issuecomment-%d", it.Repo, kind, it.Number, c.ID),
+		"created_at":         c.Created.Format(time.RFC3339),
+		"updated_at":         updated.Format(time.RFC3339),
 	}
 }
 
@@ -557,10 +679,11 @@ func (s *Server) addComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.nextComm++
-	c := Comment{ID: s.nextComm, Author: s.user, Body: body.Body, Created: time.Now().UTC()}
+	c := Comment{ID: s.nextComm, Author: s.user, Association: "OWNER", Body: body.Body, Created: time.Now().UTC()}
 	it.Comments = append(it.Comments, c)
+	it.commentVersion++
 	it.touch()
-	writeJSON(w, http.StatusCreated, commentJSON(c))
+	writeJSON(w, http.StatusCreated, commentJSON(it, c))
 }
 
 func (s *Server) listItemLabels(w http.ResponseWriter, r *http.Request) {

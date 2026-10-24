@@ -104,7 +104,10 @@ dispatch:
      label. Prompts live in prompts/. The agent routes the PR on: review
      adds agent:build when there are findings to fix and agent:done when
      clean, review-fix adds agent:review for another pass, merge finishes
-     with agent:done. Blocked work keeps its trigger and adds needs-human,
-     which the query_filter exclusion drops. The body below never renders;
+     with agent:done. At handoff the engine adds agent:done and removes
+     the trigger and in-progress; labels outside the configured states,
+     such as needs-human, stay and the query_filter exclusion drops them.
+     A question escalation adds only needs-human; the answer returns the
+     item to dispatch by adding the resume label back. The body below never renders;
      it documents the routing. Auto-review default true, opt-out via JIG_AUTO_REVIEW=false or label no-auto-review. */}}
 PR workflow routing only — the prompt comes from the dispatch template.

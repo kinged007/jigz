@@ -277,16 +277,24 @@ func TestGitHubSection(t *testing.T) {
 	if c.GitHub.Enrich || c.GitHub.PassInterval() != 10*time.Minute || c.GitHub.BaseURL() != "https://api.github.com" {
 		t.Errorf("defaults = %+v", c.GitHub)
 	}
-	c, err = Load(write(t, "github:\n  enrich: true\n  interval: 2m\n  api_url: https://ghe.example/api/v3/\nrepos:\n  - repo: o/a\n"))
+	if c.GitHub.QuestionPassInterval() != 2*time.Minute || c.GitHub.QuestionWindow() != 168*time.Hour {
+		t.Errorf("question defaults = %+v", c.GitHub)
+	}
+	c, err = Load(write(t, "github:\n  enrich: true\n  interval: 2m\n  api_url: https://ghe.example/api/v3/\n  questions_interval: 5m\n  questions_window: 24h\nrepos:\n  - repo: o/a\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !c.GitHub.Enrich || c.GitHub.PassInterval() != 2*time.Minute || c.GitHub.BaseURL() != "https://ghe.example/api/v3" {
 		t.Errorf("section = %+v", c.GitHub)
 	}
+	if c.GitHub.QuestionPassInterval() != 5*time.Minute || c.GitHub.QuestionWindow() != 24*time.Hour {
+		t.Errorf("question section = %+v", c.GitHub)
+	}
 	for path, body := range map[string]string{
-		"github.interval": "github:\n  interval: soon\n",
-		"github.api_url":  "github:\n  api_url: ftp://x\n",
+		"github.interval":           "github:\n  interval: soon\n",
+		"github.api_url":            "github:\n  api_url: ftp://x\n",
+		"github.questions_interval": "github:\n  questions_interval: soon\n",
+		"github.questions_window":   "github:\n  questions_window: soon\n",
 	} {
 		_, err := Load(write(t, body+"repos:\n  - repo: o/a\n"))
 		var fe *FieldError
@@ -294,8 +302,15 @@ func TestGitHubSection(t *testing.T) {
 			t.Errorf("%s: err = %v, want a field error", path, err)
 		}
 	}
-	if _, err := Load(write(t, "github:\n  interval: 5s\nrepos:\n  - repo: o/a\n")); err == nil {
-		t.Error("an interval under a minute was accepted")
+	for _, body := range []string{
+		"github:\n  interval: 5s\n",
+		"github:\n  questions_interval: 5s\n",
+		"github:\n  questions_window: 0s\n",
+		"github:\n  questions_window: -1h\n",
+	} {
+		if _, err := Load(write(t, body+"repos:\n  - repo: o/a\n")); err == nil {
+			t.Errorf("%s was accepted", body)
+		}
 	}
 }
 
