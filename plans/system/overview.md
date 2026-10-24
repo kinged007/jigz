@@ -218,8 +218,9 @@ The products are built by separate agent streams that work independently.
 - The only coupling is `hub-protocol.md`. It is versioned; a change to it
   is a separate PR that both streams review before either implements it.
 - Each product tests against a fake of the other: `jig` against a
-  fake hub, the hub against a fake daemon. Both are generated from the
-  protocol's JSON Schemas.
+  fake hub, the hub against a fake daemon. Each fake serves the protocol's
+  JSON Schemas as test fixtures, and each product checks its types against
+  them in a contract test.
 - Each repository has its own `AGENTS.md` that points to its plan
   documents and to this document.
 - `jig` is open source and is the canonical home of

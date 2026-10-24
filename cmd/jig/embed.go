@@ -2,16 +2,17 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"embed"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/kinged007/jigz/internal/config"
+	"github.com/kinged007/jigz/internal/source"
 )
 
 //go:embed workflows
@@ -55,7 +56,13 @@ var promptIn *bufio.Reader
 // WORKFLOW.prs.md are not written.
 // ponytail: no version stamp, so a file left untouched but outdated by a
 // binary upgrade is never noticed; delete it and re-run setup.
+//
+// A root written by the hub source holds only the files the hub served,
+// so nothing is installed there.
 func syncWorkflows(root string) []string {
+	if source.IsHubRoot(root) {
+		return nil
+	}
 	dir := filepath.Join(root, ".jigz", "workflows")
 	var legacy []string
 	for _, name := range legacyWorkflows {
@@ -223,21 +230,25 @@ func workflowPath(root, name string) string {
 // or hand-written) starts a triage loop with no code change — the loop
 // name is the filename stem ("triage").
 func discoverWorkflows(root string) []loopDef {
-	warnLegacy(syncWorkflows(root))
-	entries, err := os.ReadDir(filepath.Join(root, ".jigz", "workflows"))
+	loops, err := filesSource(root, "", "").Loops(context.Background())
 	if err != nil {
 		fatal(err)
 	}
-	var loops []loopDef
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasPrefix(name, "WORKFLOW.") || !strings.HasSuffix(name, ".md") {
-			continue
-		}
-		stem := strings.TrimSuffix(strings.TrimPrefix(name, "WORKFLOW."), ".md")
-		loops = append(loops, loopDef{stem, name})
+	return loopDefs(loops)
+}
+
+// filesSource is the loop source of `jig <root>`: the workflows installed
+// in root, narrowed by only (JIG_ONLY).
+func filesSource(root, project, only string) source.Files {
+	return source.Files{Root: root, Project: project, Only: only, Sync: func(r string) { warnLegacy(syncWorkflows(r)) }}
+}
+
+func loopDefs(loops []source.Loop) []loopDef {
+	defs := make([]loopDef, len(loops))
+	for i, l := range loops {
+		defs[i] = loopDef{l.Workflow, source.WorkflowFile(l.Workflow)}
 	}
-	return loops
+	return defs
 }
 
 // loopDef is one loop: its name (the WORKFLOW.*.md stem) and the file
@@ -245,38 +256,21 @@ func discoverWorkflows(root string) []loopDef {
 type loopDef struct{ name, file string }
 
 // selectLoops narrows the discovered set to the comma-separated names
-// in only, so a supervisor can start a chosen subset of a repo's
-// loops. An empty only keeps them all, which is what a plain run does.
-// A name matching no installed workflow is an error rather than a
-// silent omission: the caller asked for a loop that does not exist, and
-// quietly starting the rest would leave that work unwatched.
+// in only (source.Select), keeping discovery order.
 func selectLoops(loops []loopDef, only string) ([]loopDef, error) {
-	if strings.TrimSpace(only) == "" {
-		return loops, nil
+	byName := map[string]loopDef{}
+	names := make([]string, len(loops))
+	for i, l := range loops {
+		byName[l.name] = l
+		names[i] = l.name
 	}
-	keep := map[string]bool{}
-	for _, n := range strings.Split(only, ",") {
-		if n = strings.TrimSpace(n); n != "" {
-			keep[n] = true
-		}
+	names, err := source.Select(names, only)
+	if err != nil {
+		return nil, err
 	}
-	if len(keep) == 0 {
-		return nil, fmt.Errorf("JIG_ONLY=%q names no workflow", only)
-	}
-	var out []loopDef
-	for _, l := range loops {
-		if keep[l.name] {
-			out = append(out, l)
-			delete(keep, l.name)
-		}
-	}
-	if len(keep) > 0 {
-		unknown := make([]string, 0, len(keep))
-		for n := range keep {
-			unknown = append(unknown, n)
-		}
-		sort.Strings(unknown)
-		return nil, fmt.Errorf("no WORKFLOW.*.md named %s in this repo", strings.Join(unknown, " or "))
+	out := make([]loopDef, len(names))
+	for i, n := range names {
+		out[i] = byName[n]
 	}
 	return out, nil
 }

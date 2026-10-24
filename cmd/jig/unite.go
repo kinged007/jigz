@@ -62,8 +62,23 @@ type registryEntry struct {
 	StatusPath string `json:"status_path,omitempty"`
 }
 
-// registryPath returns the shared registry file, creating its directory.
+// registryPath returns the registry file, creating its directory. A
+// connected daemon sets JIG_REGISTRY_DIR for its loop children, so their
+// registry and status files are kept apart from the shared one that
+// standalone and united runs use.
 func registryPath() (string, error) {
+	if dir := os.Getenv("JIG_REGISTRY_DIR"); dir != "" {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return "", err
+		}
+		return filepath.Join(dir, registryName), nil
+	}
+	return sharedRegistryPath()
+}
+
+// sharedRegistryPath is the machine-wide registry file in the user cache
+// directory, whatever JIG_REGISTRY_DIR says.
+func sharedRegistryPath() (string, error) {
 	dir, err := dirs.Cache()
 	if err != nil {
 		return "", err
@@ -399,8 +414,15 @@ type portLock struct{ f *os.File }
 // is free. Held from before claimPorts until every loop child has
 // bound its port, so a run started at the same moment probes ports the
 // earlier run has already claimed instead of stealing them.
+//
+// The lock is next to the shared registry for every run, also a daemon's
+// loop child: the loop ports are one machine-wide range.
 func lockStarts() (*portLock, error) {
-	return lockFile(".lock")
+	path, err := sharedRegistryPath()
+	if err != nil {
+		return nil, err
+	}
+	return lockAt(path + ".lock")
 }
 
 // lockRegistry serializes read-modify-write cycles on registry.json. It
@@ -415,7 +437,11 @@ func lockFile(suffix string) (*portLock, error) {
 	if err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(path+suffix, os.O_CREATE|os.O_RDWR, 0o644)
+	return lockAt(path + suffix)
+}
+
+func lockAt(path string) (*portLock, error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return nil, err
 	}

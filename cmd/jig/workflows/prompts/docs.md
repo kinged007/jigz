@@ -16,7 +16,7 @@ Your worktree is `$SORTIE_WORKSPACE` (`auto/{{ .issue.identifier }}` already che
   ```
 
 - Guard every git operation: `[ "$(git rev-parse --show-toplevel)" = "$SORTIE_WORKSPACE" ] || { echo "wrong repo: $(pwd)"; exit 1; }`
-- Never run `git -C /home/coder/jigz` or edit `/home/coder/jigz/<path>` — that path is the bare clone used only to push `auto/...`.
+- Never run git outside `$SORTIE_WORKSPACE`. The repository checkout outside it is a bare clone used only to push `auto/...`.
 
 ## Process lifecycle (mandatory)
 

@@ -32,7 +32,46 @@ const (
 	EndStop   = "stop"
 
 	defaultReset = time.Hour
+
+	DefaultIdleTimeout      = 15 * time.Minute
+	DefaultFallbackInterval = 5 * time.Minute
+	minConnectedDuration    = time.Minute
 )
+
+// Connected tunes the connected-mode daemon. Empty fields mean the defaults.
+type Connected struct {
+	IdleTimeout      string `yaml:"idle_timeout"`
+	FallbackInterval string `yaml:"fallback_interval"`
+
+	idle     time.Duration
+	fallback time.Duration
+}
+
+// Idle is how long a loop may be idle before the daemon stops it.
+func (c Connected) Idle() time.Duration { return c.idle }
+
+// Fallback is the poll interval used while the hub connection is down.
+func (c Connected) Fallback() time.Duration { return c.fallback }
+
+func (c *Connected) validate() error {
+	var err error
+	if c.idle, err = connectedDuration("connected.idle_timeout", c.IdleTimeout, DefaultIdleTimeout); err != nil {
+		return err
+	}
+	c.fallback, err = connectedDuration("connected.fallback_interval", c.FallbackInterval, DefaultFallbackInterval)
+	return err
+}
+
+func connectedDuration(key, v string, def time.Duration) (time.Duration, error) {
+	if v == "" {
+		return def, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d < minConnectedDuration {
+		return 0, fmt.Errorf("%s: %q is not a duration of at least 1m (for example 15m)", key, v)
+	}
+	return d, nil
+}
 
 // Config is the parsed and validated machine file.
 type Config struct {
@@ -40,6 +79,8 @@ type Config struct {
 	Pool   []Entry `yaml:"pool"`
 	Limits Limits  `yaml:"limits"`
 	Engine Engine  `yaml:"engine"`
+	// Connected tunes the connected-mode daemon.
+	Connected Connected `yaml:"connected"`
 	// Warnings are non-fatal findings from Load, for example file permissions.
 	Warnings []string `yaml:"-"`
 	// Unsupported holds the runtimes the engine cannot run. Their pool
@@ -192,6 +233,9 @@ func Load(path string) (*Config, error) {
 
 func (c *Config) validate() error {
 	if err := c.Engine.validate(); err != nil {
+		return err
+	}
+	if err := c.Connected.validate(); err != nil {
 		return err
 	}
 	if err := c.Hours.validate("hours"); err != nil {

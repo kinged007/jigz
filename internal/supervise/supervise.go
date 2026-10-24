@@ -1,13 +1,10 @@
-// Package supervise owns the Jigz child processes: one per
-// enabled repository, each started only after its generated
-// configuration has been validated.
+// Package supervise owns the loop child processes of a connected daemon:
+// one `jig --no-dashboard <root>` per started (project, workflow), keyed
+// by Key(project, workflow).
 //
-// It is also where a child's failure is attributed. A Jigz
-// process that exits non-zero — a rejected workflow name, a missing
-// engine, a port it could not bind — is reported against the
-// repository it belonged to, with the tail of its output, and the rest
-// of the fleet keeps running. One broken repository must not take down
-// the others.
+// It is also where a child's failure is attributed. A child that exits
+// on its own is reported against its loop, with the tail of its output,
+// and the other loops keep running.
 package supervise
 
 import (
@@ -15,19 +12,18 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"reflect"
 	"sort"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
-	config "github.com/kinged007/jigz/internal/fleetconfig"
 	"github.com/kinged007/jigz/internal/plan"
+	"github.com/kinged007/jigz/internal/source"
 )
 
 // gracefulTimeout is how long a child gets to exit after SIGTERM before
-// it is killed.
+// its process group is killed.
 //
 // It has to cover the engine's own drain, not merely its exit. On SIGTERM
 // the engine cancels each running agent and then waits for every one of
@@ -41,11 +37,12 @@ import (
 // that raises agent.stop_grace_ms should raise this too.
 const gracefulTimeout = 60 * time.Second
 
-// outputLines is how much of a child's output is kept for the UI. The
-// tail is what explains a failure; the whole stream is a log file's job.
+// outputLines is how much of a child's output is kept. The tail is what
+// explains a failure; the whole stream is the child log's job.
 const outputLines = 50
 
-// Repository states as the UI reports them.
+// Loop and repository states. Repo and the states are also what the
+// dashboard reports for its own runs.
 const (
 	StateStopped  = "stopped"
 	StateRunning  = "running"
@@ -54,7 +51,7 @@ const (
 	StateDisabled = "disabled"
 )
 
-// Repo is one repository's supervisable state, as the UI sees it.
+// Repo is one repository's supervisable state, as the dashboard sees it.
 type Repo struct {
 	Slug  string   `json:"repo"`
 	Dir   string   `json:"dir"`
@@ -73,18 +70,36 @@ type Repo struct {
 	Output []string          `json:"output,omitempty"`
 }
 
+// Child is one loop's supervised state.
+type Child struct {
+	Key  string
+	Loop source.Loop
+	// StartedHash is Loop.Hash as it was when the running child started,
+	// "" when no child runs.
+	StartedHash string
+	State       string
+	// Exited is set when the last child ended without being asked to.
+	Exited bool
+	// Stopping is set while a child runs that was asked to stop.
+	Stopping bool
+	PID      int
+	Since    time.Time
+	Err      string
+	Output   []string
+}
+
 type entry struct {
-	res   config.Resolved
-	state string
-	diags plan.Diagnostics
-	cmd   *exec.Cmd
-	done  chan struct{}
-	since time.Time
-	err   string
-	out   *ring
-	// wanted is whether this repository should be running. A child that
-	// exits while it is false was asked to stop, and its exit is not a
-	// failure.
+	loop    source.Loop
+	started string
+	state   string
+	cmd     *exec.Cmd
+	done    chan struct{}
+	since   time.Time
+	err     string
+	exited  bool
+	out     *ring
+	// wanted is whether this loop should be running. A child that exits
+	// while it is false was asked to stop, and its exit is not a failure.
 	wanted bool
 }
 
@@ -95,219 +110,101 @@ func (e *entry) pid() int {
 	return e.cmd.Process.Pid
 }
 
-// Supervisor owns the children for one resolved config.
+// Supervisor owns the loop children.
 type Supervisor struct {
-	plan plan.Plan
-	// spawn builds a child. Tests replace it; the default runs
-	// Jigz with no dashboard, because Jigz serves the combined
-	// view.
-	spawn func(dir string, env []string) *exec.Cmd
+	spawn func(l source.Loop) *exec.Cmd
+	// Grace overrides the SIGTERM-to-kill budget. Zero means 60s.
+	Grace time.Duration
 
 	mu    sync.Mutex
-	repos map[string]*entry
-	// settle is replaced by recycleIdle: a running repository whose
-	// settings moved is handed back to its own run to replace, and this
-	// says whether that run should wait for the loops to go quiet.
-	recycleIdle bool
-
-	// grace overrides the SIGTERM-to-SIGKILL budget. Zero means
-	// gracefulTimeout; a test sets it low so it does not have to wait out
-	// the real budget to prove the escalation.
-	grace time.Duration
+	loops map[string]*entry
 }
 
-// New returns a supervisor that starts each repository with p's
-// binaries.
-func New(p plan.Plan) *Supervisor {
-	s := &Supervisor{plan: p, repos: map[string]*entry{}}
-	s.spawn = s.runLoop
-	return s
+// New returns a supervisor that builds each child with spawn. The
+// supervisor puts the child in its own process group and captures its
+// output.
+func New(spawn func(l source.Loop) *exec.Cmd) *Supervisor {
+	return &Supervisor{spawn: spawn, loops: map[string]*entry{}}
 }
 
-// graceBudget is the SIGTERM-to-SIGKILL budget actually in force.
+// Key names a loop: project/workflow.
+func Key(project, workflow string) string { return project + "/" + workflow }
+
 func (s *Supervisor) graceBudget() time.Duration {
-	if s.grace > 0 {
-		return s.grace
+	if s.Grace > 0 {
+		return s.Grace
 	}
 	return gracefulTimeout
 }
 
-// Plan exposes the materialization plan.
-func (s *Supervisor) Plan() plan.Plan { return s.plan }
-
-// Prepare materializes and validates every repository, recording each
-// one's diagnostics. It never returns early: one invalid repository
-// must not hide the state of the rest.
-//
-// A running child whose configuration moved is restarted, and one that
-// is now disabled is stopped: a child reads its environment and its
-// generated files once, at exec, so without that a re-read would only
-// re-validate settings the child never picked up.
-//
-// A repository that fails validation is reported through its
-// diagnostics and its state, not through the returned error, which is
-// reserved for nothing so far: every failure here is attributable to
-// one repository.
-func (s *Supervisor) Prepare(all []config.Resolved) {
-	var moved []string
-	for _, r := range all {
-		e := s.entry(r)
-		s.mu.Lock()
-		// Compared before the entry takes the new value: the running
-		// child is still the one started from the old one.
-		changed := e.cmd != nil && !reflect.DeepEqual(e.res, r)
-		e.res = r
-		disabled := !r.Enabled()
-		s.mu.Unlock()
-
-		if disabled {
-			if changed {
-				_ = s.Stop(r.Repo.Repo)
-			}
-			s.setState(r.Repo.Repo, StateDisabled)
-			continue
-		}
-		if err := s.prepareOne(e, r); err != nil {
-			s.mu.Lock()
-			e.state = StateFailed
-			e.err = err.Error()
-			s.mu.Unlock()
-			continue
-		}
-		if changed {
-			moved = append(moved, r.Repo.Repo)
-		}
-	}
-	s.forgetRemoved(all)
-	// After every repository is materialized: each replacement runs its
-	// loops against the files this pass just wrote.
-	idle := s.recycleIdle
-	for _, slug := range moved {
-		if idle {
-			_ = s.RecycleWhenIdle(slug)
-			continue
-		}
-		_ = s.Restart(slug)
-	}
-}
-
-// forgetRemoved stops and drops every repository that is no longer in the
-// config, so a removed project does not stay listed.
-func (s *Supervisor) forgetRemoved(all []config.Resolved) {
-	keep := map[string]bool{}
-	for _, r := range all {
-		keep[r.Repo.Repo] = true
-	}
-	for _, slug := range s.slugs() {
-		if keep[slug] {
-			continue
-		}
-		s.terminate(slug)
-		s.mu.Lock()
-		delete(s.repos, slug)
-		s.mu.Unlock()
-	}
-}
-
-// prepareOne runs the materialization steps for one repository and
-// leaves its diagnostics and state in the entry.
-//
-// A repository that fails validation becomes StateInvalid, which is
-// what stops it from being started. A child that is already running is
-// left alone: it was validated when it started, and Prepare decides
-// separately whether to replace it. Both facts are then visible at
-// once, which is the honest report.
-func (s *Supervisor) prepareOne(e *entry, r config.Resolved) error {
-	if err := plan.Apply(r); err != nil {
-		return err
-	}
-	if err := s.plan.Setup(r); err != nil {
-		return err
-	}
-	if err := s.plan.ApplySettings(r); err != nil {
-		return err
-	}
-	diags, err := s.plan.Validate(r)
-	if err != nil {
-		return err
-	}
+// Update adds l or replaces the recorded loop. A running child is left
+// alone: it keeps the files it started with until it is restarted.
+func (s *Supervisor) Update(l source.Loop) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	e.diags = diags
-	e.err = ""
-	switch {
-	case !diags.Valid:
-		e.state = StateInvalid
-	case e.state == StateInvalid || e.state == StateFailed || e.state == StateDisabled:
-		e.state = StateStopped
+	k := Key(l.Project, l.Workflow)
+	if e, ok := s.loops[k]; ok {
+		e.loop = l
+		return
 	}
-	return nil
+	s.loops[k] = &entry{loop: l, state: StateStopped, out: newRing(outputLines)}
 }
 
-// Start launches the child for one repository. It refuses a repository
-// that failed validation, so a start can never bypass it.
-func (s *Supervisor) Start(slug string) error {
-	e, ok := s.lookup(slug)
-	if !ok {
-		return fmt.Errorf("no repository %q", slug)
-	}
+// Remove stops the child of key, waits for it, and forgets the loop.
+func (s *Supervisor) Remove(key string) {
+	s.terminate(key)
 	s.mu.Lock()
-	if e.state == StateInvalid {
-		err := fmt.Errorf("%s did not validate: %s", slug, firstDiag(e.diags))
-		s.mu.Unlock()
-		return err
+	delete(s.loops, key)
+	s.mu.Unlock()
+}
+
+// Keys lists every loop, in name order.
+func (s *Supervisor) Keys() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0, len(s.loops))
+	for k := range s.loops {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Start launches the child of key. A loop that already has a child is
+// left alone.
+func (s *Supervisor) Start(key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.loops[key]
+	if !ok {
+		return fmt.Errorf("no loop %q", key)
 	}
 	if e.cmd != nil {
-		s.mu.Unlock()
 		return nil
 	}
-	res := e.res
-	env, err := res.Env()
-	if err != nil {
-		s.mu.Unlock()
-		return err
-	}
-	cmd := s.spawn(res.Dir, env)
-	// Applied here rather than in runLoop so it holds for any spawn
-	// implementation, including the stand-ins tests substitute.
+	cmd := s.spawn(e.loop)
 	setChildGroup(cmd)
-	if cmd.Env == nil {
-		// The child passes its own environment on to every loop it
-		// starts, so these reach the engine too.
-		cmd.Env = os.Environ()
-	}
-	cmd.Env = append(cmd.Env, env...)
-	if e.out == nil {
-		e.out = newRing(outputLines)
-	}
 	// A real file, not an io.Writer: exec passes a file descriptor
 	// straight through and Wait returns as soon as the child exits.
 	// Given a writer it copies through a pipe in a goroutine, and Wait
-	// then blocks until that pipe reaches EOF — which a surviving
-	// grandchild holding the write end prevents. Jigz starts one
-	// engine child per loop, so a killed supervisor would otherwise
-	// hang in Wait for as long as those grandchildren live.
+	// then blocks until that pipe reaches EOF, which a surviving
+	// grandchild holding the write end prevents.
 	w, closeWrite, err := capture(e.out)
 	if err != nil {
-		s.mu.Unlock()
 		return err
 	}
 	cmd.Stdout, cmd.Stderr = w, w
-	done := make(chan struct{})
-	e.cmd, e.done, e.wanted, e.since, e.err = cmd, done, true, time.Now(), ""
-	e.state = StateRunning
 	if err := cmd.Start(); err != nil {
 		closeWrite()
-		e.cmd, e.done, e.wanted = nil, nil, false
-		e.state = StateFailed
-		e.err = err.Error()
-		s.mu.Unlock()
+		e.state, e.err = StateFailed, err.Error()
 		return err
 	}
 	// The parent must drop its own write end, or the drainer never sees
 	// EOF even after every descendant has gone.
 	closeWrite()
-	s.mu.Unlock()
+	done := make(chan struct{})
+	e.cmd, e.done, e.wanted, e.since = cmd, done, true, time.Now()
+	e.started, e.state, e.err, e.exited = e.loop.Hash, StateRunning, "", false
 	go s.watch(e, cmd, done)
 	return nil
 }
@@ -336,96 +233,63 @@ func capture(r *ring) (*os.File, func(), error) {
 	return pw, func() { _ = pw.Close() }, nil
 }
 
-// watch reaps one child and records how it ended. A non-zero exit while
-// the repository is still wanted is a failure to report; an exit after
-// a stop was requested is not.
+// watch reaps one child and records how it ended. An exit while the loop
+// is still wanted is reported; an exit after a stop was requested is not.
 func (s *Supervisor) watch(e *entry, cmd *exec.Cmd, done chan struct{}) {
 	err := cmd.Wait()
-	// Closed after the entry is updated: a waiter that restarts the
-	// repository as soon as done closes must not find the old cmd still
-	// registered, or Start does nothing and watch then marks it stopped.
+	// Closed after the entry is updated: a waiter that restarts the loop
+	// as soon as done closes must not find the old cmd still registered.
 	defer close(done)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if e.cmd != cmd {
-		return // superseded by a newer child
+		return
 	}
-	e.cmd, e.done = nil, nil
+	e.cmd, e.done, e.started = nil, nil, ""
 	switch {
 	case !e.wanted:
 		e.state = StateStopped
 	case err != nil:
-		e.state = StateFailed
-		e.err = exitReason(err)
+		e.state, e.exited, e.err = StateFailed, true, exitReason(err)
 	default:
-		// Exited cleanly on its own. Jigz does this when one of
-		// its loops dies, and the rest of the fleet is expected to keep
-		// going, so this is reported rather than treated as an error.
-		e.state = StateStopped
-		e.err = "Jigz exited on its own"
+		e.state, e.exited, e.err = StateStopped, true, "the loop exited on its own"
 	}
 }
 
-// Stop asks one repository's child to exit and waits for it.
-func (s *Supervisor) Stop(slug string) error {
-	if _, ok := s.lookup(slug); !ok {
-		return fmt.Errorf("no repository %q", slug)
+// Stop asks the child of key to exit and waits for it, killing its
+// process group after the grace period.
+func (s *Supervisor) Stop(key string) error {
+	s.mu.Lock()
+	_, ok := s.loops[key]
+	s.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("no loop %q", key)
 	}
-	s.terminate(slug)
+	s.terminate(key)
 	return nil
 }
 
-// Restart stops a repository and starts it again, picking up whatever
-// the configuration now says.
-func (s *Supervisor) Restart(slug string) error {
-	if err := s.Stop(slug); err != nil {
-		return err
-	}
-	return s.Start(slug)
-}
-
-// StopAll terminates every child and waits for all of them. It runs on
-// shutdown, where a surviving loop would keep claiming issues for a
-// supervisor that is no longer there.
+// StopAll stops every child at once and waits for all of them. It runs
+// on shutdown, where a surviving loop would keep claiming issues for a
+// daemon that is no longer there.
 func (s *Supervisor) StopAll() {
 	var wg sync.WaitGroup
-	for _, slug := range s.slugs() {
+	for _, k := range s.Keys() {
 		wg.Add(1)
-		go func(slug string) {
+		go func(k string) {
 			defer wg.Done()
-			s.terminate(slug)
-		}(slug)
+			s.terminate(k)
+		}(k)
 	}
 	wg.Wait()
 }
 
-// StopAllWhenIdle asks every child to stop each of its loops as that loop
-// finishes what it is working on, then exit, and returns at once. The
-// children decide when they are done, so the wait belongs to whoever is
-// shutting the fleet down: pair this with WaitAll.
-//
-// Each child is marked no longer wanted first, so the exit that comes
-// back is reported as the stop it was rather than as a failure.
-func (s *Supervisor) StopAllWhenIdle() {
-	s.mu.Lock()
-	for _, e := range s.repos {
-		e.wanted = false
-	}
-	s.mu.Unlock()
-	for _, slug := range s.slugs() {
-		_ = s.StopWhenIdle(slug)
-	}
-}
-
-// WaitAll blocks until every child has exited. A repository that is not
-// running has nothing to wait for, so it returns at once. Each round
-// re-reads the entries, because a child can be replaced while an earlier
-// one is still going and the replacement is the one that has to finish.
+// WaitAll blocks until every child has exited.
 func (s *Supervisor) WaitAll() {
 	for {
 		s.mu.Lock()
 		var waiting []chan struct{}
-		for _, e := range s.repos {
+		for _, e := range s.loops {
 			if e.done != nil {
 				waiting = append(waiting, e.done)
 			}
@@ -440,32 +304,18 @@ func (s *Supervisor) WaitAll() {
 	}
 }
 
-// slugs is every repository's name.
-func (s *Supervisor) slugs() []string {
+// terminate signals a child and waits for it, killing its process group
+// when it outlives the grace period. The engine runs in the child's
+// group, so the kill reaches it too.
+func (s *Supervisor) terminate(key string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]string, 0, len(s.repos))
-	for slug := range s.repos {
-		out = append(out, slug)
-	}
-	return out
-}
-
-// terminate signals a child and waits for it, escalating to a kill if
-// it ignores the signal. It waits on the monitor's channel rather than
-// reaping a second time, so the reap stays in one place.
-func (s *Supervisor) terminate(slug string) {
-	s.mu.Lock()
-	e, ok := s.repos[slug]
+	e, ok := s.loops[key]
 	if !ok {
 		s.mu.Unlock()
 		return
 	}
 	e.wanted = false
 	cmd, done := e.cmd, e.done
-	if cmd != nil {
-		e.state = StateStopped
-	}
 	s.mu.Unlock()
 	if cmd == nil || cmd.Process == nil {
 		if done != nil {
@@ -477,167 +327,105 @@ func (s *Supervisor) terminate(slug string) {
 	select {
 	case <-done:
 	case <-time.After(s.graceBudget()):
-		_ = cmd.Process.Kill()
+		killGroup(cmd)
 		<-done
 	}
+	// A grandchild that left the engine's drain unfinished still holds
+	// the group; nothing of a stopped loop may outlive it.
+	killGroup(cmd)
 }
 
-// State returns a repository's current state, or "" if unknown.
-func (s *Supervisor) State(slug string) string {
-	// The entry is read under the lock rather than through lookup, which
-	// takes it itself: e.state is written by watch() on another
-	// goroutine, and reading it unlocked is a data race.
+// State returns a loop's current state, or "" if unknown.
+func (s *Supervisor) State(key string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	e, ok := s.repos[slug]
+	e, ok := s.loops[key]
 	if !ok {
 		return ""
 	}
 	return e.state
 }
 
-// StopWhenIdle asks one repository's Jigz to stop each of its loops
-// as that loop finishes what it is working on, rather than cutting a run
-// off mid-turn. It returns at once: a run can take many more minutes, and
-// an HTTP request is not the place to wait for one.
-//
-// The decision is the child's, because the child is what watches the
-// loops. Jigz signals and steps back.
-func (s *Supervisor) StopWhenIdle(slug string) error {
-	return s.signal(slug, sigStopIdle)
+// Running reports whether key has a child.
+func (s *Supervisor) Running(key string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.loops[key]
+	return ok && e.cmd != nil
 }
 
-// RecycleWhenIdle asks one repository's Jigz to replace each of
-// its loops as that loop goes idle, picking up the workflow and settings
-// now on disk. The run stays up, so the repository keeps its pid and its
-// registry entry, and each loop is replaced at a moment of its own rather
-// than all at once.
-func (s *Supervisor) RecycleWhenIdle(slug string) error {
-	return s.signal(slug, sigRestartIdle)
+// StopWhenIdle asks the child of key to stop each of its engine loops as
+// that loop finishes what it is working on, then exit. It returns at
+// once; the child decides when it is done.
+func (s *Supervisor) StopWhenIdle(key string) error {
+	s.mu.Lock()
+	if e, ok := s.loops[key]; ok {
+		e.wanted = false
+	}
+	s.mu.Unlock()
+	return s.Signal(key, sigStopIdle)
 }
 
-// signal sends sig to one repository's running child.
-func (s *Supervisor) signal(slug string, sig syscall.Signal) error {
-	if !idleSignals {
-		return errors.New("this platform has no idle signal, so stop-when-idle and recycle are unavailable")
+// RecycleWhenIdle asks the child of key to replace each engine loop as it
+// goes idle, picking up the files now on disk. The child stays up and
+// records the loop's current hash as the one it runs.
+func (s *Supervisor) RecycleWhenIdle(key string) error {
+	if err := s.Signal(key, sigRestartIdle); err != nil {
+		return err
 	}
 	s.mu.Lock()
-	e, ok := s.repos[slug]
+	if e, ok := s.loops[key]; ok && e.cmd != nil {
+		e.started = e.loop.Hash
+	}
+	s.mu.Unlock()
+	return nil
+}
+
+// Reload asks the child of key to re-read its config.yaml (sleep
+// settings) without restarting its engine.
+func (s *Supervisor) Reload(key string) error { return s.Signal(key, sigReload) }
+
+// Signal sends sig to the child of key. A loop with no child has nothing
+// to signal, which is not an error.
+func (s *Supervisor) Signal(key string, sig syscall.Signal) error {
+	if !idleSignals {
+		return errors.New("this platform has no control signals for a loop child")
+	}
+	s.mu.Lock()
+	e, ok := s.loops[key]
 	if !ok {
 		s.mu.Unlock()
-		return fmt.Errorf("no repository %q", slug)
+		return fmt.Errorf("no loop %q", key)
 	}
 	cmd := e.cmd
 	s.mu.Unlock()
 	if cmd == nil || cmd.Process == nil {
-		// Nothing to signal: the repository is already stopped, and that
-		// is the state the request asked for anyway.
 		return nil
 	}
 	if err := cmd.Process.Signal(sig); err != nil && !errors.Is(err, os.ErrProcessDone) {
-		// A child that exited after cmd was read is stopped, which is
-		// the same outcome as the nil case above.
 		return fmt.Errorf("signal %s: %w", sig, err)
 	}
 	return nil
 }
 
-// SetRecycleIdle chooses how a running repository is replaced when its
-// settings move: waiting for each loop to go quiet, or stopping every loop
-// at once. It is set before Prepare, which is the only thing that reads
-// it, and applies to the whole pass.
-func (s *Supervisor) SetRecycleIdle(idle bool) {
+// Snapshot returns every loop's state, in key order.
+func (s *Supervisor) Snapshot() []Child {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.recycleIdle = idle
-}
-
-// Snapshot returns every repository's state, in name order.
-func (s *Supervisor) Snapshot() []Repo {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]Repo, 0, len(s.repos))
-	for _, e := range s.repos {
-		out = append(out, Repo{
-			Slug:   e.res.Repo.Repo,
-			Dir:    e.res.Dir,
-			Loops:  e.res.Workflows,
-			State:  e.state,
-			Agents: agentKinds(e.res),
-			Diags:  e.diags,
-			PID:    e.pid(),
-			Since:  e.since,
-			Err:    e.err,
-			Output: e.out.tail(),
+	out := make([]Child, 0, len(s.loops))
+	for k, e := range s.loops {
+		out = append(out, Child{
+			Key: k, Loop: e.loop, StartedHash: e.started, State: e.state, Exited: e.exited,
+			Stopping: e.cmd != nil && !e.wanted,
+			PID:      e.pid(), Since: e.since, Err: e.err, Output: e.out.tail(),
 		})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Slug < out[j].Slug })
+	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out
 }
 
-// StartAll starts every prepared, valid, enabled repository. One
-// failure is recorded against its repository; the rest still start.
-func (s *Supervisor) StartAll() {
-	for _, e := range s.Snapshot() {
-		if e.State != StateStopped {
-			continue
-		}
-		// Start records its own error against the repository.
-		_ = s.Start(e.Slug)
-	}
-}
-
-// runLoop is the default child.
-func (s *Supervisor) runLoop(dir string, env []string) *exec.Cmd {
-	cmd := exec.Command(s.plan.LoopBinary(), "--no-dashboard", dir)
-	// Pin the engine for the child. Jigz resolves it on its own and
-	// normally reaches the same file, but Jigz just validated the
-	// workflows against a specific binary; passing the path makes the loop
-	// use exactly that one instead of a second, independent lookup that
-	// could land somewhere else.
-	if bin, err := s.plan.SortieBinPath(); err == nil && os.Getenv("JIG_ENGINE_BIN") == "" {
-		env = append(env, "JIG_ENGINE_BIN="+bin)
-	}
-	cmd.Env = append(os.Environ(), env...)
-	return cmd
-}
-
-func (s *Supervisor) entry(r config.Resolved) *entry {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	e, ok := s.repos[r.Repo.Repo]
-	if !ok {
-		e = &entry{res: r, state: StateStopped, out: newRing(outputLines)}
-		s.repos[r.Repo.Repo] = e
-	}
-	return e
-}
-
-func (s *Supervisor) lookup(slug string) (*entry, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	e, ok := s.repos[slug]
-	return e, ok
-}
-
-func (s *Supervisor) setState(slug, state string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if e, ok := s.repos[slug]; ok {
-		e.state = state
-	}
-}
-
-func firstDiag(d plan.Diagnostics) string {
-	if len(d.Errors) > 0 {
-		return d.Errors[0]
-	}
-	return "no reason reported"
-}
-
-// exitReason describes a child's non-zero exit. The message itself is
-// in the entry's output ring: ExitError.Stderr is only populated by
-// Output(), and this child writes to a buffer instead.
+// exitReason describes a child's non-zero exit. The message itself is in
+// the output ring.
 func exitReason(err error) string {
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {
@@ -646,8 +434,7 @@ func exitReason(err error) string {
 	return err.Error()
 }
 
-// ring keeps the last n lines written to it, for showing the tail of a
-// child's output in the UI.
+// ring keeps the last n lines written to it.
 type ring struct {
 	mu    sync.Mutex
 	lines []string
@@ -686,30 +473,4 @@ func (r *ring) tail() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]string(nil), r.lines...)
-}
-
-// agentKinds reports the agent adapter each of a repository's loops runs
-// with. A per-workflow override wins over the repository value, matching
-// how the knob itself is resolved.
-func agentKinds(r config.Resolved) map[string]string {
-	if len(r.Workflows) == 0 {
-		return nil
-	}
-	kind := r.Knobs["kind"]
-	out := make(map[string]string, len(r.Workflows))
-	for _, w := range r.Workflows {
-		k := kind
-		if o, ok := r.Overrides[w]; ok {
-			if v, ok := o["kind"]; ok {
-				k = v
-			}
-		}
-		if k != "" {
-			out[w] = k
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }

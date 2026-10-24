@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kinged007/jigz/schemas/hub-protocol/v0/ws.command.schema.json",
+  "title": "WebSocket command (hub to daemon)",
+  "description": "A daemon answers a command whose type is not listed with an ack of code unsupported.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "type", "args"],
+  "properties": {
+    "id": {"type": "string", "minLength": 1, "maxLength": 200, "description": "Unique per connection."},
+    "type": {"enum": ["start", "stop", "drain", "restart_when_idle", "pause", "resume", "wake", "reload_config", "session.open", "session.message", "session.close", "task.run"]},
+    "args": {"type": "object"}
+  },
+  "$defs": {
+    "loop_args": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": {"type": "string", "pattern": "^(?!\\.{1,2}/)(?!.*/\\.{1,2}$)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+        "workflow": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"type": {"enum": ["start", "stop", "drain", "restart_when_idle"]}}},
+      "then": {"properties": {"args": {"type": "object", "$ref": "#/$defs/loop_args", "dependentRequired": {"workflow": ["project"]}}}}
+    },
+    {
+      "if": {"properties": {"type": {"const": "wake"}}},
+      "then": {"properties": {"args": {"type": "object", "$ref": "#/$defs/loop_args", "required": ["project", "workflow"]}}}
+    },
+    {
+      "if": {"properties": {"type": {"enum": ["pause", "resume", "reload_config"]}}},
+      "then": {"properties": {"args": {"type": "object", "maxProperties": 0}}}
+    }
+  ]
+}

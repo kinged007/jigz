@@ -1,0 +1,1 @@
+{"time": "2026-10-24T10:00:00Z", "paused": false, "loops": [], "capacity": {"max_sessions": 1, "running_sessions": 0}, "hours": {"open": true}, "accounts": [{"name": "a", "runtime": "pi", "available": false}]}

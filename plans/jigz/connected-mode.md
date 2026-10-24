@@ -318,6 +318,16 @@ error)`, `Statuses()`, `Runs()`, `Enrollments()`, `Connected()`,
 - No agent credentials, `machine.yaml` env values or tokens go to the
   hub; pool entries are reported by name and runtime.
 - Phase 6 commands are rejected, so a hub cannot start a session.
+- Accepted risks:
+  - The fallback search sends the tracker token to the API base of the
+    served issues workflow (`tracker.endpoint`), so a hub that serves a
+    workflow with another endpoint receives the token. This is within the
+    trust given to hub-served files.
+  - `filter_additions` can widen the filter to other repositories. The
+    runner label stays ANDed to every filter, so only items that carry it
+    are picked up.
+  - The daemon starts paused when `state.json` is unreadable, and reports
+    the error, until a `resume`.
 
 ## 3. Work packages
 
@@ -393,8 +403,9 @@ engine, `mock` agent, set up as `TestAcceptance` (temporary `HOME` and
 XDG directories, `JIG_ENGINE_BIN`, fake GitHub `acme/widgets` with token
 owner `octo`) plus a fake hub. Hub config: project `acme/widgets`, the
 issues workflow passed through `acceptanceWorkflow`, runner label
-`runner:ci-1`, member `octo`. `machine.yaml`: idle time 30 s, fallback
-interval 20 s.
+`runner:ci-1`, member `octo`. `machine.yaml`: idle time and fallback
+interval 1m, the minimum. The fake hub's heartbeat interval is 5 s. The
+engine process is located through the daemon's child processes.
 
 1. `jig join <fakehub-url> - --no-service`, enrollment token on stdin,
    `JIG_TOKEN` set. One enrollment recorded with OS, arch, CPU count,
@@ -406,19 +417,24 @@ interval 20 s.
    `octo`, no runner label), C (`agent:plan`, `octo`, `runner:other`).
 4. `Send(wake acme/widgets issues)` acks `ok`. A is handed off
    (`assertHandedOff`); every engine search contains
-   `label:runner:ci-1`; B and C get no label events.
+   `label:runner:ci-1`; B and C get no label events. Fallback searches
+   are told apart from engine searches by query shape
+   (`state:open label:runner:ci-1 repo:acme/widgets`).
 5. `POST runs` carries A's run: `succeeded`, 100 input and 50 output
    tokens, work item `acme/widgets#A`; no later batch repeats it.
-6. Within 90 s a heartbeat reports the loop `sleeping`; no engine process.
+6. Within 150 s (idle time 1m plus the child's 30 s idle poll) a
+   heartbeat reports the loop `sleeping`; no engine process.
 7. `SetDown(true)`; seed D (`agent:plan`, `octo`, `runner:ci-1`). Within
-   60 s a search `state:open label:runner:ci-1 repo:acme/widgets` runs,
-   the loop starts and D is handed off.
+   60 s a fallback search runs, the loop starts and D is handed off.
 8. `SetDown(false)`; `SetConfig` adds the filter addition
-   `-label:backlog`. After the next heartbeat the config is fetched; the
-   next engine search has `-label:backlog` and `label:runner:ci-1`; the
-   status shows the new workflow hash.
+   `-label:backlog` and a newline at the end of the workflow, so the
+   workflow hash changes. After the next heartbeat the daemon fetches the
+   config (seen in `jigd.log`); the status shows the new workflow hash;
+   after a `wake`, the next engine search has `-label:backlog` and
+   `label:runner:ci-1`.
 9. `pause`: the loop drains; seed E (`runner:ci-1`); no label event on E
-   over two fallback intervals. `resume`: E is handed off.
+   over two fallback intervals plus 5 s (2m05s). `resume`: E is handed
+   off.
 10. `Send(session.open ...)` acks `ok: false`, code `unsupported`. The
     daemon process has no listening socket.
 11. SIGTERM to the daemon: exit within 120 s, no child or engine left.
@@ -463,3 +479,42 @@ the protocol and the code.
 Code finding outside this scope: `internal/supervise.Supervisor` and the
 `repos:` resolution in `internal/fleetconfig` have no production caller
 (WP6 reuses the first).
+
+### Engine facts
+
+Read from the engine source at the pinned tags, `v1.28.1` (default,
+`kinged007/sortie`, `internal/engine/engine.go` `DefaultTag`) and
+`v1.29.0` (upstream, `TestAcceptanceUpstreamEngine`). Line numbers are
+`v1.28.1`, then `v1.29.0` where they differ.
+
+**The engine re-reads its workflow file while running.** Two paths:
+
+- `workflow.Manager.Start` watches the workflow file's directory with
+  `fsnotify` and reloads on a write or create of the file, after a 50 ms
+  debounce (`internal/workflow/manager.go:323`, `:378`; `:402`, `:457`).
+  `cmd/sortie/boot.go:194` (`:191`) starts it.
+- Every poll tick runs a defensive `Reload()` in preflight before
+  dispatch (`internal/orchestrator/orchestrator.go:927`; `:948`). It
+  reads the workflow by path, so it also picks up a file whose directory
+  was renamed over, which the watcher misses.
+
+A reload re-reads the workflow and the prompt and partial files it names
+(`manager.go:442`; `:499`). A failed reload keeps the last good config.
+Agent settings are resolved once per attempt, so a reload reaches a claim
+already held at its next attempt
+(`internal/orchestrator/attempt_settings.go:23`; `:24`). For 2.3: files
+swapped under a running engine take effect at its next tick, whether or
+not the daemon restarts it.
+
+**The `github` tracker sends `query_filter` to the search API.** With a
+non-empty filter, `FetchCandidateIssues` calls `GET /search/issues` with
+`q=repo:<owner>/<repo> type:issue state:open <query_filter>`
+(`internal/scm/github/tracker.go:182`, `:239`, same lines at both tags);
+with an empty filter it lists `/repos/{owner}/{repo}/issues` with no
+filter. The `github-pr` tracker (`v1.28.1` only; `v1.29.0` has none)
+does the same with `type:pr` (`internal/scm/githubpr/tracker.go:142`,
+`:164`). The adapter reads `query_filter` when it is built
+(`tracker.go:125`), once at boot (`cmd/sortie/boot.go:267`; `:265`), and
+a workflow reload does not rebuild it. `jig` passes the filter as
+`SORTIE_TRACKER_QUERY_FILTER` (`cmd/jig/supervise.go:201`), so a filter
+change reaches the engine only when its process restarts.
