@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"html"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -92,6 +94,18 @@ func TestAcceptance(t *testing.T) {
 	home := filepath.Join(root, "home")
 	repoDir := filepath.Join(root, "repo")
 	writeAcceptanceRepo(t, repoDir, slug, token, srv.URL)
+	// Scenario f reads questions through the dashboard's scanner.
+	cfgFile, err := os.OpenFile(filepath.Join(repoDir, ".jigz", "config.yaml"), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = fmt.Fprintf(cfgFile, "github:\n  enrich: true\n  api_url: %s\n", srv.URL)
+	if cerr := cfgFile.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	dashPort := freePort(t)
 	logPath := filepath.Join(root, "jig.log")
@@ -238,6 +252,11 @@ func TestAcceptance(t *testing.T) {
 				t.Errorf("issue #%d was claimed: labels %v", n, it.Labels)
 			}
 			for _, r := range gh.Requests() {
+				// The dashboard's question scanner reads the comments of
+				// needs-human items; the engine never does.
+				if r.Method == http.MethodGet && strings.HasSuffix(r.Path, "/comments") {
+					continue
+				}
 				if strings.HasPrefix(r.Path, fmt.Sprintf("/repos/%s/issues/%d", slug, n)) {
 					t.Errorf("issue #%d was fetched by the engine: %s %s", n, r.Method, r.Path)
 				}
@@ -460,6 +479,214 @@ func TestAcceptance(t *testing.T) {
 		}
 		it, _ := gh.Get(slug, pooled)
 		t.Logf("scenario e: %s, runs %v, %d comments, claude-a %+v", time.Since(t0).Round(time.Millisecond), attempts, len(it.Comments), sa)
+	})
+
+	t.Run("f_blocking_question_stops_and_answer_resumes", func(t *testing.T) {
+		t0 := time.Now()
+		const question = `<!-- agent-question id="q-1" audience="product" blocking="true" resume="agent:plan" -->
+**Question:** Which colour?
+
+**Suggested answer:** Blue.
+<!-- /agent-question -->`
+		// The mock agent writes no comments and edits no labels, so the test
+		// writes what an agent that asks a blocking question writes.
+		a := gh.Add(fakegithub.Item{Repo: slug, Title: "Ask first", Body: "Needs an answer.",
+			Labels: []string{"agent:plan"}, Assignees: []string{owner}})
+		gh.AddComment(slug, a, fakegithub.Comment{Author: owner, Association: "OWNER", Body: question})
+		assertHandedOff(t, a, 90*time.Second)
+		req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/repos/%s/issues/%d/labels", srv.URL, slug, a),
+			strings.NewReader(`{"labels":["needs-human"]}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if it, _ := gh.Get(slug, a); !slices.Contains(it.Labels, "needs-human") || !slices.Contains(it.Labels, "agent:done") || slices.Contains(it.Labels, "agent:plan") {
+			t.Fatalf("issue #%d labels %v, want needs-human and agent:done without agent:plan", a, it.Labels)
+		}
+
+		b := gh.Add(fakegithub.Item{Repo: slug, Title: "Parked without a question", Body: "Blocked.",
+			Labels: []string{"agent:plan", "agent:done", "needs-human"}, Assignees: []string{owner}})
+		gh.AddComment(slug, b, fakegithub.Comment{Author: owner, Association: "OWNER", Body: "Waiting for a person."})
+
+		claims := func(n int) int {
+			c := 0
+			for _, e := range labelLog(gh, slug, n) {
+				if e == "+in-progress" {
+					c++
+				}
+			}
+			return c
+		}
+		seen := countSearches(gh)
+		waitFor("three more candidate polls", 30*time.Second, func() bool { return countSearches(gh) >= seen+3 })
+		if c := claims(a); c != 1 {
+			t.Errorf("issue #%d was claimed %d times while parked, want once before parking: %v", a, c, labelLog(gh, slug, a))
+		}
+		if c := claims(b); c != 0 {
+			t.Errorf("issue #%d was claimed: %v", b, labelLog(gh, slug, b))
+		}
+
+		noFollow := &http.Client{Timeout: 30 * time.Second,
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		post := func(path string, form url.Values) string {
+			t.Helper()
+			resp, err := noFollow.PostForm(dash+path, form)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusSeeOther {
+				t.Fatalf("POST %s: %s, want 303", path, resp.Status)
+			}
+			return resp.Header.Get("Location")
+		}
+		if loc := post("/questions/refresh", nil); strings.Contains(loc, "err=") {
+			t.Fatalf("refresh redirected to %s", loc)
+		}
+		var qs struct {
+			Enrich    bool
+			Questions []struct {
+				Project, QID, State string
+				Number              int
+				Blocking            bool
+			}
+			Items []struct {
+				Project string
+				Number  int
+			}
+		}
+		if err := getJSON(dash+"/api/v1/questions", &qs); err != nil {
+			t.Fatal(err)
+		}
+		if !qs.Enrich {
+			t.Fatalf("/api/v1/questions reports enrich off; github.enrich in .jigz/config.yaml did not reach the dashboard")
+		}
+		var onA int
+		for _, q := range qs.Questions {
+			switch {
+			case q.Project == slug && q.Number == a:
+				onA++
+				if q.QID != "q-1" || q.State != "open" || !q.Blocking {
+					t.Errorf("question on #%d: %+v, want q-1 open and blocking", a, q)
+				}
+			case q.Project == slug && q.Number == b:
+				t.Errorf("question listed for #%d: %+v", b, q)
+			}
+		}
+		if onA != 1 {
+			t.Fatalf("%d questions listed for #%d, want 1: %+v", onA, a, qs.Questions)
+		}
+		for _, it := range qs.Items {
+			if it.Project == slug && it.Number == b {
+				t.Errorf("problem item listed for #%d: %+v", b, qs.Items)
+			}
+		}
+
+		page := getBody(t, dash+"/questions")
+		var form url.Values
+		for _, m := range regexp.MustCompile(`(?s)<form[^>]*action="/questions/answer"[^>]*>.*?</form>`).FindAllString(page, -1) {
+			v := url.Values{}
+			for _, in := range regexp.MustCompile(`<input[^>]*>`).FindAllString(m, -1) {
+				name := regexp.MustCompile(`name="([^"]*)"`).FindStringSubmatch(in)
+				val := regexp.MustCompile(`value="([^"]*)"`).FindStringSubmatch(in)
+				if name != nil && val != nil {
+					v.Set(name[1], html.UnescapeString(val[1]))
+				}
+			}
+			if v.Get("qid") == "q-1" && v.Get("number") == strconv.Itoa(a) && v.Get("project") == slug {
+				form = v
+			}
+		}
+		if form == nil || form.Get("token") == "" {
+			t.Fatalf("/questions has no answer form with a token for q-1 on #%d", a)
+		}
+		form.Set("text", "Green.")
+		labelReqs, events := len(gh.LabelRequests(slug, a)), len(labelLog(gh, slug, a))
+		it, _ := gh.Get(slug, a)
+		before := len(it.Comments)
+		first := post("/questions/answer", form)
+		if second := post("/questions/answer", form); second != first {
+			t.Errorf("second submit redirected to %q, want the first result %q", second, first)
+		}
+		if strings.Contains(first, "err=") {
+			t.Errorf("answer redirected to %s", first)
+		}
+
+		it, _ = gh.Get(slug, a)
+		answerHead := `<!-- agent-answer id="q-1" by="` + owner + `"`
+		if added := it.Comments[before:]; len(added) != 1 || !strings.Contains(added[0].Body, answerHead) {
+			t.Errorf("new comments on #%d: %+v, want one containing %q", a, added, answerHead)
+		}
+		var got []string
+		for _, r := range gh.LabelRequests(slug, a)[labelReqs:] {
+			got = append(got, fmt.Sprintf("%s %s %s %d", r.Method, r.Path, strings.TrimSpace(r.Body), r.Status))
+		}
+		base := fmt.Sprintf("/repos/%s/issues/%d/labels", slug, a)
+		want := []string{
+			fmt.Sprintf(`POST %s {"labels":["agent:plan"]} 200`, base),
+			fmt.Sprintf("DELETE %s/agent%%3Adone  200", base),
+			fmt.Sprintf("DELETE %s/needs-human  200", base),
+		}
+		if len(got) < len(want) || !slices.Equal(got[:len(want)], want) {
+			t.Errorf("label requests on #%d after the answer:\n%s\nwant first:\n%s", a, strings.Join(got, "\n"), strings.Join(want, "\n"))
+		}
+		if ev := labelLog(gh, slug, a)[events:]; len(ev) < 3 || !slices.Equal(ev[:3], []string{"+agent:plan", "-agent:done", "-needs-human"}) {
+			t.Errorf("label events on #%d after the answer: %v, want +agent:plan, -agent:done, -needs-human first", a, ev)
+		}
+		for _, r := range gh.Requests() {
+			if r.Method == http.MethodPut {
+				t.Errorf("label PUT sent: %s %s", r.Method, r.Path)
+			}
+		}
+
+		focus = a
+		waitFor(fmt.Sprintf("issue #%d to be claimed and handed off again", a), 90*time.Second, func() bool {
+			it, _ := gh.Get(slug, a)
+			return claims(a) == 2 && slices.Contains(it.Labels, "agent:done") && !slices.Contains(it.Labels, "in-progress")
+		})
+		if it, _ := gh.Get(slug, a); !slices.Equal(it.Labels, []string{"agent:done"}) {
+			t.Errorf("issue #%d labels %v after the second run, want [agent:done]", a, it.Labels)
+		}
+		var runs struct {
+			Runs []struct {
+				Status            string
+				Attempt           int
+				DisplayIdentifier string `json:"display_identifier"`
+			}
+		}
+		id := fmt.Sprintf("%s#%d", slug, a)
+		succeeded := func() int {
+			c := 0
+			for _, r := range runs.Runs {
+				if r.DisplayIdentifier == id && r.Status == "succeeded" && r.Attempt == 1 {
+					c++
+				}
+			}
+			return c
+		}
+		waitFor("the dashboard to list the second run of #"+strconv.Itoa(a), 120*time.Second, func() bool {
+			runs.Runs = nil
+			return getJSON(dash+"/api/v1/runs?project="+slug, &runs) == nil && succeeded() >= 2
+		})
+		if c := succeeded(); c != 2 {
+			t.Errorf("%d succeeded attempt-1 runs of %s, want 2: %+v", c, id, runs.Runs)
+		}
+
+		if it, _ := gh.Get(slug, b); !slices.Contains(it.Labels, "needs-human") || !slices.Contains(it.Labels, "agent:done") {
+			t.Errorf("issue #%d labels %v, want needs-human and agent:done kept", b, it.Labels)
+		}
+		if reqs := gh.LabelRequests(slug, b); len(reqs) != 0 {
+			t.Errorf("label requests for #%d: %+v", b, reqs)
+		}
+		if un := gh.Unexpected(); len(un) > 0 {
+			t.Errorf("the fake GitHub rejected requests:\n%s", strings.Join(un, "\n"))
+		}
+		t.Logf("scenario f: %s, labels %v", time.Since(t0).Round(time.Millisecond), labelLog(gh, slug, a))
 	})
 
 	if un := gh.Unexpected(); len(un) > 0 {
