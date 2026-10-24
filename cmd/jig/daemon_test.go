@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -18,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -26,6 +28,7 @@ import (
 	"github.com/kinged007/jigz/internal/hubclient"
 	"github.com/kinged007/jigz/internal/hubproto"
 	"github.com/kinged007/jigz/internal/hubstate"
+	"github.com/kinged007/jigz/internal/rollup"
 	"github.com/kinged007/jigz/internal/store"
 	"github.com/kinged007/jigz/internal/supervise"
 )
@@ -145,7 +148,7 @@ if [ -f "$rec/ignore-term" ]; then
 else
   trap 'echo "term $root" >> "$rec/signals"; exit 0' TERM
 fi
-trap 'echo "usr1 $root" >> "$rec/signals"; exit 0' USR1
+trap 'echo "usr1 $root" >> "$rec/signals"; [ -f "$rec/slow-drain" ] && sleep 1; exit 0' USR1
 trap 'echo "usr2 $root" >> "$rec/signals"' USR2
 trap 'echo "hup $root" >> "$rec/signals"' HUP
 env | grep '^JIG_' | sort > "$rec/env"
@@ -600,5 +603,209 @@ func TestDaemonRefusesAGroupReadableHubFile(t *testing.T) {
 	}
 	if ack := supervise.Key("a/b", "c"); ack != "a/b/c" {
 		t.Errorf("Key = %q", ack)
+	}
+}
+
+// childPids lists the pids the stub child recorded at each start.
+func (r *rig) childPids() []int {
+	var pids []int
+	for _, line := range strings.Split(strings.TrimSpace(r.record("starts")), "\n") {
+		if f := strings.Fields(line); len(f) > 0 {
+			pid, _ := strconv.Atoi(f[0])
+			pids = append(pids, pid)
+		}
+	}
+	return pids
+}
+
+func (r *rig) etag() string {
+	r.d.mu.Lock()
+	defer r.d.mu.Unlock()
+	return r.d.etag
+}
+
+func TestDaemonKeepsItsLoopsWhenTheLoopListFails(t *testing.T) {
+	r := newRig(t)
+	r.hub.SetConfig(hubConfig(r.ghURL, "", testProject, "acme/gadgets"))
+	r.start()
+	r.wake(testProject)
+	manifest := filepath.Join(r.root("acme/gadgets"), ".jigz", "hub-files.json")
+	if err := os.WriteFile(manifest, []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tag := r.hub.SetConfig(hubConfig(r.ghURL, "-label:backlog", testProject, "acme/gadgets"))
+	r.send(hubproto.CmdReloadConfig, `{}`)
+	r.eventually("the loop list error", func() bool { return strings.Contains(r.logs.String(), "hub-files.json") })
+	time.Sleep(300 * time.Millisecond)
+	if strings.Contains(r.record("signals"), "usr1") {
+		t.Fatal("a failed loop list drained the running loops")
+	}
+	if r.etag() == tag {
+		t.Error("the refused config's ETag was kept, so it is never fetched again")
+	}
+	if err := os.Remove(manifest); err != nil {
+		t.Fatal(err)
+	}
+	r.eventually("the config to be fetched again and taken in", func() bool { return r.etag() == tag })
+}
+
+func TestDaemonPanicStopsEveryChild(t *testing.T) {
+	r := newRig(t)
+	r.start()
+	r.wake(testProject)
+	pid := r.childPids()[0]
+	func() {
+		defer func() { _ = recover() }()
+		defer r.d.guard()
+		panic("test panic")
+	}()
+	if !procGone(pid) {
+		t.Error("the loop child outlived a daemon panic")
+	}
+}
+
+func TestDaemonStopsTheChildrenOfAPreviousDaemon(t *testing.T) {
+	r := newRig(t)
+	root := r.root(testProject)
+	orphan := exec.Command(r.opt.childBin, "--no-dashboard", root)
+	orphan.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	decoy := exec.Command("sleep", "30")
+	for _, c := range []*exec.Cmd{orphan, decoy} {
+		if err := c.Start(); err != nil {
+			t.Fatal(err)
+		}
+		go func() { _ = c.Wait() }()
+	}
+	defer func() { _ = decoy.Process.Kill() }()
+	r.eventually("the orphan to come up", func() bool { return r.record("starts") != "" })
+	for i, c := range []*exec.Cmd{orphan, decoy} {
+		doc := statusDoc{PID: c.Process.Pid, Repo: root}
+		if i == 1 {
+			doc.Repo = filepath.Join(root, "other")
+		}
+		if err := writeStatus(doc); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.start()
+	r.eventually("the orphan to be stopped", func() bool { return procGone(orphan.Process.Pid) })
+	if procGone(decoy.Process.Pid) {
+		t.Error("a process that is not a loop child was killed")
+	}
+}
+
+func TestDaemonRetriesAFailedApply(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	r := newRig(t)
+	r.start()
+	r.wake(testProject)
+	jigz := filepath.Join(r.root(testProject), ".jigz")
+	if err := os.Chmod(jigz, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(jigz, 0o755)
+	r.hub.SetConfig(hubConfig(r.ghURL, "-label:backlog", testProject))
+	r.send(hubproto.CmdReloadConfig, `{}`)
+	r.eventually("the apply to fail", func() bool { return strings.Contains(r.logs.String(), "apply:") })
+	if err := os.Chmod(jigz, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r.eventually("the apply to be retried", func() bool {
+		return strings.Contains(readFile(t, filepath.Join(jigz, "config.yaml")), "-label:backlog")
+	})
+}
+
+func TestDaemonDropsAPendingApplyWhenTheConfigReverts(t *testing.T) {
+	r := newRig(t)
+	r.start()
+	r.wake(testProject)
+	r.idle.Store(false)
+	r.hub.SetConfig(hubConfig(r.ghURL, "-label:backlog", testProject))
+	r.send(hubproto.CmdReloadConfig, `{}`)
+	next := filepath.Join(r.root(testProject), ".jigz.next")
+	r.eventually("the new files to be staged", func() bool { _, err := os.Stat(next); return err == nil })
+	r.hub.SetConfig(hubConfig(r.ghURL, "", testProject))
+	r.send(hubproto.CmdReloadConfig, `{}`)
+	r.eventually("the staged files to be dropped", func() bool { _, err := os.Stat(next); return err != nil })
+	time.Sleep(100 * time.Millisecond)
+	r.idle.Store(true)
+	time.Sleep(300 * time.Millisecond)
+	if s := r.record("signals"); strings.Contains(s, "usr2") || strings.Contains(s, "hup") {
+		t.Errorf("a reverted config restarted the loop: %q", s)
+	}
+}
+
+func TestDaemonWakeOfAStoppingLoopStartsItAfterItExits(t *testing.T) {
+	r := newRig(t)
+	if err := os.WriteFile(filepath.Join(r.rec, "slow-drain"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r.start()
+	r.wake(testProject)
+	if ack := r.send(hubproto.CmdDrain, loopArgs(testProject)); !ack.OK {
+		t.Fatalf("drain = %+v", ack)
+	}
+	if ack := r.send(hubproto.CmdWake, loopArgs(testProject)); !ack.OK {
+		t.Fatalf("wake of a stopping loop = %+v", ack)
+	}
+	r.eventually("the loop to start again", func() bool { return len(r.childPids()) == 2 })
+}
+
+func TestDaemonReadsARemovedLoopOnceMore(t *testing.T) {
+	r := newRig(t)
+	d, err := newDaemon(r.opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.store.Close()
+	d.applyConfig(hubConfig(r.ghURL, "", testProject, "acme/gadgets"))
+	d.applyConfig(hubConfig(r.ghURL, "", "acme/gadgets"))
+	d.reconcile()
+	has := func(loops []rollup.Loop) bool {
+		return slices.ContainsFunc(loops, func(l rollup.Loop) bool { return l.Repo == testProject })
+	}
+	if got := d.sup.Keys(); slices.Contains(got, supervise.Key(testProject, "issues")) {
+		t.Fatalf("the removed loop is still supervised: %v", got)
+	}
+	if !has(d.discover()) {
+		t.Error("the collector does not read the removed loop's database once more")
+	}
+	if has(d.discover()) {
+		t.Error("the removed loop is read after its last pass")
+	}
+}
+
+func TestDaemonStartsPausedWhenItsStateIsUnreadable(t *testing.T) {
+	r := newRig(t)
+	if err := os.MkdirAll(r.opt.stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(r.opt.stateDir, "state.json"), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d, err := newDaemon(r.opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.store.Close()
+	d.loadState()
+	if !d.isPaused() {
+		t.Error("a corrupt state.json did not start the daemon paused")
+	}
+}
+
+func TestDaemonForgetsStartedEventsOfFinishedItems(t *testing.T) {
+	r := newRig(t)
+	d, err := newDaemon(r.opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.store.Close()
+	d.sentStarted["start:acme/widgets:issues:1:1:0"] = true
+	d.startedEvents()
+	if len(d.sentStarted) != 0 {
+		t.Errorf("sentStarted = %v, want the finished item dropped", d.sentStarted)
 	}
 }

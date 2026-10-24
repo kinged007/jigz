@@ -32,11 +32,11 @@ func TestHubRunsArePastTheCursorOfTheirWorkflow(t *testing.T) {
 	if err := s.AddRuns([]Run{hubRun("o/a", "prs", 1), hubRun("o/a", "issues", 2), hubRun("o/a", "issues", 1), hubRun("o/a", "issues", 3)}); err != nil {
 		t.Fatal(err)
 	}
-	if got := hubIDs(t, s, 100); got != "issues:1,issues:2,issues:3,prs:1" {
-		t.Errorf("pending = %s, want every run ordered by workflow and id", got)
+	if got := hubIDs(t, s, 100); got != "issues:1,prs:1,issues:2,issues:3" {
+		t.Errorf("pending = %s, want the workflows taking turns in id order", got)
 	}
-	if got := hubIDs(t, s, 2); got != "issues:1,issues:2" {
-		t.Errorf("limited = %s, want the oldest two of the first workflow", got)
+	if got := hubIDs(t, s, 2); got != "issues:1,prs:1" {
+		t.Errorf("limited = %s, want the oldest run of each workflow", got)
 	}
 	if err := s.SetHubCursor("o/a", "issues", 2); err != nil {
 		t.Fatal(err)

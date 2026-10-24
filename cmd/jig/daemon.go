@@ -41,8 +41,8 @@ import (
 )
 
 const (
-	defaultIdleTimeout      = 15 * time.Minute
-	defaultFallbackInterval = 5 * time.Minute
+	defaultIdleTimeout      = machine.DefaultIdleTimeout
+	defaultFallbackInterval = machine.DefaultFallbackInterval
 	// fallbackWhileDown is the fallback search interval while the hub
 	// does not answer.
 	fallbackWhileDown = time.Minute
@@ -102,6 +102,9 @@ type daemon struct {
 
 	fallbackNow chan struct{}
 
+	// ctl makes pause and every start that checks it atomic.
+	ctl sync.Mutex
+
 	mu       sync.Mutex
 	etag     string
 	paused   bool
@@ -118,6 +121,15 @@ type daemon struct {
 	exitSeen map[string]time.Time
 	// sentStarted holds the ids of started events the hub accepted.
 	sentStarted map[string]bool
+	// applyWait counts reconcile ticks before a failed apply of a loop is
+	// tried again; applyBackoff is the next wait.
+	applyWait, applyBackoff map[string]int
+	// wakeAfter holds loops woken while their child was stopping; they
+	// start once it has exited.
+	wakeAfter map[string]bool
+	// gone are removed loops whose database the collector still reads
+	// once, so their last runs reach the hub.
+	gone map[string]source.Loop
 }
 
 // storedConfig is <stateDir>/config.json.
@@ -203,15 +215,6 @@ func daemonSecrets(st hubstate.State) []string {
 	return out
 }
 
-func redactSecrets(s string, secrets []string) string {
-	for _, v := range secrets {
-		if v != "" {
-			s = strings.ReplaceAll(s, v, "[redacted]")
-		}
-	}
-	return s
-}
-
 // redactWriter removes secrets from every write.
 type redactWriter struct {
 	w       io.Writer
@@ -219,41 +222,25 @@ type redactWriter struct {
 }
 
 func (r *redactWriter) Write(p []byte) (int, error) {
-	if _, err := io.WriteString(r.w, redactSecrets(string(p), r.secrets)); err != nil {
+	if _, err := io.WriteString(r.w, redactAll(string(p), r.secrets...)); err != nil {
 		return 0, err
 	}
 	return len(p), nil
 }
 
-// loadConnected reads connected.idle_timeout and
-// connected.fallback_interval from machine.yaml, with the defaults for a
-// missing file, key or unreadable value.
+// loadConnected returns the connected settings from machine.yaml, or the
+// defaults when the file cannot be loaded.
 func loadConnected() (idle, fallback time.Duration) {
 	idle, fallback = defaultIdleTimeout, defaultFallbackInterval
 	path, err := machine.DefaultPath()
 	if err != nil {
 		return
 	}
-	raw, err := os.ReadFile(path)
+	cfg, err := machine.Load(path)
 	if err != nil {
 		return
 	}
-	var f struct {
-		Connected struct {
-			IdleTimeout      string `yaml:"idle_timeout"`
-			FallbackInterval string `yaml:"fallback_interval"`
-		} `yaml:"connected"`
-	}
-	if yaml.Unmarshal(raw, &f) != nil {
-		return
-	}
-	if v, err := time.ParseDuration(f.Connected.IdleTimeout); err == nil && v > 0 {
-		idle = v
-	}
-	if v, err := time.ParseDuration(f.Connected.FallbackInterval); err == nil && v > 0 {
-		fallback = v
-	}
-	return
+	return cfg.Connected.Idle(), cfg.Connected.Fallback()
 }
 
 // engineValidate checks a staged workflow with `sortie validate`, in the
@@ -297,13 +284,16 @@ func newDaemon(opt daemonOptions) (*daemon, error) {
 	d := &daemon{
 		opt:         opt,
 		log:         log.New(&redactWriter{w: opt.logw, secrets: secrets}, "", log.LstdFlags),
-		redact:      func(s string) string { return redactSecrets(s, secrets) },
+		redact:      func(s string) string { return redactAll(s, secrets...) },
 		gh:          map[string]*github.Client{},
 		fallbackNow: make(chan struct{}, 1),
 		pending:     map[string]source.Loop{},
 		retired:     map[string]bool{},
 		exitSeen:    map[string]time.Time{},
 		sentStarted: map[string]bool{},
+		applyWait:   map[string]int{}, applyBackoff: map[string]int{},
+		wakeAfter: map[string]bool{},
+		gone:      map[string]source.Loop{},
 	}
 	d.hub = &hubclient.Client{
 		URL: opt.hub.HubURL, DaemonID: opt.hub.DaemonID, Credential: opt.hub.Credential,
@@ -359,8 +349,10 @@ func (d *daemon) spawn(l source.Loop) *exec.Cmd {
 // runs and status. It returns the exit code.
 func (d *daemon) run(ctx context.Context) int {
 	defer d.store.Close()
+	defer d.guard()
 	d.log.Printf("jig daemon %s: hub %s, runner %s, idle %s, fallback every %s",
 		version, d.opt.hub.HubURL, d.opt.hub.RunnerLabel, d.opt.idle, d.opt.fallback)
+	d.killOrphans()
 	d.loadState()
 	d.loadStoredConfig()
 	ictx, cancel := context.WithTimeout(ctx, initialConfigWait)
@@ -372,6 +364,7 @@ func (d *daemon) run(ctx context.Context) int {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			defer d.guard()
 			f(ctx)
 		}()
 	}
@@ -393,6 +386,53 @@ func (d *daemon) run(ctx context.Context) int {
 	return 0
 }
 
+// guard is deferred by run and by every daemon goroutine. On a panic it
+// stops every loop child, then panics again, so a crash leaves no loop
+// running without its daemon.
+func (d *daemon) guard() {
+	if r := recover(); r != nil {
+		d.log.Printf("panic: %v; stopping every loop child", r)
+		d.sup.StopAll()
+		panic(r)
+	}
+}
+
+// goGuarded runs f on its own goroutine under guard.
+func (d *daemon) goGuarded(f func()) {
+	go func() {
+		defer d.guard()
+		f()
+	}()
+}
+
+const orphanGrace = 10 * time.Second
+
+// killOrphans stops the loop children a previous daemon left running. A
+// child's status document names its pid and root; a live process whose
+// command line is `... --no-dashboard <root>` gets SIGTERM, then SIGKILL
+// after a short grace, to its whole process group.
+func (d *daemon) killOrphans() {
+	files, _ := filepath.Glob(filepath.Join(d.opt.stateDir, statusDirName, "*.json"))
+	for _, f := range files {
+		var doc statusDoc
+		raw, err := os.ReadFile(f)
+		if err != nil || json.Unmarshal(raw, &doc) != nil || doc.PID <= 0 || doc.PID == os.Getpid() || !pidAlive(doc.PID) {
+			continue
+		}
+		out, err := exec.Command("ps", "-o", "args=", "-p", strconv.Itoa(doc.PID)).Output()
+		if err != nil || !strings.Contains(string(out), "--no-dashboard "+doc.Repo) {
+			continue
+		}
+		d.log.Printf("stopping loop child %d of a previous daemon (%s)", doc.PID, doc.Repo)
+		_ = syscall.Kill(-doc.PID, syscall.SIGTERM)
+		for deadline := time.Now().Add(orphanGrace); pidAlive(doc.PID) && time.Now().Before(deadline); {
+			time.Sleep(100 * time.Millisecond)
+		}
+		_ = syscall.Kill(-doc.PID, syscall.SIGKILL)
+		_ = os.Remove(f)
+	}
+}
+
 // --- state files
 
 func (d *daemon) path(name string) string { return filepath.Join(d.opt.stateDir, name) }
@@ -409,7 +449,7 @@ func writePrivate(path string, v any) error {
 	}
 	defer os.Remove(tmp.Name())
 	_, werr := tmp.Write(append(data, '\n'))
-	if err := firstErr(werr, tmp.Chmod(0o600), tmp.Close()); err != nil {
+	if err := firstErr(werr, tmp.Chmod(0o600), tmp.Sync(), tmp.Close()); err != nil {
 		return err
 	}
 	return os.Rename(tmp.Name(), path)
@@ -417,10 +457,14 @@ func writePrivate(path string, v any) error {
 
 func (d *daemon) loadState() {
 	var s daemonState
-	if raw, err := os.ReadFile(d.path("state.json")); err == nil {
-		if err := json.Unmarshal(raw, &s); err != nil {
-			d.log.Printf("state.json: %v", err)
-		}
+	raw, err := os.ReadFile(d.path("state.json"))
+	if err == nil {
+		err = json.Unmarshal(raw, &s)
+	}
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		// A pause that cannot be read is kept: resume clears it.
+		s.Paused = true
+		d.setErr(fmt.Errorf("state.json is unreadable, starting paused: %w", err))
 	}
 	d.mu.Lock()
 	d.paused = s.Paused
@@ -458,10 +502,11 @@ func (d *daemon) loadStoredConfig() {
 		d.setErr(fmt.Errorf("stored config: %w", err))
 		return
 	}
-	d.mu.Lock()
-	d.etag = sc.ETag
-	d.mu.Unlock()
-	d.applyConfig(sc.Config)
+	if d.applyConfig(sc.Config) {
+		d.mu.Lock()
+		d.etag = sc.ETag
+		d.mu.Unlock()
+	}
 }
 
 // setErr records the latest error for the status and logs it.
@@ -495,11 +540,14 @@ func (d *daemon) fetchConfig(ctx context.Context) {
 		d.setErr(fmt.Errorf("store config: %w", err))
 		return
 	}
-	d.mu.Lock()
-	d.etag = newTag
-	d.mu.Unlock()
 	d.log.Printf("config %s fetched: %d projects", newTag, len(cfg.Projects))
-	d.applyConfig(*cfg)
+	// The ETag is kept only for a config that was taken in, so the next
+	// heartbeat fetches a refused one again.
+	if d.applyConfig(*cfg) {
+		d.mu.Lock()
+		d.etag = newTag
+		d.mu.Unlock()
+	}
 }
 
 // hubFailed handles a failed hub request and returns how long to wait
@@ -615,12 +663,13 @@ func (d *daemon) commandLoop(ctx context.Context) {
 
 // applyConfig hands cfg to the hub source and brings the supervisor in
 // line: new loops are added, changed ones wait for idle, removed ones
-// drain.
-func (d *daemon) applyConfig(cfg hubproto.ConfigResponse) {
+// drain. It reports false when the config could not be taken in; the
+// loops then keep running as they are.
+func (d *daemon) applyConfig(cfg hubproto.ConfigResponse) bool {
 	rep, err := d.src.Sync(cfg)
 	if err != nil {
 		d.setErr(err)
-		return
+		return false
 	}
 	for _, inv := range rep.Invalid {
 		d.setErr(inv)
@@ -628,6 +677,7 @@ func (d *daemon) applyConfig(cfg hubproto.ConfigResponse) {
 	loops, err := d.src.Loops(context.Background())
 	if err != nil {
 		d.setErr(err)
+		return false
 	}
 	want := map[string]bool{}
 	for _, l := range loops {
@@ -639,6 +689,9 @@ func (d *daemon) applyConfig(cfg hubproto.ConfigResponse) {
 	for k := range want {
 		delete(d.retired, k)
 	}
+	// Sync dropped every staged set it did not report pending, such as
+	// one a reverted config no longer needs.
+	d.pending = map[string]source.Loop{}
 	for _, l := range rep.Pending {
 		d.pending[supervise.Key(l.Project, l.Workflow)] = l
 	}
@@ -655,6 +708,7 @@ func (d *daemon) applyConfig(cfg hubproto.ConfigResponse) {
 		d.log.Printf("%s: not in the config any more; draining", k)
 		_ = d.sup.StopWhenIdle(k)
 	}
+	return true
 }
 
 func (d *daemon) reconcileLoop(ctx context.Context) {
@@ -686,11 +740,30 @@ func (d *daemon) reconcile() {
 		if d.sup.Running(k) {
 			continue
 		}
+		l, _ := d.loop(k)
 		d.sup.Remove(k)
 		d.mu.Lock()
 		delete(d.retired, k)
+		d.gone[k] = l
 		d.mu.Unlock()
 		d.log.Printf("%s: stopped and removed; its root is kept", k)
+	}
+	d.mu.Lock()
+	var woken []string
+	for k := range d.wakeAfter {
+		woken = append(woken, k)
+	}
+	d.mu.Unlock()
+	for _, k := range woken {
+		if d.sup.Running(k) {
+			continue
+		}
+		d.mu.Lock()
+		delete(d.wakeAfter, k)
+		d.mu.Unlock()
+		if err := d.wake(k); err != nil {
+			d.setErr(fmt.Errorf("%s: %w", k, err))
+		}
 	}
 	for _, c := range d.sup.Snapshot() {
 		if !c.Exited {
@@ -723,11 +796,29 @@ func (d *daemon) applyIdle(l source.Loop) {
 		}
 	}
 	d.mu.Lock()
-	delete(d.pending, k)
+	wait := d.applyWait[k] > 0
+	if wait {
+		d.applyWait[k]--
+	}
 	d.mu.Unlock()
+	if wait {
+		return
+	}
 	applied, err := d.src.Apply(l)
+	d.mu.Lock()
 	if err != nil {
-		d.setErr(err)
+		b := min(max(2*d.applyBackoff[k], 1), maxApplyBackoff)
+		d.applyBackoff[k], d.applyWait[k] = b, b
+	} else {
+		if d.pending[k].Hash == l.Hash {
+			delete(d.pending, k)
+		}
+		delete(d.applyBackoff, k)
+		delete(d.applyWait, k)
+	}
+	d.mu.Unlock()
+	if err != nil {
+		d.setErr(fmt.Errorf("%s: apply: %w", k, err))
 		return
 	}
 	d.sup.Update(applied)
@@ -740,6 +831,10 @@ func (d *daemon) applyIdle(l source.Loop) {
 		_ = d.sup.RecycleWhenIdle(k)
 	}
 }
+
+// maxApplyBackoff is the longest wait, in reconcile ticks, before a
+// failed apply is tried again.
+const maxApplyBackoff = int(5 * time.Minute / reconcileEvery)
 
 func shortHash(h string) string {
 	if len(h) > 12 {
@@ -774,17 +869,27 @@ func childQuiet(root string) (idle, known bool) {
 }
 
 // wake starts the loop's child, or wakes it when it sleeps.
+//
+// The pause check and the start hold ctl, which pause also holds, so no
+// loop starts after a pause has drained the loops. A loop whose child is
+// stopping starts again once the child has exited.
 func (d *daemon) wake(k string) error {
-	if d.sup.Running(k) {
-		var root string
-		for _, c := range d.sup.Snapshot() {
-			if c.Key == k {
-				root = c.Loop.Root
-			}
-		}
-		if childSleeping(root) {
+	d.ctl.Lock()
+	defer d.ctl.Unlock()
+	if d.isPaused() {
+		return errPaused
+	}
+	c := d.child(k)
+	if c.PID != 0 {
+		switch {
+		case c.Stopping:
+			d.mu.Lock()
+			d.wakeAfter[k] = true
+			d.mu.Unlock()
+			d.log.Printf("%s: starts again once its child has stopped", k)
+		case childSleeping(c.Loop.Root):
 			d.log.Printf("%s: waking", k)
-			return requestWake(root)
+			return requestWake(c.Loop.Root)
 		}
 		return nil
 	}
@@ -828,7 +933,12 @@ func (d *daemon) handle(ctx context.Context, cmd hubproto.Command) *hubproto.Ack
 	}
 	switch cmd.Type {
 	case hubproto.CmdPause:
+		d.ctl.Lock()
+		defer d.ctl.Unlock()
 		d.setPaused(true)
+		d.mu.Lock()
+		d.wakeAfter = map[string]bool{}
+		d.mu.Unlock()
 		d.log.Printf("paused: every loop drains")
 		for _, k := range d.sup.Keys() {
 			_ = d.sup.StopWhenIdle(k)
@@ -840,7 +950,7 @@ func (d *daemon) handle(ctx context.Context, cmd hubproto.Command) *hubproto.Ack
 		d.nudgeFallback()
 		return nil
 	case hubproto.CmdReloadConfig:
-		go d.fetchConfig(ctx)
+		d.goGuarded(func() { d.fetchConfig(ctx) })
 		return nil
 	}
 	args, err := cmd.LoopArgs()
@@ -853,9 +963,6 @@ func (d *daemon) handle(ctx context.Context, cmd hubproto.Command) *hubproto.Ack
 	}
 	switch cmd.Type {
 	case hubproto.CmdStart, hubproto.CmdWake:
-		if d.isPaused() {
-			return fail(hubproto.AckFailed, "the daemon is paused")
-		}
 		for _, k := range keys {
 			if err := d.wake(k); err != nil {
 				return fail(hubproto.AckFailed, err.Error())
@@ -863,7 +970,7 @@ func (d *daemon) handle(ctx context.Context, cmd hubproto.Command) *hubproto.Ack
 		}
 	case hubproto.CmdStop:
 		for _, k := range keys {
-			go func() { _ = d.sup.Stop(k) }()
+			d.goGuarded(func() { _ = d.sup.Stop(k) })
 		}
 	case hubproto.CmdDrain:
 		for _, k := range keys {
@@ -938,6 +1045,17 @@ func readLoopMeta(l source.Loop) loopMeta {
 	return m
 }
 
+var errPaused = errors.New("the daemon is paused")
+
+func (d *daemon) child(k string) supervise.Child {
+	for _, c := range d.sup.Snapshot() {
+		if c.Key == k {
+			return c
+		}
+	}
+	return supervise.Child{}
+}
+
 func (d *daemon) loop(k string) (source.Loop, bool) {
 	for _, c := range d.sup.Snapshot() {
 		if c.Key == k {
@@ -961,11 +1079,23 @@ func (d *daemon) workflowKind(project, workflow string) string {
 
 // discover lists the workflow database of every loop, so runs of a loop
 // that is not running are still copied.
+// A removed loop is listed in one more pass, so the runs it finished
+// before it stopped are copied and reach the hub.
 func (d *daemon) discover() []rollup.Loop {
-	var out []rollup.Loop
+	loops := []source.Loop{}
 	for _, c := range d.sup.Snapshot() {
-		for _, l := range loopsrc.Discover(map[string]string{c.Loop.Project: c.Loop.Root}) {
-			if l.Loop == c.Loop.Workflow {
+		loops = append(loops, c.Loop)
+	}
+	d.mu.Lock()
+	for _, l := range d.gone {
+		loops = append(loops, l)
+	}
+	d.gone = map[string]source.Loop{}
+	d.mu.Unlock()
+	var out []rollup.Loop
+	for _, c := range loops {
+		for _, l := range loopsrc.Discover(map[string]string{c.Project: c.Root}) {
+			if l.Loop == c.Workflow {
 				out = append(out, l)
 			}
 		}
@@ -1155,8 +1285,8 @@ func (d *daemon) postRuns(ctx context.Context) {
 }
 
 // advanceCursors moves each workflow's cursor over the leading runs that
-// done reports, and stops at the first one it does not. runs are ordered
-// by project, workflow and run id.
+// done reports, and stops at the first one it does not. Within a
+// workflow, runs are in run id order.
 func (d *daemon) advanceCursors(runs []store.Run, done func(int, store.Run) bool) bool {
 	moved := false
 	blocked := map[string]bool{}
@@ -1228,6 +1358,18 @@ type engineRunning struct {
 // now that the hub has not accepted yet.
 func (d *daemon) startedEvents() []hubproto.RunEvent {
 	var out []hubproto.RunEvent
+	live := map[string]bool{}
+	// Ids of items no longer running are dropped, so the set stays as
+	// small as the work in flight.
+	defer func() {
+		d.mu.Lock()
+		for id := range d.sentStarted {
+			if !live[id] {
+				delete(d.sentStarted, id)
+			}
+		}
+		d.mu.Unlock()
+	}()
 	for _, c := range d.sup.Snapshot() {
 		if c.PID == 0 {
 			continue
@@ -1260,6 +1402,7 @@ func (d *daemon) startedEvents() []hubproto.RunEvent {
 					attempt = *r.Attempt
 				}
 				evID := fmt.Sprintf("start:%s:%s:%d:%d:%d", c.Loop.Project, c.Loop.Workflow, n, attempt, started.Unix())
+				live[evID] = true
 				d.mu.Lock()
 				sent := d.sentStarted[evID]
 				d.mu.Unlock()
