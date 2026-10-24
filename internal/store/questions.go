@@ -1,9 +1,7 @@
 package store
 
 import (
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"strings"
 )
 
@@ -108,18 +106,15 @@ func (s *Store) ReplaceQuestions(item QuestionItem, qs []Question) error {
 	}
 	defer tx.Rollback()
 	first := ""
-	if err := tx.QueryRow(`SELECT first_labels FROM question_items WHERE project = ? AND number = ?`,
-		item.Project, item.Number).Scan(&first); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	if first == "" && len(qs) > 0 {
+	if len(qs) > 0 {
 		first = jsonList(item.Labels)
 	}
 	if _, err := tx.Exec(`INSERT INTO question_items (`+questionItemColumns+`)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT (project, number) DO UPDATE SET
 		is_pr=excluded.is_pr, title=excluded.title, url=excluded.url, labels=excluded.labels,
-		assignees=excluded.assignees, first_labels=excluded.first_labels,
+		assignees=excluded.assignees,
+		first_labels=CASE WHEN question_items.first_labels = '' THEN excluded.first_labels ELSE question_items.first_labels END,
 		issue_etag=excluded.issue_etag, comments_etag=excluded.comments_etag,
 		scanned_at=excluded.scanned_at, problems=excluded.problems`,
 		item.Project, item.Number, boolInt(item.IsPR), item.Title, item.URL,
@@ -130,7 +125,7 @@ func (s *Store) ReplaceQuestions(item QuestionItem, qs []Question) error {
 	if _, err := tx.Exec(`DELETE FROM questions WHERE project = ? AND number = ?`, item.Project, item.Number); err != nil {
 		return err
 	}
-	for _, q := range qs {
+	for _, q := range lastPerQID(qs) {
 		if _, err := tx.Exec(`INSERT INTO questions (project, number, qid, audience, blocking, resume, question,
 			suggested, asked_comment_url, asked_at, asked_count, answer, answered_by, answer_comment_url, answered_at, ignored_answers)
 			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -141,6 +136,22 @@ func (s *Store) ReplaceQuestions(item QuestionItem, qs []Question) error {
 		}
 	}
 	return tx.Commit()
+}
+
+// lastPerQID drops all but the last question of each qid, keeping the
+// position of the first.
+func lastPerQID(qs []Question) []Question {
+	idx := map[string]int{}
+	var out []Question
+	for _, q := range qs {
+		if i, ok := idx[q.QID]; ok {
+			out[i] = q
+			continue
+		}
+		idx[q.QID] = len(out)
+		out = append(out, q)
+	}
+	return out
 }
 
 // QuestionItem returns one item with its problems.

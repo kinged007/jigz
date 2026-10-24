@@ -200,3 +200,32 @@ func TestPreviousVersionMigratesToQuestionTables(t *testing.T) {
 		t.Errorf("questions = %v, want %v", qids(t, s, QuestionFilter{}), want)
 	}
 }
+
+func TestReplaceQuestionsKeepsFirstLabelsAndLastDuplicateQID(t *testing.T) {
+	s := open(t)
+	if err := s.ReplaceQuestions(qitem(4, "a"), nil); err != nil {
+		t.Fatal(err)
+	}
+	dup := question("q1")
+	dup.Question = "second"
+	if err := s.ReplaceQuestions(qitem(4, "b"), []Question{question("q1"), question("q2"), dup}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReplaceQuestions(qitem(4, "c"), []Question{question("q1")}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.QuestionItem("o/a", 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameStrings(got.FirstLabels, []string{"b"}) {
+		t.Errorf("first labels = %v, want [b]", got.FirstLabels)
+	}
+	if err := s.ReplaceQuestions(qitem(4, "c"), []Question{question("q1"), question("q2"), dup}); err != nil {
+		t.Fatal(err)
+	}
+	qs, err := s.Questions(QuestionFilter{})
+	if err != nil || len(qs) != 2 || qs[0].Question != "second" {
+		t.Errorf("questions = %+v, %v; want q1 (second) and q2", qs, err)
+	}
+}

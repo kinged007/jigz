@@ -237,3 +237,29 @@ func TestUserIsCachedPerKey(t *testing.T) {
 		t.Errorf("User(q) = %q, %v, hits = %d", login, err, hits)
 	}
 }
+
+func TestWritesDoNotFollowRedirects(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		if r.URL.Path == "/moved" {
+			http.Redirect(w, r, "/new", http.StatusMovedPermanently)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	c := &Client{BaseURL: srv.URL}
+	_, err := c.Post(context.Background(), "p", "t", "/moved", []byte(`{}`))
+	var e *Error
+	if !errors.As(err, &e) || e.Status != http.StatusMovedPermanently {
+		t.Errorf("post err = %v, want 301", err)
+	}
+	err = c.Delete(context.Background(), "p", "t", "/moved")
+	if !errors.As(err, &e) || e.Status != http.StatusMovedPermanently {
+		t.Errorf("delete err = %v, want 301", err)
+	}
+	if hits != 2 {
+		t.Errorf("server hit %d times, want 2", hits)
+	}
+}

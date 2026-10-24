@@ -175,13 +175,18 @@ func TestLabelRequestSequence(t *testing.T) {
 	call(t, ts, "POST", "/repos/o/r/issues/1/labels", `{"labels":["agent:plan","needs-human"]}`)
 	call(t, ts, "PUT", "/repos/o/r/issues/1/labels", `{"labels":["agent:plan"]}`)
 	call(t, ts, "DELETE", "/repos/o/r/issues/2/labels/agent%3Adone", "")
+	s.Add(Item{Repo: "o/r", Title: "slash", Labels: []string{"a/b"}})
+	call(t, ts, "DELETE", "/repos/o/r/issues/3/labels/a%2Fb", "")
+	if got := s.LabelRequests("o/r", 3); len(got) != 1 || got[0].Path != "/repos/o/r/issues/3/labels/a%2Fb" || got[0].Status != 200 {
+		t.Errorf("slash label requests = %+v", got)
+	}
 
 	var got []string
 	for _, r := range s.LabelRequests("o/r", 1) {
 		got = append(got, r.Method+" "+r.Path+" "+r.Body)
 	}
 	want := []string{
-		"DELETE /repos/o/r/issues/1/labels/agent:done ",
+		"DELETE /repos/o/r/issues/1/labels/agent%3Adone ",
 		"POST /repos/o/r/issues/1/labels {\"labels\":[\"agent:plan\",\"needs-human\"]}",
 		"PUT /repos/o/r/issues/1/labels {\"labels\":[\"agent:plan\"]}",
 	}
@@ -422,6 +427,24 @@ func TestCommentsETag(t *testing.T) {
 	}
 	if h.Get("ETag") == tag {
 		t.Errorf("ETag did not change: %s", tag)
+	}
+}
+
+func TestCommentsETagIgnoresLabelChangesAndTracksPage(t *testing.T) {
+	s, ts := newServer(t)
+	s.Add(Item{Repo: "o/r", Title: "t", Labels: []string{"x"}})
+	_, _, h := call(t, ts, "GET", "/repos/o/r/issues/1/comments?per_page=1", "")
+	tag := h.Get("ETag")
+	call(t, ts, "POST", "/repos/o/r/issues/1/labels", `{"labels":["y"]}`)
+	if code, _, _ := call(t, ts, "GET", "/repos/o/r/issues/1/comments?per_page=1", "", "If-None-Match", tag); code != 304 {
+		t.Errorf("after label change: %d, want 304", code)
+	}
+	if code, _, _ := call(t, ts, "GET", "/repos/o/r/issues/1/comments?per_page=2", "", "If-None-Match", tag); code != 200 {
+		t.Errorf("other per_page: %d, want 200", code)
+	}
+	call(t, ts, "POST", "/repos/o/r/issues/1/comments", `{"body":"hi"}`)
+	if code, _, _ := call(t, ts, "GET", "/repos/o/r/issues/1/comments?per_page=1", "", "If-None-Match", tag); code != 200 {
+		t.Errorf("after comment: %d, want 200", code)
 	}
 }
 

@@ -169,6 +169,11 @@ func (c *Client) do(ctx context.Context, key, token, method, path string, body [
 	if hc == nil {
 		hc = &http.Client{Timeout: 20 * time.Second}
 	}
+	if method != http.MethodGet {
+		noRedirect := *hc
+		noRedirect.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		hc = &noRedirect
+	}
 	resp, err := hc.Do(req)
 	if err != nil {
 		return Response{}, fmt.Errorf("GitHub request failed: %w", urlError(err))

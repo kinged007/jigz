@@ -49,7 +49,8 @@ type Item struct {
 	Created   time.Time
 	Updated   time.Time
 
-	version int
+	version        int
+	commentVersion int
 }
 
 // LabelEvent is one label write the server accepted.
@@ -167,6 +168,7 @@ func (s *Server) AddComment(slug string, n int, c Comment) int64 {
 		c.Created = time.Now().UTC()
 	}
 	it.Comments = append(it.Comments, c)
+	it.commentVersion++
 	it.touch()
 	return c.ID
 }
@@ -311,7 +313,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.mux.ServeHTTP(rec, r)
 	}
 	s.mu.Lock()
-	s.requests = append(s.requests, Request{r.Method, r.URL.Path, r.URL.RawQuery, string(body), rec.status})
+	s.requests = append(s.requests, Request{r.Method, r.URL.EscapedPath(), r.URL.RawQuery, string(body), rec.status})
 	s.mu.Unlock()
 }
 
@@ -611,6 +613,11 @@ func (it *Item) touch() {
 	it.Updated = time.Now().UTC()
 }
 
+func commentsETag(it *Item, r *http.Request) string {
+	q := r.URL.Query()
+	return fmt.Sprintf(`"%x"`, sha1.Sum([]byte(fmt.Sprint(it.Number, it.commentVersion, q.Get("page"), q.Get("per_page")))))
+}
+
 func (s *Server) listComments(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -621,11 +628,12 @@ func (s *Server) listComments(w http.ResponseWriter, r *http.Request) {
 	if !s.checkParams(w, r, "per_page", "page") {
 		return
 	}
-	if r.Header.Get("If-None-Match") == etag(it) {
+	tag := commentsETag(it, r)
+	if r.Header.Get("If-None-Match") == tag {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-	w.Header().Set("ETag", etag(it))
+	w.Header().Set("ETag", tag)
 	out := []map[string]any{}
 	for _, c := range page(w, r, it.Comments) {
 		out = append(out, commentJSON(it, c))
@@ -673,6 +681,7 @@ func (s *Server) addComment(w http.ResponseWriter, r *http.Request) {
 	s.nextComm++
 	c := Comment{ID: s.nextComm, Author: s.user, Association: "OWNER", Body: body.Body, Created: time.Now().UTC()}
 	it.Comments = append(it.Comments, c)
+	it.commentVersion++
 	it.touch()
 	writeJSON(w, http.StatusCreated, commentJSON(it, c))
 }
