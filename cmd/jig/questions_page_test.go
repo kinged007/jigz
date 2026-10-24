@@ -102,3 +102,31 @@ func TestQuestionsPageEmpty(t *testing.T) {
 		t.Errorf("page lacks the empty state: %s", body)
 	}
 }
+
+func TestQuestionsPageAskedCount(t *testing.T) {
+	r := newQuestionsRig(t)
+	parkQuestion(t, r, question("q-1", "agent:plan"))
+	if body := getPage(t, r.a, "/questions"); strings.Contains(body, "times</span>") {
+		t.Error("a question asked once shows an asked count")
+	}
+	r2 := newQuestionsRig(t)
+	parkQuestion(t, r2, question("q-1", "agent:plan"), question("q-1", "agent:plan"))
+	if body := getPage(t, r2.a, "/questions"); !strings.Contains(body, "asked 2 times") {
+		t.Errorf("page lacks the asked count: %s", body)
+	}
+}
+
+func TestQuestionsPageAnswered(t *testing.T) {
+	r := newQuestionsRig(t)
+	// q-2 stays open and blocking, so the item keeps needs-human and is
+	// scanned again after the answer.
+	n := parkQuestion(t, r, question("q-1", "agent:plan"), question("q-2", "agent:plan"))
+	if body := getPage(t, r.a, "/questions"); strings.Contains(body, "Answer by") {
+		t.Error("an open question shows an answer")
+	}
+	location(t, r.post(t, "/questions/answer", answerForm(n, "q-1", "Green.", r.token(actAnswer, n))))
+	location(t, r.post(t, "/questions/refresh", nil))
+	if body := getPage(t, r.a, "/questions?state=answered"); !strings.Contains(body, "<b>Answer by bot:</b> Green.") {
+		t.Errorf("answered question lacks the answer and its author: %s", body)
+	}
+}

@@ -157,6 +157,11 @@ var questionPrompts = map[string][]string{
 	"docs.md":       {"agent:docs"},
 }
 
+// questionExample is the example block every questions section shows, with
+// its resume attribute replaced by R.
+const questionExample = "\n\n<!-- agent-question id=\"q-<short-id>\" audience=\"product|project\" blocking=\"true|false\" resume=\"R\" -->\n" +
+	"**Question:** ...\n**Suggested answer:** ...\n<!-- /agent-question -->\n\n"
+
 var resumeAttr = regexp.MustCompile(`resume="([A-Za-z0-9:_-]+)"`)
 
 // questionsSection is the text between the "## Questions" heading and the next
@@ -184,7 +189,8 @@ func TestPromptQuestionSection(t *testing.T) {
 			t.Errorf("%s: no ## Questions heading", name)
 			continue
 		}
-		for _, s := range []string{"<!-- agent-question", `resume="agent:`, "--add-label needs-human", "--comments"} {
+		for _, s := range []string{"<!-- agent-question", `resume="agent:`, "--add-label needs-human", "--comments",
+			`echo "blocked" > .sortie/status`, "Do not wrap the block in a code fence"} {
 			if !strings.Contains(section, s) {
 				t.Errorf("%s: questions section lacks %q", name, s)
 			}
@@ -199,6 +205,12 @@ func TestPromptQuestionSection(t *testing.T) {
 			if !strings.Contains(section, label) {
 				t.Errorf("%s: questions section does not name %q", name, label)
 			}
+		}
+		if strings.Contains(section, "```") {
+			t.Errorf("%s: questions section has a code fence", name)
+		}
+		if got := resumeAttr.ReplaceAllString(section, `resume="R"`); !strings.Contains(got, questionExample) {
+			t.Errorf("%s: questions section lacks the shared example block %q", name, questionExample)
 		}
 		for _, m := range resumeAttr.FindAllStringSubmatch(section, -1) {
 			if !slices.Contains(want, m[1]) {

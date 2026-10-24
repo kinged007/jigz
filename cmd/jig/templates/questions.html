@@ -62,10 +62,12 @@
     {{if $q.Blocking}}<span class="chip s-warn">blocking</span>{{else}}<span class="chip">non-blocking</span>{{end}}
     {{if $q.AnsweredAt}}<span class="chip s-succeeded">answered</span>{{end}}
     {{if $q.AskedAt}}<span class="muted" title="{{$q.AskedAt}}">asked {{since $q.AskedAt}} ago</span>{{end}}
+    {{if gt $q.AskedCount 1}}<span class="muted">asked {{$q.AskedCount}} times</span>{{end}}
     {{with $q.AskedCommentURL}}<a href="{{.}}">comment</a>{{end}}
   </p>
   <p>{{$q.Question.Question}}</p>
   {{with $q.Suggested}}<p><b>Suggested answer:</b> <span id="sug-{{$i}}">{{.}}</span></p>{{end}}
+  {{if $q.AnsweredAt}}<p><b>Answer by {{$q.AnsweredBy}}:</b> {{$q.Answer}}</p>{{end}}
   {{range $q.IgnoredAnswers}}<p class="muted">ignored: {{.Author}}</p>{{end}}
   <form method="post" action="/questions/answer">
     <input type="hidden" name="project" value="{{$q.Project}}">

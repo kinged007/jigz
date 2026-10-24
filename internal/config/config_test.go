@@ -422,3 +422,32 @@ func TestGitHubBlockInvalid(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadTokenHasNoSideEffects(t *testing.T) {
+	t.Setenv("JIG_TOKEN", "")
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".jigz"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".jigz", "config.yaml"), []byte("token: filetok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// No repo: and no git checkout, so Load would fail on detectRepo.
+	if tok, err := LoadToken(dir); err != nil || tok != "filetok" {
+		t.Errorf("LoadToken = %q, %v; want filetok", tok, err)
+	}
+	t.Setenv("JIG_TOKEN", "jigtok")
+	if tok, _ := LoadToken(dir); tok != "jigtok" {
+		t.Errorf("LoadToken = %q, want JIG_TOKEN first", tok)
+	}
+	old := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(old, ".sortie"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadToken(old); err == nil {
+		t.Error("LoadToken read a config from a dir without .jigz/config.yaml")
+	}
+	if _, err := os.Stat(filepath.Join(old, ".sortie")); err != nil {
+		t.Errorf("LoadToken moved .sortie: %v", err)
+	}
+}

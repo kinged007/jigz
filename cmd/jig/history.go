@@ -152,12 +152,12 @@ func (a *app) githubTargets() []collector.Target {
 
 // projectTarget resolves a project's token the way its loops do (JIG_TOKEN,
 // then token: in .jigz/config.yaml, then GITHUB_TOKEN and GH_TOKEN), and
-// falls back to the environment alone when the config cannot be loaded.
+// falls back to the environment alone when the config cannot be read.
 func projectTarget(r fleetconfig.Resolved) collector.Target {
 	t := collector.Target{Project: r.Repo.Repo, Token: r.Token(), TokenEnv: r.TokenEnv}
 	if r.TokenEnv == "" && r.Dir != "" {
-		if cfg, err := config.Load(r.Dir); err == nil && cfg.Token != "" {
-			t.Token = cfg.Token
+		if tok, err := config.LoadToken(r.Dir); err == nil && tok != "" {
+			t.Token = tok
 		}
 	}
 	return t

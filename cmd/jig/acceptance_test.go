@@ -26,6 +26,7 @@ import (
 	"gopkg.in/yaml.v3"
 	_ "modernc.org/sqlite"
 
+	"github.com/kinged007/jigz/internal/collector"
 	"github.com/kinged007/jigz/internal/config"
 	"github.com/kinged007/jigz/internal/engine"
 	"github.com/kinged007/jigz/internal/fakegithub"
@@ -254,7 +255,7 @@ func TestAcceptance(t *testing.T) {
 			for _, r := range gh.Requests() {
 				// The dashboard's question scanner reads the comments of
 				// needs-human items; the engine never does.
-				if r.Method == http.MethodGet && strings.HasSuffix(r.Path, "/comments") {
+				if n == needsHuman && r.Method == http.MethodGet && strings.HasSuffix(r.Path, "/comments") {
 					continue
 				}
 				if strings.HasPrefix(r.Path, fmt.Sprintf("/repos/%s/issues/%d", slug, n)) {
@@ -1130,13 +1131,20 @@ func labelLog(gh *fakegithub.Server, slug string, n int) []string {
 	return out
 }
 
+// searchQueries lists the engine's search queries. The dashboard's question
+// scanner also searches, for label:needs-human; those are left out.
 func searchQueries(gh *fakegithub.Server) []string {
 	var out []string
 	for _, r := range gh.Requests() {
-		if r.Path == "/search/issues" {
-			v, _ := url.ParseQuery(r.Query)
-			out = append(out, v.Get("q"))
+		if r.Path != "/search/issues" {
+			continue
 		}
+		v, _ := url.ParseQuery(r.Query)
+		q := v.Get("q")
+		if slices.Contains(strings.Fields(q), "label:"+collector.NeedsHuman) {
+			continue
+		}
+		out = append(out, q)
 	}
 	return out
 }

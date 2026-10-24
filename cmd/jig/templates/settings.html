@@ -25,7 +25,7 @@
       {{range .Statuses}}<tr><td>{{.Name}}</td><td>{{.Value}}</td></tr>{{end}}
     </tbody></table>
     <ul class="muted">
-      <li>Off by default. When on, Jigz reads pull requests from GitHub with each project's own token (<code>token_env</code>) to fill branch, PR link and opened and merged times. It never writes to GitHub.</li>
+      <li>Off by default. When on, Jigz reads pull requests from GitHub with each project's own token (<code>token_env</code>) to fill branch, PR link and opened and merged times. It writes to GitHub only from the Questions page, when you answer a question or remove labels there: it posts the answer comment and changes the item's labels.</li>
       <li>Commits and checks is off by default. When on (and enrichment is on), Jigz also reads the commits, changed files and check runs of each pull request, with up to two more requests per pull request.</li>
     </ul>
   </div>

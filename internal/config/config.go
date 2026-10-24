@@ -412,6 +412,27 @@ func Load(dir string) (*Config, error) {
 	return c, nil
 }
 
+// LoadToken returns the token Load would take from JIG_TOKEN or the token:
+// key of dir's .jigz/config.yaml, "" when neither is set. Unlike Load it
+// does not migrate directories or run git, so the dashboard can call it on
+// every pass.
+func LoadToken(dir string) (string, error) {
+	raw, err := os.ReadFile(filepath.Join(dir, ".jigz", "config.yaml"))
+	if err != nil {
+		return "", fmt.Errorf("read config: %w", err)
+	}
+	var file struct {
+		Token string `yaml:"token"`
+	}
+	if err := yaml.Unmarshal(raw, &file); err != nil {
+		return "", fmt.Errorf("parse .jigz/config.yaml: %w", err)
+	}
+	if v := os.Getenv("JIG_TOKEN"); v != "" {
+		return v, nil
+	}
+	return file.Token, nil
+}
+
 // LoadGitHub reads only the github block of dir's .jigz/config.yaml. It is
 // the cheap read the dashboard repeats so a config edit applies without a
 // restart.

@@ -99,26 +99,27 @@ the issue comment instead: what you found, what is blocking, what you need.
 
 ## Questions
 
-Ask a question when a decision needs a person's answer and you cannot reasonably choose. Put one block per question in the comment you post:
+Ask a question when a decision needs a person's answer and you cannot reasonably choose. Put one block per question in the comment you post, as plain text in this form:
 
-```
 <!-- agent-question id="q-<short-id>" audience="product|project" blocking="true|false" resume="agent:plan" -->
 **Question:** ...
 **Suggested answer:** ...
 <!-- /agent-question -->
-```
+
+Do not wrap the block in a code fence: the parser ignores markers inside a fence.
 
 - `id` is `q-` plus a short unique id of letters, digits, `_` or `-`.
 - `audience` is `product` (scope, priority, user-facing behaviour) or `project` (technical approach, implementation, order of work).
 - `resume` is always the dispatch label, one of the labels {{ .issue.labels }}: `agent:plan` or `agent:plan-build` — write whichever of the two appears there. It is the label that returns the issue to dispatch after the answer.
-- `blocking="true"`: you cannot continue without the answer. Add the label `needs-human` with `gh issue edit {{ .issue.identifier }} --repo $SORTIE_TRACKER_PROJECT --add-label needs-human` and end your turn. Do not add `agent:done` yourself and do not rely on your trigger label staying on the issue: the engine hands the issue off, and the answer returns it to dispatch through `resume`.
+- `blocking="true"`: you cannot continue without the answer. Add the label `needs-human` with `gh issue edit {{ .issue.identifier }} --repo $SORTIE_TRACKER_PROJECT --add-label needs-human`, write `blocked` to the status file with `mkdir -p .sortie && echo "blocked" > .sortie/status`, and end your turn. Do not add `agent:done` yourself and do not rely on your trigger label staying on the issue: the engine hands the issue off, and the answer returns it to dispatch through `resume`. Skip "Finishing the run": none of its label changes apply, and removing `agent:plan-build` would advance the plan-build chain.
 - `blocking="false"`: continue with your suggested answer and record the assumption in your comment.
 
 Before you act, read every comment on the issue with `gh issue view {{ .issue.identifier }} --repo $SORTIE_TRACKER_PROJECT --comments`. Apply each `<!-- agent-answer id="q-..." -->` block to the question with the same id. Treat an unanswered non-blocking question as answered with its suggestion.
 
 ## Finishing the run
 
-You own the labels: remove your trigger and the claim, then mark the
+After a blocking question, skip this section (see Questions). Otherwise
+you own the labels: remove your trigger and the claim, then mark the
 state. If the issue carries `agent:plan-build`, do not add `agent:done` —
 the stage chain will advance via `stage-build`. Otherwise finish with
 `agent:done`. Add `needs-human` in the same command when a person has to
