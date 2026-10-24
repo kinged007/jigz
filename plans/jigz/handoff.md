@@ -1,8 +1,8 @@
 # Jigz: handoff
 
 Status: 2026-10-24, Phase 3 (Questions) is merged into `main` (PR #22,
-commit `d940a08`). Phase 4 (Connected mode) is planned and not started;
-the release is not requested. Read this first in a new
+commit `d940a08`). Phase 4 (Connected mode) is implemented on branch
+`feat/connected-mode`; the PR is pending. No release is requested. Read this first in a new
 session working on Jigz. The hub is a separate stream; its plans are in
 `plans/hub/` and it has no code yet.
 
@@ -16,7 +16,7 @@ release or release notes; releases are deferred until the user asks. The
 rename to Jigz is done, including the repo directory `.sortie/` to
 `.jigz/`. CI runs the acceptance test. Phase 3 (Questions) is merged into `main`; its plan is
 `plans/jigz/questions.md`. Phase 4 plan: `plans/jigz/connected-mode.md`,
-approved by delegation.
+approved by delegation; implemented on `feat/connected-mode`.
 
 Read, in order:
 
@@ -241,12 +241,19 @@ Outside this repository:
 
 ## 6. Outstanding work
 
-1. Phase 4 (Connected mode) is not started. Work packages WP0 to WP10
-   are in `plans/jigz/connected-mode.md` section 3. WP0 (protocol and
-   schemas) and WP8 (prompts) can start first.
+1. Phase 4 (Connected mode): work packages WP0 to WP10 of
+   `plans/jigz/connected-mode.md` are implemented on `feat/connected-mode`.
+   Open the PR after the user approves it. The hub repository side is not
+   built.
 2. Remove the worktrees under `/home/coder/sortie-loop-wt/`.
 3. Phase 1 and Phase 2 releases and release notes: deferred; only when
    the user asks.
+4. Phase 5 (previews) and Phase 6 (agent sessions, `task.run`).
+5. User decisions pending:
+   - Approval for `github.com/coder/websocket` as a replacement for
+     `internal/wsclient`.
+   - Whether top-level config keys are validated strictly.
+   - Issue #20.
 
 Issue #20 (trust only comments from authorized authors) is open: the
 scanner filters authors (`internal/collector/questions.go`), the prompts
@@ -334,9 +341,9 @@ dashboard, because an earlier instance used 7677 with engine children on
 7679 and 7680. Tests isolate `HOME` and `XDG_*` to temporary directories;
 keep doing that.
 
-Installed binaries: `~/.local/bin/jig` is a local build from 2026-10-23
-and is older than `main`. There is no `make install` target; build it with
-`go build -o ~/.local/bin/jig ./cmd/jig`. `~/.local/bin/sortie-loop` is
+Installed binaries: `~/.local/bin/jig` is built from branch
+`feat/questions` at its merge. There is no `make install` target; build it
+with `go build -o ~/.local/bin/jig ./cmd/jig`. `~/.local/bin/sortie-loop` is
 the binary from before the rename.
 
 ## 8. Lessons for routing work
@@ -382,7 +389,11 @@ the binary from before the rename.
   Keep it for security-relevant code.
 - Parallel workers in worktrees with disjoint files, merged by
   cherry-pick, had no conflicts.
+- The `claude` relay shell is unusable in this container because
+  bubblewrap cannot create a network namespace. Use subagents for work
+  that runs commands.
 
 ## 9. Next action
 
-1. Phase 4, WP0 and WP8 of `plans/jigz/connected-mode.md`.
+1. Open the Phase 4 PR from `feat/connected-mode` when the user asks, then
+   start the hub repository side or Phase 5.

@@ -318,6 +318,16 @@ error)`, `Statuses()`, `Runs()`, `Enrollments()`, `Connected()`,
 - No agent credentials, `machine.yaml` env values or tokens go to the
   hub; pool entries are reported by name and runtime.
 - Phase 6 commands are rejected, so a hub cannot start a session.
+- Accepted risks:
+  - The fallback search sends the tracker token to the API base of the
+    served issues workflow (`tracker.endpoint`), so a hub that serves a
+    workflow with another endpoint receives the token. This is within the
+    trust given to hub-served files.
+  - `filter_additions` can widen the filter to other repositories. The
+    runner label stays ANDed to every filter, so only items that carry it
+    are picked up.
+  - The daemon starts paused when `state.json` is unreadable, and reports
+    the error, until a `resume`.
 
 ## 3. Work packages
 
@@ -393,8 +403,9 @@ engine, `mock` agent, set up as `TestAcceptance` (temporary `HOME` and
 XDG directories, `JIG_ENGINE_BIN`, fake GitHub `acme/widgets` with token
 owner `octo`) plus a fake hub. Hub config: project `acme/widgets`, the
 issues workflow passed through `acceptanceWorkflow`, runner label
-`runner:ci-1`, member `octo`. `machine.yaml`: idle time 30 s, fallback
-interval 20 s.
+`runner:ci-1`, member `octo`. `machine.yaml`: idle time and fallback
+interval 1m, the minimum. The fake hub's heartbeat interval is 5 s. The
+engine process is located through the daemon's child processes.
 
 1. `jig join <fakehub-url> - --no-service`, enrollment token on stdin,
    `JIG_TOKEN` set. One enrollment recorded with OS, arch, CPU count,
@@ -406,19 +417,24 @@ interval 20 s.
    `octo`, no runner label), C (`agent:plan`, `octo`, `runner:other`).
 4. `Send(wake acme/widgets issues)` acks `ok`. A is handed off
    (`assertHandedOff`); every engine search contains
-   `label:runner:ci-1`; B and C get no label events.
+   `label:runner:ci-1`; B and C get no label events. Fallback searches
+   are told apart from engine searches by query shape
+   (`state:open label:runner:ci-1 repo:acme/widgets`).
 5. `POST runs` carries A's run: `succeeded`, 100 input and 50 output
    tokens, work item `acme/widgets#A`; no later batch repeats it.
-6. Within 90 s a heartbeat reports the loop `sleeping`; no engine process.
+6. Within 150 s (idle time 1m plus the child's 30 s idle poll) a
+   heartbeat reports the loop `sleeping`; no engine process.
 7. `SetDown(true)`; seed D (`agent:plan`, `octo`, `runner:ci-1`). Within
-   60 s a search `state:open label:runner:ci-1 repo:acme/widgets` runs,
-   the loop starts and D is handed off.
+   60 s a fallback search runs, the loop starts and D is handed off.
 8. `SetDown(false)`; `SetConfig` adds the filter addition
-   `-label:backlog`. After the next heartbeat the config is fetched; the
-   next engine search has `-label:backlog` and `label:runner:ci-1`; the
-   status shows the new workflow hash.
+   `-label:backlog` and a newline at the end of the workflow, so the
+   workflow hash changes. After the next heartbeat the daemon fetches the
+   config (seen in `jigd.log`); the status shows the new workflow hash;
+   after a `wake`, the next engine search has `-label:backlog` and
+   `label:runner:ci-1`.
 9. `pause`: the loop drains; seed E (`runner:ci-1`); no label event on E
-   over two fallback intervals. `resume`: E is handed off.
+   over two fallback intervals plus 5 s (2m05s). `resume`: E is handed
+   off.
 10. `Send(session.open ...)` acks `ok: false`, code `unsupported`. The
     daemon process has no listening socket.
 11. SIGTERM to the daemon: exit within 120 s, no child or engine left.

@@ -853,6 +853,123 @@ work between the window close and the moment it is stopped.
 Using a subscription account unattended can be restricted by the provider.
 Checking the provider's terms is your responsibility.
 
+## Connected mode
+
+A machine can be enrolled with a hub. The hub supplies the project
+config and sends commands. The machine runs the loops.
+
+```sh
+jig join https://hub.example.com <token>
+```
+
+Flags:
+
+- `--name <name>`: the runner name sent to the hub. Default: the host
+  name, cut to 40 characters.
+- `--no-service`: enroll without installing the service. Run `jig daemon`
+  yourself.
+- `--yes`: replace an existing enrollment without asking.
+
+A token of `-` is read from stdin, so it is not in the process list. The
+hub URL must be `https://`; `http://` is accepted only for `localhost`
+and loopback addresses.
+
+`join` needs a tracker token, taken from `JIG_TOKEN`, `GITHUB_TOKEN`,
+`GH_TOKEN`, or `gh auth token`, in that order. It checks the token with
+`GET /user` and sends the login to the hub. `JIG_GITHUB_API_URL` sets the
+API base for that check (default `https://api.github.com`). The
+enrollment token is used once and not stored.
+
+### What is stored
+
+| File | Contents |
+| ---- | -------- |
+| `~/.config/jigz/hub.json` | hub URL, daemon id, name, credential, runner label, tracker token. File mode 0600, directory 0700. `jig daemon` refuses to start when the file is readable by group or others. |
+| `~/.local/state/jigz/hub/config.json` | last config fetched from the hub and its ETag (0600) |
+| `~/.local/state/jigz/hub/state.json` | the pause flag (0600) |
+| `~/.local/state/jigz/hub/status.json` | the last status document sent (0600) |
+| `~/.local/state/jigz/jigd.log` | daemon log |
+| `~/.local/share/jigz/hub/loops/<owner>/<name>/<workflow>/` | one root per project and workflow: the files served by the hub, the loop's workspaces and its engine database |
+
+`machine.yaml`, `pool.json`, the agent CLIs and their logins stay on the
+machine. The hub receives their status (pool entry names and runtimes,
+working hours), not the credentials.
+
+### The service
+
+`join` installs and starts a user service that runs `jig daemon`.
+
+- Linux: systemd user unit `~/.config/systemd/user/jigd.service`. The
+  unit records the `PATH` of the shell that ran `join`, so the agent CLIs,
+  `gh` and `git` are found. A user service stops at logout unless
+  lingering is on; when it is off, `join` prints
+  `loginctl enable-linger <user>` and does not run it.
+- macOS: launchd agent `io.github.kinged007.jigd` in
+  `~/Library/LaunchAgents/`. It runs while the user is logged in.
+- Windows is not supported.
+
+`jig daemon` runs the daemon in the foreground and logs to `jigd.log`.
+SIGTERM stops every loop it started.
+
+`jig leave` removes the service and `hub.json`. The loop roots are kept.
+A daemon started by hand keeps running until you stop it.
+
+`jig status --json` with no repo root prints the daemon's status
+document while `hub.json` exists.
+
+### Settings
+
+In `machine.yaml`:
+
+```yaml
+connected:
+  idle_timeout: 15m       # a loop's engine stops after this long without work
+  fallback_interval: 5m   # how often the machine searches GitHub itself
+```
+
+Both are Go durations with a minimum of `1m`. The defaults are `15m` and
+`5m`.
+
+### How loops run
+
+- The daemon reads no repo config (`.jigz/config.yaml`), `jigz.yaml` or
+  the unite registry. The hub's config is the only source.
+- It starts one loop per project and workflow, only when there is work.
+  A loop stops its engine after `idle_timeout` without work.
+- The runner label (`runner:<name>`) is added to every loop's query
+  filter, so a loop picks up only items that carry it.
+- The `wake` command starts a loop. Every `fallback_interval`, and every
+  minute while the hub is unreachable, the daemon searches GitHub for
+  open items with the runner label and starts the loops that fit them.
+- A new config is applied to a loop when it is idle. An invalid workflow
+  is not applied and is reported as the loop's last error.
+- With the hub unreachable the daemon runs on the stored config. With no
+  stored config it runs no loops and retries.
+- When the hub rejects the credential, the loops are drained and the
+  daemon retries every 10 minutes.
+- The daemon listens on no port. It opens the connections: HTTPS to the
+  hub and one WebSocket for commands. The WebSocket client uses the Go
+  standard library.
+
+Commands implemented: `start`, `stop`, `drain`, `restart_when_idle`,
+`pause`, `resume`, `wake`, `reload_config`. `pause` drains every loop and
+ignores wakes until `resume`; the flag survives a restart. The commands
+`session.*` and `task.run` and the preview endpoints are answered as
+`unsupported`.
+
+### What the hub can run on your machine
+
+The workflow files and hooks the hub serves run on this machine as the
+user who joined. Hooks are shell commands, and prompts drive an agent
+that has your logins and your GitHub token. Enrolling a machine gives the
+hub's operators code execution as that user. The status document lists
+the hash of every applied file.
+
+### No local dashboard
+
+Connected mode has no local dashboard and no Questions page. Answers to
+a parked item are written on GitHub.
+
 ## Ad hoc: auto-merge on clean review
 
 To fully automate build → review → merge on one repo (not a template

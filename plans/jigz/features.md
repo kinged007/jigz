@@ -2,8 +2,8 @@
 
 Status: draft for discussion (2026-10-21)
 
-"exists" means implemented on `main`, on `feat/united-dashboard`, or on
-`feat/questions`. A
+"exists" means implemented on `main`, on `feat/united-dashboard`, on
+`feat/questions`, or on `feat/connected-mode`. A
 number in brackets is the phase in `plans/jigz/vision-and-roadmap.md`
 section 6.
 
@@ -72,18 +72,18 @@ section 6.
 
 ## 6. Connected mode
 
-- `join`, credential storage [4]
-- Config pull and apply when idle [4]
-- Heartbeat, run events, command channel [4]
-- Config source for the supervisor: local files or hub [4]
-- Loops per (project, workflow) from the hub config [4]
+- `join`, credential storage — exists
+- Config pull and apply when idle — exists
+- Heartbeat, run events, command channel — exists
+- Config source for the supervisor: local files or hub — exists
+- Loops per (project, workflow) from the hub config — exists
 - On-demand loop start and stop on `wake`; fallback search for items with
-  the runner label [4]
-- Default branch used for agent PRs [4]
-- Runner label in query filters [4]
-- Offline operation with last config [4]
-- No local dashboard in connected mode [4]
-- Status document fields match the hub protocol's status message [4]
+  the runner label — exists
+- Default branch used for agent PRs — exists
+- Runner label in query filters — exists
+- Offline operation with last config — exists
+- No local dashboard in connected mode — exists
+- Status document fields match the hub protocol's status message — exists
 - Agent session host, internal to the hub, not documented for users [6]
 - Conversations: one session per (agent, project), idle timeout [6]
 - One-shot tasks (`task.run`) with the result returned on the socket [6]
