@@ -140,15 +140,6 @@ func trackerToken(d joinDeps) (string, error) {
 	return "", errors.New("no tracker token: set JIG_TOKEN, GITHUB_TOKEN or GH_TOKEN, or run gh auth login")
 }
 
-func redactAll(s string, secrets ...string) string {
-	for _, v := range secrets {
-		if v != "" {
-			s = strings.ReplaceAll(s, v, "[redacted]")
-		}
-	}
-	return s
-}
-
 func (d joinDeps) confirm(prompt string, r **bufio.Reader) bool {
 	fmt.Fprint(d.out, prompt+" [y/N] ")
 	if *r == nil {

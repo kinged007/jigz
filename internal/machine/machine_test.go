@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 func isolate(t *testing.T) {
@@ -127,6 +129,11 @@ func TestLoadValidation(t *testing.T) {
 		{"entry window", "pool:\n  - name: a\n    runtime: pi\n    hours:\n      windows:\n        - {days: [mon], start: \"x\", end: \"10:00\"}\n", "pool[0].hours.windows[0].start"},
 		{"reset", "limits:\n  default_reset: soon\n", "limits.default_reset"},
 		{"reset neg", "limits:\n  default_reset: -1h\n", "limits.default_reset"},
+		{"idle bad", "connected:\n  idle_timeout: soon\n", "connected.idle_timeout"},
+		{"idle short", "connected:\n  idle_timeout: 30s\n", "connected.idle_timeout"},
+		{"fallback bad", "connected:\n  fallback_interval: x\n", "connected.fallback_interval"},
+		{"fallback short", "connected:\n  fallback_interval: 0s\n", "connected.fallback_interval"},
+		{"connected unknown", "connected:\n  bogus: 1\n", "bogus"},
 		{"pattern", "limits:\n  patterns: [\"(\"]\n", "limits.patterns[0]"},
 	}
 	for _, tc := range cases {
@@ -435,5 +442,28 @@ func TestLoadEngineBlock(t *testing.T) {
 	}
 	if e, err := LoadEngine(filepath.Join(dir, "absent.yaml")); err != nil || e != (Engine{}) {
 		t.Errorf("LoadEngine(missing) = %+v, %v", e, err)
+	}
+}
+
+func TestConnectedBlock(t *testing.T) {
+	c := mustLoad(t, "")
+	if c.Connected.Idle() != DefaultIdleTimeout || c.Connected.Fallback() != DefaultFallbackInterval {
+		t.Fatalf("defaults = %v %v", c.Connected.Idle(), c.Connected.Fallback())
+	}
+	c = mustLoad(t, "connected:\n  idle_timeout: 1h\n")
+	if c.Connected.Idle() != time.Hour || c.Connected.Fallback() != DefaultFallbackInterval {
+		t.Fatalf("partial = %v %v", c.Connected.Idle(), c.Connected.Fallback())
+	}
+	c = mustLoad(t, "connected:\n  idle_timeout: 20m\n  fallback_interval: 1m\n")
+	if c.Connected.Idle() != 20*time.Minute || c.Connected.Fallback() != time.Minute {
+		t.Fatalf("set = %v %v", c.Connected.Idle(), c.Connected.Fallback())
+	}
+	out, err := yaml.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c2 := mustLoad(t, string(out))
+	if c2.Connected.Idle() != 20*time.Minute || c2.Connected.Fallback() != time.Minute {
+		t.Fatalf("round trip = %v %v\n%s", c2.Connected.Idle(), c2.Connected.Fallback(), out)
 	}
 }
