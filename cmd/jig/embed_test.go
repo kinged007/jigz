@@ -56,7 +56,7 @@ func TestSyncWorkflowsKeepsEditsFillsGaps(t *testing.T) {
 	f.Close()
 	promptFile := filepath.Join(root, ".jigz", "workflows", "prompts", "docs.md")
 	os.WriteFile(promptFile, []byte("mine\n"), 0o644)
-	os.Remove(filepath.Join(root, ".jigz", "workflows", "prompts", "quick.md"))
+	os.Remove(filepath.Join(root, ".jigz", "workflows", "prompts", "build.md"))
 	if got := workflowPath(root, "WORKFLOW.issues.md"); got != issues {
 		t.Fatalf("workflowPath = %q, want %q", got, issues)
 	}
@@ -67,7 +67,7 @@ func TestSyncWorkflowsKeepsEditsFillsGaps(t *testing.T) {
 	if got, _ := os.ReadFile(promptFile); string(got) != "mine\n" {
 		t.Error("sync overwrote local prompt edit")
 	}
-	if _, err := os.Stat(filepath.Join(root, ".jigz", "workflows", "prompts", "quick.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, ".jigz", "workflows", "prompts", "build.md")); err != nil {
 		t.Error("sync did not restore missing prompt file")
 	}
 }
@@ -243,8 +243,8 @@ func TestPromptQuestionTemplatesParse(t *testing.T) {
 	}
 }
 
-func TestPromptQuestionAbsentInMergeAndQuick(t *testing.T) {
-	for _, name := range []string{"merge.md", "quick.md"} {
+func TestPromptQuestionAbsentInMerge(t *testing.T) {
+	for _, name := range []string{"merge.md"} {
 		raw, err := embeddedWorkflows.ReadFile("workflows/prompts/" + name)
 		if err != nil {
 			t.Fatal(err)
@@ -715,5 +715,39 @@ func TestRepoNameFallsBackToTheBasename(t *testing.T) {
 	}
 	if got := repoName(root); got != "just-a-dir" {
 		t.Errorf("repoName = %q, want the basename", got)
+	}
+}
+
+func shippedWorkflowFiles(t *testing.T) map[string]string {
+	t.Helper()
+	files := map[string]string{}
+	err := fs.WalkDir(embeddedWorkflows, "workflows", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		raw, err := embeddedWorkflows.ReadFile(p)
+		files[p] = string(raw)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files
+}
+
+func TestShippedWorkflowsHaveNoHomePath(t *testing.T) {
+	for p, body := range shippedWorkflowFiles(t) {
+		if strings.Contains(body, "/home/") {
+			t.Errorf("%s contains an absolute home path", p)
+		}
+	}
+}
+
+func TestShippedWorkflowsHardCodeNoBaseBranch(t *testing.T) {
+	re := regexp.MustCompile(`--base[ =]+(main|master)\b|origin/(main|master)\b`)
+	for p, body := range shippedWorkflowFiles(t) {
+		if m := re.FindString(body); m != "" {
+			t.Errorf("%s hard-codes a base branch: %q", p, m)
+		}
 	}
 }
