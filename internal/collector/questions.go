@@ -519,11 +519,16 @@ func sameItem(prev, it store.QuestionItem) bool {
 }
 
 // comments reads every comment of item n. The ETag applies to the first
-// page; a 304 there returns notModified and no comments.
+// page; a 304 there returns notModified and no comments. The returned ETag
+// is empty when the comments fill more than one page, because a new
+// comment on a later page does not change the first page's ETag.
 func (s *Scanner) comments(ctx context.Context, t Target, n int, etag string) ([]questions.Comment, string, bool, error) {
 	var out []questions.Comment
 	first := ""
 	for page := 1; ; page++ {
+		if page == 2 {
+			first = ""
+		}
 		path := fmt.Sprintf("/repos/%s/issues/%d/comments?per_page=%d", t.Project, n, commentsPerPage)
 		send := etag
 		if page > 1 {
@@ -659,8 +664,8 @@ type Resumed struct {
 }
 
 // Resume is step 4 of the answer path: it rescans item n and, when rule 2
-// holds, removes needs-human and agent:done and adds the resume trigger
-// unless the item carries one.
+// holds, adds the resume trigger unless the item carries one and removes
+// agent:done and needs-human (see relabel).
 func (s *Scanner) Resume(ctx context.Context, t Target, n int) (Resumed, error) {
 	sc, err := s.ScanItem(ctx, t, n)
 	if err != nil {
@@ -716,34 +721,40 @@ func (s *Scanner) RemoveLabels(ctx context.Context, t Target, n int, choice stri
 	return s.relabel(ctx, t, sc, trigger)
 }
 
-// relabel removes needs-human and agent:done with one DELETE each, a 404
-// meaning already gone, then adds trigger unless the item has a trigger.
-// Each call changes only its own label.
+// relabel adds trigger unless the item has a trigger, then removes
+// agent:done and last needs-human, with one DELETE each and a 404 meaning
+// already gone. agent:done outranks the trigger and needs-human keeps the
+// item out of the dispatch query, so a failure midway dispatches nothing
+// and leaves needs-human or agent:done for the scanner to report. Each
+// call changes only its own label.
 func (s *Scanner) relabel(ctx context.Context, t Target, sc ItemScan, trigger string) (Resumed, error) {
 	n := sc.Item.Number
 	out := Resumed{Scan: sc}
-	for _, l := range []string{NeedsHuman, AgentDone} {
-		name := strings.ReplaceAll(url.PathEscape(l), ":", "%3A")
-		err := s.gh().Delete(ctx, t.Project, t.Token, fmt.Sprintf("/repos/%s/issues/%d/labels/%s", t.Project, n, name))
-		if err != nil && !errors.Is(err, github.ErrNotFound) {
-			return out, fmt.Errorf("remove %s: %w", l, err)
+	err := func() error {
+		if !HasTrigger(sc.Item.Labels) && trigger != "" {
+			body, err := json.Marshal(map[string][]string{"labels": {trigger}})
+			if err != nil {
+				return err
+			}
+			if _, err := s.gh().Post(ctx, t.Project, t.Token, fmt.Sprintf("/repos/%s/issues/%d/labels", t.Project, n), body); err != nil {
+				return fmt.Errorf("add %s: %w", trigger, err)
+			}
+			out.Added = trigger
 		}
-	}
-	if !HasTrigger(sc.Item.Labels) && trigger != "" {
-		body, err := json.Marshal(map[string][]string{"labels": {trigger}})
-		if err != nil {
-			return out, err
+		for _, l := range []string{AgentDone, NeedsHuman} {
+			name := strings.ReplaceAll(url.PathEscape(l), ":", "%3A")
+			err := s.gh().Delete(ctx, t.Project, t.Token, fmt.Sprintf("/repos/%s/issues/%d/labels/%s", t.Project, n, name))
+			if err != nil && !errors.Is(err, github.ErrNotFound) {
+				return fmt.Errorf("remove %s: %w", l, err)
+			}
 		}
-		if _, err := s.gh().Post(ctx, t.Project, t.Token, fmt.Sprintf("/repos/%s/issues/%d/labels", t.Project, n), body); err != nil {
-			return out, fmt.Errorf("add %s: %w", trigger, err)
-		}
-		out.Added = trigger
-	}
-	out.Removed = true
-	if after, err := s.ScanItem(ctx, t, n); err == nil {
+		return nil
+	}()
+	out.Removed = err == nil
+	if after, serr := s.ScanItem(ctx, t, n); serr == nil {
 		out.Scan = after
 	}
-	return out, nil
+	return out, err
 }
 
 // Triggers lists the project's trigger labels, for the person to choose

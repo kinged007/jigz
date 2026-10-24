@@ -97,8 +97,8 @@ func scanQuestionItem(row interface{ Scan(...any) error }) (QuestionItem, error)
 
 // ReplaceQuestions replaces one item's row and its questions in a single
 // transaction. Question Project and Number come from item. first_labels is
-// set by the first pass that finds a question on the item and kept by later
-// passes.
+// set by the first pass that finds a question or a problem on the item, such
+// as a malformed block, and kept by later passes.
 func (s *Store) ReplaceQuestions(item QuestionItem, qs []Question) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -106,7 +106,7 @@ func (s *Store) ReplaceQuestions(item QuestionItem, qs []Question) error {
 	}
 	defer tx.Rollback()
 	first := ""
-	if len(qs) > 0 {
+	if len(qs) > 0 || len(item.Problems) > 0 {
 		first = jsonList(item.Labels)
 	}
 	if _, err := tx.Exec(`INSERT INTO question_items (`+questionItemColumns+`)

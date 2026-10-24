@@ -93,6 +93,17 @@ func TestFirstLabelsKeptAcrossPasses(t *testing.T) {
 		t.Fatalf("first_labels after empty pass = %v, want none", got)
 	}
 
+	// A pass that finds only a problem, such as a malformed block, stores
+	// that pass's labels.
+	malformed := qitem(4, "agent:m")
+	malformed.Problems = []string{"malformed block"}
+	if err := s.ReplaceQuestions(malformed, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.QuestionItem("o/a", 4); err != nil || !sameStrings(got.FirstLabels, []string{"agent:m"}) {
+		t.Fatalf("first_labels of a malformed-only item = %v, %v; want [agent:m]", got.FirstLabels, err)
+	}
+
 	// The first pass that finds a question stores that pass's labels.
 	it.Labels = []string{"agent:x", "agent:y"}
 	if err := s.ReplaceQuestions(it, []Question{question("q1")}); err != nil {

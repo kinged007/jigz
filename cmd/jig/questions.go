@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,9 +33,17 @@ type questionsState struct {
 	locks  map[string]*sync.Mutex
 }
 
-// formToken is issued with one form for one item. done is the redirect
-// target of the first submit, "" while unused.
+// Form actions a token is issued for; a token works only on its own route.
+const (
+	actAnswer = "answer"
+	actRemove = "remove-labels"
+	actRetry  = "retry"
+)
+
+// formToken is issued with one form, for one action on one item. done is
+// the redirect target of the first submit, "" while unused.
 type formToken struct {
+	action string
 	item   string
 	issued time.Time
 	done   string
@@ -46,8 +55,8 @@ func newQuestionsState(s *collector.Scanner) *questionsState {
 
 func itemKey(project string, n int) string { return project + "#" + strconv.Itoa(n) }
 
-// issue returns a new token for a form on item.
-func (q *questionsState) issue(item string) string {
+// issue returns a new token for an action's form on item.
+func (q *questionsState) issue(action, item string) string {
 	b := make([]byte, 16)
 	rand.Read(b)
 	tok := hex.EncodeToString(b)
@@ -59,16 +68,16 @@ func (q *questionsState) issue(item string) string {
 			delete(q.tokens, k)
 		}
 	}
-	q.tokens[tok] = &formToken{item: item, issued: now}
+	q.tokens[tok] = &formToken{action: action, item: item, issued: now}
 	return tok
 }
 
-// token returns the token issued for item, or nil.
-func (q *questionsState) token(tok, item string) *formToken {
+// token returns the token issued for action on item, or nil.
+func (q *questionsState) token(tok, action, item string) *formToken {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	t := q.tokens[tok]
-	if t == nil || t.item != item || time.Since(t.issued) > tokenTTL {
+	if t == nil || t.action != action || t.item != item || time.Since(t.issued) > tokenTTL {
 		return nil
 	}
 	return t
@@ -108,7 +117,10 @@ type questionItem struct {
 	store.QuestionItem
 	Problems  []collector.ItemProblem
 	Malformed bool
-	Token     string
+	// Token is for Remove labels, set when Malformed; RetryToken is for
+	// Retry, set when the labels were not removed.
+	Token      string
+	RetryToken string
 }
 
 // answerDraft is an answer form shown again: after a failed post, or to
@@ -182,8 +194,11 @@ func (a *app) questionsData(f store.QuestionFilter, tokens bool) ([]questionRow,
 			continue
 		}
 		qi := questionItem{QuestionItem: it, Problems: ps, Malformed: collector.Malformed(ps)}
-		if tokens {
-			qi.Token = a.questions.issue(itemKey(it.Project, it.Number))
+		if tokens && qi.Malformed {
+			qi.Token = a.questions.issue(actRemove, itemKey(it.Project, it.Number))
+		}
+		if tokens && slices.ContainsFunc(ps, func(p collector.ItemProblem) bool { return p.Kind == collector.LabelsNotRemoved }) {
+			qi.RetryToken = a.questions.issue(actRetry, itemKey(it.Project, it.Number))
 		}
 		withProblems = append(withProblems, qi)
 	}
@@ -203,7 +218,7 @@ func (a *app) questionsData(f store.QuestionFilter, tokens bool) ([]questionRow,
 			row.Title, row.URL = it.Title, it.URL
 		}
 		if tokens {
-			row.Token = a.questions.issue(itemKey(q.Project, q.Number))
+			row.Token = a.questions.issue(actAnswer, itemKey(q.Project, q.Number))
 		}
 		rows = append(rows, row)
 	}
@@ -231,7 +246,7 @@ func (a *app) renderQuestions(w http.ResponseWriter, r *http.Request, draft *ans
 	if n, err := strconv.Atoi(q.Get("number")); err == nil && q.Get("retry") != "" && a.questionsOn() {
 		project := q.Get("retry")
 		if it, err := a.store.QuestionItem(project, n); err == nil {
-			v.Retry = &questionItem{QuestionItem: it, Problems: collector.Problems(it), Token: a.questions.issue(itemKey(project, n))}
+			v.Retry = &questionItem{QuestionItem: it, Problems: collector.Problems(it), RetryToken: a.questions.issue(actRetry, itemKey(project, n))}
 		}
 	}
 	if page.Lookup("questions") != nil {
@@ -246,7 +261,8 @@ func (a *app) renderQuestions(w http.ResponseWriter, r *http.Request, draft *ans
 
 // questionsPlaceholder renders the page until templates/questions.html
 // defines "questions".
-var questionsPlaceholder = template.Must(template.New("questions-placeholder").Parse(`<!doctype html>
+var questionsPlaceholder = template.Must(template.New("questions-placeholder").Parse(`{{define "retry"}}<form method="post" action="/questions/retry"><input type="hidden" name="project" value="{{.Project}}"><input type="hidden" name="number" value="{{.Number}}"><input type="hidden" name="token" value="{{.RetryToken}}"><button>Retry</button></form>{{end}}
+<!doctype html>
 <title>Questions</title>
 {{with .Msg}}<p class="msg">{{.}}</p>{{end}}{{with .Err}}<p class="err">{{.}}</p>{{end}}
 {{if not .Enrich}}<p>Set github.enrich to see questions</p>{{else}}
@@ -257,9 +273,9 @@ var questionsPlaceholder = template.Must(template.New("questions-placeholder").P
 {{with .Remove}}<form method="post" action="/questions/remove-labels"><input type="hidden" name="confirm" value="1">
 <input type="hidden" name="project" value="{{.Project}}"><input type="hidden" name="number" value="{{.Number}}"><input type="hidden" name="token" value="{{.Token}}">
 {{if .Trigger}}<p>Remove needs-human and agent:done, add {{.Trigger}}</p>{{else}}<select name="trigger">{{range .Choices}}<option>{{.}}</option>{{end}}</select>{{end}}<button>Remove labels</button></form>{{end}}
-{{with .Retry}}<form method="post" action="/questions/retry"><input type="hidden" name="project" value="{{.Project}}"><input type="hidden" name="number" value="{{.Number}}"><input type="hidden" name="token" value="{{.Token}}"><button>Retry</button></form>{{end}}
+{{with .Retry}}{{template "retry" .}}{{end}}
 {{range .Items}}<div class="item"><a href="{{.URL}}">{{.Project}}#{{.Number}}</a> {{.Title}}<ul>{{range .Problems}}<li>{{.Message}}{{with .CommentURL}} <a href="{{.}}">comment</a>{{end}}</li>{{end}}</ul>
-{{if .Malformed}}<form method="post" action="/questions/remove-labels"><input type="hidden" name="project" value="{{.Project}}"><input type="hidden" name="number" value="{{.Number}}"><input type="hidden" name="token" value="{{.Token}}"><button>Remove labels</button></form>{{end}}</div>{{end}}
+{{if .RetryToken}}{{template "retry" .}}{{end}}{{if .Malformed}}<form method="post" action="/questions/remove-labels"><input type="hidden" name="project" value="{{.Project}}"><input type="hidden" name="number" value="{{.Number}}"><input type="hidden" name="token" value="{{.Token}}"><button>Remove labels</button></form>{{end}}</div>{{end}}
 {{range .Questions}}<div class="question"><a href="{{.URL}}">{{.Project}}#{{.Number}}</a> {{.Title}} {{.QID}} {{.Audience}} blocking={{.Blocking}}
 <p>{{.Question.Question}}</p>{{with .Suggested}}<p class="suggested">{{.}}</p>{{end}}{{range .IgnoredAnswers}}<p>ignored: {{.Author}}</p>{{end}}
 <form method="post" action="/questions/answer"><input type="hidden" name="project" value="{{.Project}}"><input type="hidden" name="number" value="{{.Number}}"><input type="hidden" name="qid" value="{{.QID}}"><input type="hidden" name="token" value="{{.Token}}">
@@ -303,8 +319,8 @@ func (a *app) readQuestionForm(w http.ResponseWriter, r *http.Request) (question
 
 // useToken returns the form's token, or redirects: to the first result
 // when the token was used, else to an error.
-func (a *app) useToken(w http.ResponseWriter, r *http.Request, f questionForm) (*formToken, bool) {
-	t := a.questions.token(r.FormValue("token"), f.key)
+func (a *app) useToken(w http.ResponseWriter, r *http.Request, f questionForm, action string) (*formToken, bool) {
+	t := a.questions.token(r.FormValue("token"), action, f.key)
 	switch {
 	case t == nil:
 		http.Redirect(w, r, "/questions?err="+query("this form has expired; reload the page"), http.StatusSeeOther)
@@ -354,7 +370,7 @@ func (a *app) questionsAnswer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer a.questions.lock(f.key)()
-	t, ok := a.useToken(w, r, f)
+	t, ok := a.useToken(w, r, f, actAnswer)
 	if !ok {
 		return
 	}
@@ -403,7 +419,7 @@ func (a *app) questionsRetry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer a.questions.lock(f.key)()
-	t, ok := a.useToken(w, r, f)
+	t, ok := a.useToken(w, r, f, actRetry)
 	if !ok {
 		return
 	}
@@ -428,7 +444,7 @@ func (a *app) questionsRemoveLabels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer a.questions.lock(f.key)()
-	t, ok := a.useToken(w, r, f)
+	t, ok := a.useToken(w, r, f, actRemove)
 	if !ok {
 		return
 	}
@@ -443,21 +459,14 @@ func (a *app) questionsRemoveLabels(w http.ResponseWriter, r *http.Request) {
 			a.done(w, r, t, f, "labels not removed", collector.ErrNotMalformed, false)
 			return
 		}
-		c := &removeConfirm{Project: f.project, Number: f.number, Token: r.FormValue("token"), Trigger: collector.RemoveTrigger(sc)}
-		if c.Trigger == "" && !collector.HasTrigger(sc.Item.Labels) {
-			if c.Choices, err = s.Triggers(r.Context(), f.target); err != nil {
-				a.renderQuestions(w, r, nil, nil, "labels not removed: "+err.Error())
-				return
-			}
-		}
-		a.renderQuestions(w, r, nil, c, "")
+		a.renderQuestions(w, r, nil, a.removeConfirm(r, f, sc), "")
 		return
 	}
 	target := fmt.Sprintf("#%d", f.number)
 	res, err := s.RemoveLabels(r.Context(), f.target, f.number, r.FormValue("trigger"))
 	switch {
 	case errors.Is(err, collector.ErrNeedTrigger):
-		a.renderQuestions(w, r, nil, nil, "labels not removed: "+err.Error())
+		a.renderQuestions(w, r, nil, a.removeConfirm(r, f, res.Scan), "labels not removed: "+err.Error())
 		return
 	case err != nil:
 		a.audit(r, "remove-labels", f.project, target, "labels not removed: "+err.Error())
@@ -467,6 +476,25 @@ func (a *app) questionsRemoveLabels(w http.ResponseWriter, r *http.Request) {
 	note := resumeNote(res)
 	a.audit(r, "remove-labels", f.project, target, note)
 	a.done(w, r, t, f, note, nil, false)
+}
+
+// dispatchTriggers are the triggers of the shipped workflows, offered when
+// the project's labels cannot be read or hold none.
+var dispatchTriggers = []string{"agent:plan", "agent:plan-build", "agent:build", "agent:docs"}
+
+// removeConfirm builds the confirmation of remove-labels for a scanned
+// item. When no trigger can be derived, it lists the choices.
+func (a *app) removeConfirm(r *http.Request, f questionForm, sc collector.ItemScan) *removeConfirm {
+	c := &removeConfirm{Project: f.project, Number: f.number, Token: r.FormValue("token"), Trigger: collector.RemoveTrigger(sc)}
+	if c.Trigger != "" || collector.HasTrigger(sc.Item.Labels) {
+		return c
+	}
+	choices, err := a.questions.scanner.Triggers(r.Context(), f.target)
+	if err != nil || len(choices) == 0 {
+		choices = dispatchTriggers
+	}
+	c.Choices = choices
+	return c
 }
 
 // questionsRefresh runs a scan pass now.

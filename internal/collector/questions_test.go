@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,6 +26,14 @@ type qRig struct {
 	st   *store.Store
 	cfg  config.GitHub
 	now  time.Time
+
+	mu sync.Mutex
+	// fail answers requests matching "METHOD path-suffix" with 500, as many
+	// times as the value says.
+	fail map[string]int
+	// pageOneUnchanged answers 304 to a comments request with an ETag, as
+	// GitHub does when only a later page changed.
+	pageOneUnchanged bool
 }
 
 func newQRig(t *testing.T) *qRig {
@@ -37,7 +46,25 @@ func newQRig(t *testing.T) *qRig {
 	r := &qRig{fake: fakegithub.New("bot", "tok"), st: st, now: time.Now().UTC()}
 	r.fake.Logf = t.Logf
 	r.fake.AddRepo(qRepo, "agent:plan", "agent:build", "agent:done", "needs-human", "in-progress")
-	srv := httptest.NewServer(r.fake)
+	r.fail = map[string]int{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		path := req.URL.EscapedPath()
+		if r.pageOneUnchanged && strings.HasSuffix(path, "/comments") && req.Header.Get("If-None-Match") != "" {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		for k, n := range r.fail {
+			method, suffix, _ := strings.Cut(k, " ")
+			if n > 0 && req.Method == method && strings.HasSuffix(path, suffix) {
+				r.fail[k]--
+				http.Error(w, "boom", http.StatusInternalServerError)
+				return
+			}
+		}
+		r.fake.ServeHTTP(w, req)
+	}))
 	t.Cleanup(srv.Close)
 	r.cfg = config.GitHub{Enrich: true, APIURL: srv.URL}
 	r.Scanner = &Scanner{
@@ -260,9 +287,9 @@ func (r *qRig) resume(t *testing.T, n int) Resumed {
 }
 
 var resumeWrites = []string{
-	"DELETE /repos/acme/app/issues/1/labels/needs-human",
-	"DELETE /repos/acme/app/issues/1/labels/agent%3Adone",
 	"POST /repos/acme/app/issues/1/labels",
+	"DELETE /repos/acme/app/issues/1/labels/agent%3Adone",
+	"DELETE /repos/acme/app/issues/1/labels/needs-human",
 }
 
 func TestRule2AllAnsweredResumes(t *testing.T) {
@@ -335,8 +362,8 @@ func TestRule2LabelsAlreadyRemoved(t *testing.T) {
 	for _, q := range r.fake.LabelRequests(qRepo, n) {
 		statuses = append(statuses, q.Status)
 	}
-	if !slices.Equal(statuses, []int{404, 404, 200}) {
-		t.Errorf("label statuses = %v, want two 404 deletes and the add", statuses)
+	if !slices.Equal(statuses, []int{200, 404, 404}) {
+		t.Errorf("label statuses = %v, want the add and two 404 deletes", statuses)
 	}
 	if got := r.labels(t, n); !slices.Equal(got, []string{"in-progress", "agent:plan"}) {
 		t.Errorf("labels = %v", got)
@@ -353,7 +380,7 @@ func TestRule2KeepsATriggerAPersonAdded(t *testing.T) {
 	if !res.Removed || res.Added != "" {
 		t.Errorf("result = %+v", res)
 	}
-	if got := r.labelWrites(n); !slices.Equal(got, append([]string{"POST /repos/acme/app/issues/1/labels"}, resumeWrites[:2]...)) {
+	if got := r.labelWrites(n); !slices.Equal(got, append([]string{"POST /repos/acme/app/issues/1/labels"}, resumeWrites[1:]...)) {
 		t.Errorf("label writes = %v", got)
 	}
 	if got := r.labels(t, n); !slices.Equal(got, []string{"agent:build"}) {
@@ -477,5 +504,77 @@ func TestProblemsRoundTrip(t *testing.T) {
 	}
 	if !Malformed(ps) || !slices.Equal(kinds, []string{string(questions.MalformedQuestion), string(questions.UnknownAnswer)}) {
 		t.Errorf("problems = %+v", ps)
+	}
+}
+
+func TestRule2FailureMidwayIsReported(t *testing.T) {
+	cases := map[string]struct {
+		fail string
+		want []string
+	}{
+		"trigger add":        {"POST /issues/1/labels", []string{"needs-human", "agent:done"}},
+		"agent:done delete":  {"DELETE /labels/agent%3Adone", []string{"needs-human", "agent:done", "agent:plan"}},
+		"needs-human delete": {"DELETE /labels/needs-human", []string{"needs-human", "agent:plan"}},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			r := newQRig(t)
+			n := r.parked(qblock("q-1", true, "agent:plan"), ablock("q-1", "a"))
+			r.fail[c.fail] = 1
+			res, err := r.Resume(context.Background(), r.target(), n)
+			if err == nil || res.Removed {
+				t.Fatalf("result = %+v, %v; want an error", res, err)
+			}
+			if got := r.labels(t, n); !slices.Equal(got, c.want) {
+				t.Errorf("labels = %v, want %v", got, c.want)
+			}
+			it, err := r.st.QuestionItem(qRepo, n)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ps := Problems(it); len(ps) != 1 || ps[0].Kind != LabelsNotRemoved {
+				t.Errorf("problems = %+v, want labels not removed", ps)
+			}
+			res = r.resume(t, n)
+			if !res.Removed {
+				t.Errorf("retry = %+v", res)
+			}
+			if got := r.labels(t, n); !slices.Equal(got, []string{"agent:plan"}) {
+				t.Errorf("labels after retry = %v", got)
+			}
+		})
+	}
+}
+
+func TestScanReadsEveryCommentPage(t *testing.T) {
+	r := newQRig(t)
+	n := r.parked(qblock("q-1", true, "agent:plan"))
+	for i := 0; i < commentsPerPage; i++ {
+		r.comment(n, "bot", "OWNER", fmt.Sprintf("note %d", i))
+	}
+	r.Pass(context.Background())
+	if qs := r.stored(t, store.QuestionFilter{}); len(qs) != 1 || qs[0].AnsweredAt != "" {
+		t.Fatalf("questions = %+v", qs)
+	}
+	r.comment(n, "bot", "OWNER", ablock("q-1", "late"))
+	r.pageOneUnchanged = true
+	r.Pass(context.Background())
+	if qs := r.stored(t, store.QuestionFilter{}); len(qs) != 1 || qs[0].Answer != "late" {
+		t.Errorf("answer on the second page missed: %+v", qs)
+	}
+}
+
+func TestRemoveLabelsUsesFirstLabelsOfMalformedOnlyItem(t *testing.T) {
+	r := newQRig(t)
+	n := r.add("agent:build", "needs-human")
+	r.comment(n, "bot", "OWNER", noResume)
+	r.Pass(context.Background())
+	r.fake.EngineHandoff(qRepo, n, "agent:build")
+	res, err := r.RemoveLabels(context.Background(), r.target(), n, "")
+	if err != nil || res.Added != "agent:build" {
+		t.Fatalf("result = %+v, %v", res, err)
+	}
+	if got := r.labels(t, n); !slices.Equal(got, []string{"agent:build"}) {
+		t.Errorf("labels = %v", got)
 	}
 }

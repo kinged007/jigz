@@ -85,7 +85,9 @@ func question(id, resume string) string {
 <!-- /agent-question -->`
 }
 
-func (r *questionsRig) token(n int) string { return r.a.questions.issue(itemKey(qProject, n)) }
+func (r *questionsRig) token(action string, n int) string {
+	return r.a.questions.issue(action, itemKey(qProject, n))
+}
 
 // post sends a form and returns the response.
 func (r *questionsRig) post(t *testing.T, path string, form url.Values) *httptest.ResponseRecorder {
@@ -150,7 +152,7 @@ func (r *questionsRig) audit(t *testing.T) []store.AuditEntry {
 func TestAnswerPostsOnceAndResumes(t *testing.T) {
 	r := newQuestionsRig(t)
 	n := r.parked(question("q-1", "agent:plan"))
-	form := answerForm(n, "q-1", "Green.", r.token(n))
+	form := answerForm(n, "q-1", "Green.", r.token(actAnswer, n))
 	first := location(t, r.post(t, "/questions/answer", form))
 	if !strings.Contains(first, "answer posted") || !strings.Contains(first, "added agent:plan") {
 		t.Errorf("first result = %q", first)
@@ -164,9 +166,9 @@ func TestAnswerPostsOnceAndResumes(t *testing.T) {
 		t.Errorf("comments = %q, want one answer from the token login", cs)
 	}
 	want := []string{
-		"DELETE /repos/acme/app/issues/1/labels/needs-human",
-		"DELETE /repos/acme/app/issues/1/labels/agent%3Adone",
 		"POST /repos/acme/app/issues/1/labels",
+		"DELETE /repos/acme/app/issues/1/labels/agent%3Adone",
+		"DELETE /repos/acme/app/issues/1/labels/needs-human",
 	}
 	if got := r.labelWrites(n); !slices.Equal(got, want) {
 		t.Errorf("label writes = %v, want %v", got, want)
@@ -188,7 +190,7 @@ func TestAnswerPostsOnceAndResumes(t *testing.T) {
 func TestAnswerOneOfTwoKeepsLabels(t *testing.T) {
 	r := newQuestionsRig(t)
 	n := r.parked(question("q-1", "agent:plan"), question("q-2", "agent:plan"))
-	loc := location(t, r.post(t, "/questions/answer", answerForm(n, "q-1", "Green.", r.token(n))))
+	loc := location(t, r.post(t, "/questions/answer", answerForm(n, "q-1", "Green.", r.token(actAnswer, n))))
 	if !strings.Contains(loc, "a blocking question is still open") {
 		t.Errorf("result = %q", loc)
 	}
@@ -204,7 +206,7 @@ func TestAnswerCommentFailureChangesNothing(t *testing.T) {
 	r := newQuestionsRig(t)
 	n := r.parked(question("q-1", "agent:plan"))
 	r.fail["POST /issues/1/comments"] = 1
-	tok := r.token(n)
+	tok := r.token(actAnswer, n)
 	rec := r.post(t, "/questions/answer", answerForm(n, "q-1", "Green.", tok))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "answer not posted") || !strings.Contains(rec.Body.String(), "Green.") {
 		t.Fatalf("response = %d %s", rec.Code, rec.Body.String())
@@ -222,7 +224,7 @@ func TestAnswerLabelFailureIsRetryable(t *testing.T) {
 	r := newQuestionsRig(t)
 	n := r.parked(question("q-1", "agent:plan"))
 	r.fail["DELETE /labels/agent%3Adone"] = 1
-	loc := location(t, r.post(t, "/questions/answer", answerForm(n, "q-1", "Green.", r.token(n))))
+	loc := location(t, r.post(t, "/questions/answer", answerForm(n, "q-1", "Green.", r.token(actAnswer, n))))
 	if !strings.Contains(loc, "answer posted, labels not removed") || !strings.Contains(loc, "retry="+qProject) {
 		t.Fatalf("result = %q", loc)
 	}
@@ -230,13 +232,34 @@ func TestAnswerLabelFailureIsRetryable(t *testing.T) {
 	if !strings.Contains(body, `action="/questions/retry"`) {
 		t.Errorf("page has no Retry form")
 	}
-	if got := r.labels(t, n); !slices.Equal(got, []string{"agent:done"}) {
+	if got := r.labels(t, n); !slices.Equal(got, []string{"needs-human", "agent:done", "agent:plan"}) {
 		t.Errorf("labels after failure = %v", got)
 	}
-	form := url.Values{"project": {qProject}, "number": {strconv.Itoa(n)}, "token": {r.token(n)}}
+	var api struct {
+		Items []apiQuestionItem `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(getPage(t, r.a, "/api/v1/questions")), &api); err != nil {
+		t.Fatal(err)
+	}
+	if len(api.Items) != 1 || len(api.Items[0].Problems) != 1 || api.Items[0].Problems[0].Kind != collector.LabelsNotRemoved {
+		t.Errorf("items after failure = %+v, want a labels-not-removed problem", api.Items)
+	}
+	if body := getPage(t, r.a, "/questions"); !strings.Contains(body, `action="/questions/retry"`) {
+		t.Errorf("item list has no Retry form")
+	}
+	form := url.Values{"project": {qProject}, "number": {strconv.Itoa(n)}, "token": {r.token(actRetry, n)}}
 	loc = location(t, r.post(t, "/questions/retry", form))
-	if !strings.Contains(loc, "added agent:plan") {
+	if !strings.Contains(loc, "a trigger was already set") {
 		t.Errorf("retry = %q", loc)
+	}
+	// The failed DELETE never reached the fake, so it is not listed.
+	want := []string{
+		"POST /repos/acme/app/issues/1/labels",
+		"DELETE /repos/acme/app/issues/1/labels/agent%3Adone",
+		"DELETE /repos/acme/app/issues/1/labels/needs-human",
+	}
+	if got := r.labelWrites(n); !slices.Equal(got, want) {
+		t.Errorf("label writes = %v, want %v", got, want)
 	}
 	if got := r.labels(t, n); !slices.Equal(got, []string{"agent:plan"}) {
 		t.Errorf("labels after retry = %v", got)
@@ -264,7 +287,7 @@ func TestAnswerAskedTwiceNeedsConfirm(t *testing.T) {
 	n := r.parked(question("q-1", "agent:build"), `<!-- agent-answer id="q-1" -->
 Red.
 <!-- /agent-answer -->`, question("q-2", "agent:build"))
-	tok := r.token(n)
+	tok := r.token(actAnswer, n)
 	resp := r.post(t, "/questions/answer", answerForm(n, "q-1", "Green.", tok))
 	if resp.Code != http.StatusOK || !strings.Contains(resp.Body.String(), "Red.") {
 		t.Fatalf("response = %d %s", resp.Code, resp.Body.String())
@@ -283,7 +306,7 @@ Red.
 func TestAnswerToMissingQuestion(t *testing.T) {
 	r := newQuestionsRig(t)
 	n := r.parked(question("q-1", "agent:plan"))
-	loc := location(t, r.post(t, "/questions/answer", answerForm(n, "q-5", "Green.", r.token(n))))
+	loc := location(t, r.post(t, "/questions/answer", answerForm(n, "q-5", "Green.", r.token(actAnswer, n))))
 	if !strings.Contains(loc, "question no longer exists") || len(r.comments(t, n)) != 1 {
 		t.Errorf("result = %q", loc)
 	}
@@ -295,8 +318,8 @@ func TestAnswerRefusesBadTokenAndText(t *testing.T) {
 	other := r.fake.Add(fakegithub.Item{Repo: qProject, Title: "other"})
 	for name, form := range map[string]url.Values{
 		"no token":       answerForm(n, "q-1", "Green.", "nope"),
-		"other item":     answerForm(n, "q-1", "Green.", r.token(other)),
-		"marker in text": answerForm(n, "q-1", "<!-- /agent-answer -->", r.token(n)),
+		"other item":     answerForm(n, "q-1", "Green.", r.token(actAnswer, other)),
+		"marker in text": answerForm(n, "q-1", "<!-- /agent-answer -->", r.token(actAnswer, n)),
 	} {
 		resp := r.post(t, "/questions/answer", form)
 		if resp.Code != http.StatusOK && resp.Code != http.StatusSeeOther {
@@ -316,7 +339,7 @@ func TestQuestionsOffMakesNoRequests(t *testing.T) {
 	if !strings.Contains(body, "Set github.enrich to see questions") {
 		t.Errorf("page lacks the enrich message")
 	}
-	loc := location(t, r.post(t, "/questions/answer", answerForm(n, "q-1", "Green.", r.token(n))))
+	loc := location(t, r.post(t, "/questions/answer", answerForm(n, "q-1", "Green.", r.token(actAnswer, n))))
 	if !strings.Contains(loc, "github.enrich") {
 		t.Errorf("answer = %q", loc)
 	}
@@ -367,7 +390,7 @@ const noResumeBlock = `<!-- agent-question id="q-9" audience="product" blocking=
 func TestRemoveLabelsConfirmsAndAsksForTrigger(t *testing.T) {
 	r := newQuestionsRig(t)
 	n := r.parked(noResumeBlock)
-	tok := r.token(n)
+	tok := r.token(actRemove, n)
 	form := url.Values{"project": {qProject}, "number": {strconv.Itoa(n)}, "token": {tok}}
 	resp := r.post(t, "/questions/remove-labels", form)
 	if resp.Code != http.StatusOK || !strings.Contains(resp.Body.String(), "<option>agent:build</option>") {
@@ -394,9 +417,48 @@ func TestRemoveLabelsConfirmsAndAsksForTrigger(t *testing.T) {
 func TestRemoveLabelsRefusesWellFormedItem(t *testing.T) {
 	r := newQuestionsRig(t)
 	n := r.parked(question("q-1", "agent:plan"))
-	form := url.Values{"project": {qProject}, "number": {strconv.Itoa(n)}, "token": {r.token(n)}, "confirm": {"1"}, "trigger": {"agent:plan"}}
+	form := url.Values{"project": {qProject}, "number": {strconv.Itoa(n)}, "token": {r.token(actRemove, n)}, "confirm": {"1"}, "trigger": {"agent:plan"}}
 	loc := location(t, r.post(t, "/questions/remove-labels", form))
 	if !strings.Contains(loc, "no malformed question block") || len(r.labelWrites(n)) != 0 {
 		t.Errorf("result = %q, writes %v", loc, r.labelWrites(n))
+	}
+}
+
+func TestTokenWorksOnlyOnItsRoute(t *testing.T) {
+	r := newQuestionsRig(t)
+	n := r.parked(noResumeBlock)
+	tok := r.token(actAnswer, n)
+	for _, path := range []string{"/questions/remove-labels", "/questions/retry"} {
+		form := url.Values{"project": {qProject}, "number": {strconv.Itoa(n)}, "token": {tok}, "confirm": {"1"}, "trigger": {"agent:plan"}}
+		if loc := location(t, r.post(t, path, form)); !strings.Contains(loc, "this form has expired") {
+			t.Errorf("%s with an answer token = %q", path, loc)
+		}
+	}
+	remove := r.token(actRemove, n)
+	if loc := location(t, r.post(t, "/questions/answer", answerForm(n, "q-9", "x", remove))); !strings.Contains(loc, "this form has expired") {
+		t.Errorf("answer with a remove-labels token = %q", loc)
+	}
+	if got := r.labelWrites(n); len(got) != 0 {
+		t.Errorf("label writes = %v", got)
+	}
+	if len(r.comments(t, n)) != 1 {
+		t.Error("comment posted")
+	}
+}
+
+func TestRemoveLabelsOffersDispatchTriggersWhenRepoHasNone(t *testing.T) {
+	r := newQuestionsRig(t)
+	r.fake.AddRepo("acme/bare")
+	r.a.questions.scanner.Targets = func() []collector.Target {
+		return []collector.Target{{Project: "acme/bare", Token: "tok"}}
+	}
+	n := r.fake.Add(fakegithub.Item{Repo: "acme/bare", Title: "T"})
+	r.fake.AddComment("acme/bare", n, fakegithub.Comment{Author: "bot", Association: "OWNER", Body: noResumeBlock})
+	form := url.Values{"project": {"acme/bare"}, "number": {strconv.Itoa(n)}, "token": {r.a.questions.issue(actRemove, itemKey("acme/bare", n))}}
+	resp := r.post(t, "/questions/remove-labels", form)
+	for _, l := range dispatchTriggers {
+		if !strings.Contains(resp.Body.String(), "<option>"+l+"</option>") {
+			t.Errorf("confirmation lacks %s: %s", l, resp.Body.String())
+		}
 	}
 }
