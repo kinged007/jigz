@@ -92,3 +92,33 @@ func TestMatch(t *testing.T) {
 		}
 	}
 }
+
+func TestMatchSeveralRepoTermsAreOr(t *testing.T) {
+	it := &Item{Repo: "o/a", State: "open", Labels: []string{"x"}}
+	cases := []struct {
+		q    string
+		want bool
+	}{
+		{"repo:o/a repo:o/b", true},
+		{"repo:o/b repo:O/A", true},
+		{"repo:o/b repo:o/c", false},
+		{"repo:o/b,o/a repo:o/c", true},
+		{"repo:o/b repo:o/a label:x", true},
+		{"repo:o/b repo:o/a label:y", false},
+		{"repo:o/a repo:o/b -repo:o/a", false},
+		{"repo:o/b repo:o/c -repo:o/c", false},
+		{"state:open repo:o/a repo:o/b", true},
+	}
+	for _, c := range cases {
+		q, err := ParseQuery(c.q)
+		if err != nil {
+			t.Fatalf("%q: %v", c.q, err)
+		}
+		if got := q.Match(it, "me"); got != c.want {
+			t.Errorf("Match(%q) = %v, want %v", c.q, got, c.want)
+		}
+	}
+	if _, err := ParseQuery("repo:o/a repo:o/b draft:true"); err == nil {
+		t.Error("unknown qualifier accepted next to several repo terms")
+	}
+}

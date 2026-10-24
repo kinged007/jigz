@@ -122,15 +122,22 @@ func checkValue(key, v string) error {
 	return nil
 }
 
-// Match reports whether it satisfies every term. me is the login that
+// Match reports whether it satisfies every term, except that several
+// positive repo: terms are an OR, as on GitHub. me is the login that
 // assignee:@me stands for.
 func (q Query) Match(it *Item, me string) bool {
+	repos, repoHit := 0, false
 	for _, t := range q.terms {
+		if t.key == "repo" && !t.neg {
+			repos++
+			repoHit = repoHit || t.holds(it, me)
+			continue
+		}
 		if t.holds(it, me) == t.neg {
 			return false
 		}
 	}
-	return true
+	return repos == 0 || repoHit
 }
 
 // holds reports whether the item satisfies the term's positive form.
