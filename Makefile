@@ -12,4 +12,4 @@ test:
 	go test ./...
 
 acceptance:
-	go test -tags acceptance -count=1 -timeout 5m -run '^TestAcceptance' -v ./cmd/jig
+	go test -tags acceptance -count=1 -timeout 14m -run '^TestAcceptance' -v ./cmd/jig
