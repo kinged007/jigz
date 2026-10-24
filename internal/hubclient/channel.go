@@ -4,10 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"regexp"
 	"slices"
-	"strconv"
 	"time"
 
 	"github.com/kinged007/jigz/internal/hubproto"
@@ -29,9 +28,6 @@ var supported = []hubproto.CommandType{
 	hubproto.CmdStart, hubproto.CmdStop, hubproto.CmdDrain, hubproto.CmdRestartWhenIdle,
 	hubproto.CmdPause, hubproto.CmdResume, hubproto.CmdWake, hubproto.CmdReloadConfig,
 }
-
-// wsclient reports a refused upgrade only in its error text.
-var upgradeStatusRe = regexp.MustCompile(`unexpected status (\d{3})`)
 
 // Handler carries out a supported, valid command. It returns nil to
 // acknowledge with ok, or the error for the acknowledgement (code invalid
@@ -64,9 +60,9 @@ func (c *Client) Connect(ctx context.Context) (*wsclient.Conn, error) {
 	if ctx.Err() != nil {
 		return nil, c.fail("GET", "ws", false, ctx.Err())
 	}
-	if m := upgradeStatusRe.FindStringSubmatch(err.Error()); m != nil {
-		status, _ := strconv.Atoi(m[1])
-		return nil, c.statusError("GET", "ws", status, nil)
+	var se *wsclient.StatusError
+	if errors.As(err, &se) {
+		return nil, c.statusError("GET", "ws", se.Code, nil)
 	}
 	return nil, c.fail("GET", "ws", true, err)
 }
