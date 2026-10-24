@@ -430,15 +430,16 @@ func TestDialFailures(t *testing.T) {
 	ln.Close()
 
 	tests := []struct {
-		name string
-		url  string
-		want string
+		name   string
+		url    string
+		want   string
+		status int
 	}{
-		{"non-101", wsURL(ok), "unexpected status 401"},
-		{"redirect", wsURL(redirect), "redirect refused"},
-		{"bad accept", rawServer(t, true, func(net.Conn, *bufio.Reader) {}), "invalid Sec-WebSocket-Accept"},
-		{"connection refused", "ws://" + closedAddr + "/ws?token=" + secret, "dial"},
-		{"unsupported scheme", "http://example.com/", "unsupported URL scheme"},
+		{"non-101", wsURL(ok), "unexpected status 401", 401},
+		{"redirect", wsURL(redirect), "redirect refused", 302},
+		{"bad accept", rawServer(t, true, func(net.Conn, *bufio.Reader) {}), "invalid Sec-WebSocket-Accept", 0},
+		{"connection refused", "ws://" + closedAddr + "/ws?token=" + secret, "dial", 0},
+		{"unsupported scheme", "http://example.com/", "unsupported URL scheme", 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -450,6 +451,10 @@ func TestDialFailures(t *testing.T) {
 			}
 			if strings.Contains(err.Error(), "s3cr3t") {
 				t.Fatalf("error contains the credential: %v", err)
+			}
+			var se *StatusError
+			if errors.As(err, &se) != (tt.status != 0) || (se != nil && se.Code != tt.status) {
+				t.Fatalf("err = %v, want StatusError %d", err, tt.status)
 			}
 		})
 	}
@@ -583,5 +588,165 @@ func TestPongTimeoutCloses(t *testing.T) {
 	defer cancel()
 	if _, err := c.Read(ctx); !errors.Is(err, ErrClosed) {
 		t.Fatalf("err = %v, want ErrClosed", err)
+	}
+}
+
+func TestRemoteCloseCodes(t *testing.T) {
+	tests := []struct {
+		code       int
+		wantRemote bool
+	}{
+		{1000, true}, {1001, true}, {1003, true}, {1007, true}, {1011, true},
+		{1012, true}, {1013, true}, {1014, true}, {3000, true}, {4999, true},
+		{999, false}, {1004, false}, {1005, false}, {1006, false}, {1015, false},
+		{1016, false}, {2999, false}, {5000, false},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprint(tt.code), func(t *testing.T) {
+			reply := make(chan rawFrame, 1)
+			url := rawServer(t, false, func(nc net.Conn, br *bufio.Reader) {
+				nc.Write(encode(true, opClose, binary.BigEndian.AppendUint16(nil, uint16(tt.code)), false))
+				nc.SetReadDeadline(time.Now().Add(5 * time.Second))
+				f, err := readRawFrame(br)
+				if err != nil {
+					close(reply)
+					return
+				}
+				reply <- f
+			})
+			c, err := Dial(context.Background(), url, nil, Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = c.Read(context.Background())
+			var ce *CloseError
+			if !errors.As(err, &ce) {
+				t.Fatalf("err = %v, want CloseError", err)
+			}
+			wantCode := tt.code
+			if !tt.wantRemote {
+				wantCode = StatusProtocolError
+			}
+			if ce.Code != wantCode || ce.Remote != tt.wantRemote {
+				t.Fatalf("got code %d remote=%v, want %d remote=%v", ce.Code, ce.Remote, wantCode, tt.wantRemote)
+			}
+			if f := <-reply; f.closeCode() != wantCode {
+				t.Fatalf("server got close %d, want %d", f.closeCode(), wantCode)
+			}
+		})
+	}
+}
+
+func TestPingFloodAnsweredOffReadPath(t *testing.T) {
+	const pings = 100
+	frames := make(chan rawFrame, pings+1)
+	url := rawServer(t, false, func(nc net.Conn, br *bufio.Reader) {
+		var flood []byte
+		for i := range pings {
+			flood = append(flood, encode(true, opPing, fmt.Appendf(nil, "p%d", i), false)...)
+		}
+		flood = append(flood, encode(true, opText, []byte("after"), false)...)
+		nc.Write(flood)
+		nc.SetReadDeadline(time.Now().Add(5 * time.Second))
+		for {
+			f, err := readRawFrame(br)
+			if err != nil {
+				close(frames)
+				return
+			}
+			frames <- f
+		}
+	})
+	c, err := Dial(context.Background(), url, nil, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// With the write lock held, Read must still return.
+	c.writeMu.Lock()
+	read := make(chan string, 1)
+	go func() {
+		got, err := c.Read(context.Background())
+		read <- fmt.Sprintf("%s %v", got, err)
+	}()
+	select {
+	case got := <-read:
+		c.writeMu.Unlock()
+		if got != "after <nil>" {
+			t.Fatalf("Read = %s", got)
+		}
+	case <-time.After(2 * time.Second):
+		c.writeMu.Unlock()
+		c.abort()
+		t.Fatal("Read blocked on the write lock")
+	}
+	// After the first pong, a text marker ends the scan for extra pongs.
+	var pongs []string
+	for f := range frames {
+		if f.op == opText {
+			break
+		}
+		if f.op == opPong {
+			pongs = append(pongs, string(f.payload))
+			if len(pongs) == 1 {
+				if err := c.Write(context.Background(), []byte("marker")); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+	if len(pongs) != 1 || pongs[0] != fmt.Sprintf("p%d", pings-1) {
+		t.Fatalf("pongs = %q, want one pong for the latest ping", pongs)
+	}
+	c.abort()
+}
+
+func TestPongTimeoutIgnoresIdleReader(t *testing.T) {
+	srv := httptest.NewServer(echoHandler(nil))
+	defer srv.Close()
+	c, err := Dial(context.Background(), wsURL(srv), nil, Options{PingInterval: 10 * time.Millisecond, PongTimeout: 30 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close(StatusNormal, "")
+	time.Sleep(200 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := c.Write(ctx, []byte("still open")); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := c.Read(ctx); err != nil || string(got) != "still open" {
+		t.Fatalf("Read = %q, %v", got, err)
+	}
+}
+
+func TestDialDefaultHandshakeTimeout(t *testing.T) {
+	old := defaultHandshakeTimeout
+	defaultHandshakeTimeout = 100 * time.Millisecond
+	defer func() { defaultHandshakeTimeout = old }()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		nc, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer nc.Close()
+		io.Copy(io.Discard, nc)
+	}()
+	errc := make(chan error, 1)
+	go func() {
+		_, err := Dial(context.Background(), "ws://"+ln.Addr().String()+"/ws", nil, Options{})
+		errc <- err
+	}()
+	select {
+	case err := <-errc:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("err = %v, want deadline exceeded", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Dial did not time out")
 	}
 }

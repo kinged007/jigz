@@ -68,10 +68,13 @@ type Options struct {
 	WriteTimeout time.Duration
 	// PingInterval sends a ping at this interval when positive.
 	PingInterval time.Duration
-	// PongTimeout closes the connection when no pong has arrived for this
-	// long, checked at each ping. Pongs are processed while Read runs.
+	// PongTimeout closes the connection when a Read has been running for
+	// this long without receiving any frame, checked at each ping. Frames,
+	// pongs included, are only consumed by Read, so time without a running
+	// Read is not counted: a caller that pauses reading is not closed.
 	PongTimeout time.Duration
-	// HandshakeTimeout bounds Dial when positive.
+	// HandshakeTimeout bounds Dial. When it is zero and the Dial context has
+	// no deadline, 30 s is used.
 	HandshakeTimeout time.Duration
 	// TLSConfig is used for wss URLs. ServerName defaults to the URL host.
 	TLSConfig *tls.Config
@@ -112,11 +115,18 @@ type Conn struct {
 	writeMu   sync.Mutex
 	closeSent bool
 
+	// pingPayload holds the latest unanswered ping; pongLoop answers it.
+	pingMu      sync.Mutex
+	pingPayload []byte
+	pingPending bool
+	pingSignal  chan struct{}
+
 	closeRecv chan struct{}
 	recvOnce  sync.Once
 	done      chan struct{}
 	doneOnce  sync.Once
-	lastPong  atomic.Int64
+	reading   atomic.Bool
+	lastSeen  atomic.Int64
 }
 
 func newConn(nc net.Conn, br *bufio.Reader, client bool, opts Options) *Conn {
@@ -127,14 +137,15 @@ func newConn(nc net.Conn, br *bufio.Reader, client bool, opts Options) *Conn {
 		opts.WriteTimeout = defaultWriteTimeout
 	}
 	c := &Conn{
-		nc:        nc,
-		br:        br,
-		client:    client,
-		opts:      opts,
-		closeRecv: make(chan struct{}),
-		done:      make(chan struct{}),
+		nc:         nc,
+		br:         br,
+		client:     client,
+		opts:       opts,
+		closeRecv:  make(chan struct{}),
+		done:       make(chan struct{}),
+		pingSignal: make(chan struct{}, 1),
 	}
-	c.lastPong.Store(time.Now().UnixNano())
+	go c.pongLoop()
 	if opts.PingInterval > 0 {
 		go c.keepalive()
 	}
@@ -158,13 +169,35 @@ func (c *Conn) keepalive() {
 			return
 		case <-t.C:
 		}
-		if c.opts.PongTimeout > 0 && time.Since(time.Unix(0, c.lastPong.Load())) > c.opts.PongTimeout {
+		if c.opts.PongTimeout > 0 && c.reading.Load() && time.Since(time.Unix(0, c.lastSeen.Load())) > c.opts.PongTimeout {
 			c.abort()
 			return
 		}
 		if err := c.writeFrame(context.Background(), opPing, nil); err != nil {
 			return
 		}
+	}
+}
+
+// pongLoop answers pings off the read path, so a held write lock or a slow
+// peer never blocks Read. It takes the pending payload only once it holds the
+// write lock, so a ping flood is answered with one pong for the latest ping.
+func (c *Conn) pongLoop() {
+	for {
+		select {
+		case <-c.done:
+			return
+		case <-c.pingSignal:
+		}
+		c.writeMu.Lock()
+		c.pingMu.Lock()
+		p, ok := c.pingPayload, c.pingPending
+		c.pingPayload, c.pingPending = nil, false
+		c.pingMu.Unlock()
+		if ok {
+			c.writeLocked(context.Background(), opPong, p)
+		}
+		c.writeMu.Unlock()
 	}
 }
 
@@ -184,8 +217,8 @@ func (c *Conn) Read(ctx context.Context) ([]byte, error) {
 	return p, err
 }
 
-// ReadMessage returns the next data message and its type. Pings are answered
-// and pongs recorded while it runs.
+// ReadMessage returns the next data message and its type. Incoming frames,
+// pings and pongs included, are only consumed while it runs.
 func (c *Conn) ReadMessage(ctx context.Context) (MessageType, []byte, error) {
 	c.readMu.Lock()
 	defer c.readMu.Unlock()
@@ -195,9 +228,12 @@ func (c *Conn) ReadMessage(ctx context.Context) (MessageType, []byte, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, nil, fmt.Errorf("wsclient: read: %w", err)
 	}
+	c.lastSeen.Store(time.Now().UnixNano())
+	c.reading.Store(true)
 	stop := context.AfterFunc(ctx, c.abort)
 	typ, p, err := c.readMessage()
 	stop()
+	c.reading.Store(false)
 	if err != nil {
 		var ce *CloseError
 		switch {
@@ -266,6 +302,10 @@ func (c *Conn) writeFrame(ctx context.Context, op byte, payload []byte) error {
 	}
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
+	return c.writeLocked(ctx, op, payload)
+}
+
+func (c *Conn) writeLocked(ctx context.Context, op byte, payload []byte) error {
 	if c.closeSent || c.isDone() {
 		return ErrClosed
 	}
@@ -382,9 +422,13 @@ func (c *Conn) readMessage() (MessageType, []byte, error) {
 func (c *Conn) control(op byte, payload []byte) error {
 	switch op {
 	case opPing:
-		c.writeFrame(context.Background(), opPong, payload)
-	case opPong:
-		c.lastPong.Store(time.Now().UnixNano())
+		c.pingMu.Lock()
+		c.pingPayload, c.pingPending = payload, true
+		c.pingMu.Unlock()
+		select {
+		case c.pingSignal <- struct{}{}:
+		default:
+		}
 	case opClose:
 		code, reason := StatusNoStatus, ""
 		if len(payload) == 1 {
@@ -413,6 +457,7 @@ func (c *Conn) readHeader() (header, error) {
 	if _, err := io.ReadFull(c.br, b[:2]); err != nil {
 		return header{}, c.readFailed(err)
 	}
+	c.lastSeen.Store(time.Now().UnixNano())
 	h := header{fin: b[0]&0x80 != 0, op: b[0] & 0x0F, masked: b[1]&0x80 != 0}
 	if b[0]&0x70 != 0 {
 		return h, c.fail(StatusProtocolError, "reserved bits set")
@@ -500,5 +545,5 @@ func closePayload(code int, reason string) []byte {
 }
 
 func validCloseCode(code int) bool {
-	return (code >= 1000 && code <= 1003) || (code >= 1007 && code <= 1011) || (code >= 3000 && code <= 4999)
+	return (code >= 1000 && code <= 1003) || (code >= 1007 && code <= 1014) || (code >= 3000 && code <= 4999)
 }

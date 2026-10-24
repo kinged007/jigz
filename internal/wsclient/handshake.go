@@ -19,14 +19,31 @@ import (
 
 const acceptGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
+// defaultHandshakeTimeout is a variable so tests can shorten it.
+var defaultHandshakeTimeout = 30 * time.Second
+
+// StatusError reports a handshake response other than 101, redirects
+// included. It carries the status code only, never headers or body.
+type StatusError struct {
+	Code int
+}
+
+func (e *StatusError) Error() string {
+	if e.Code >= 300 && e.Code < 400 {
+		return fmt.Sprintf("redirect refused (status %d)", e.Code)
+	}
+	return fmt.Sprintf("unexpected status %d", e.Code)
+}
+
 func acceptKey(key string) string {
 	sum := sha1.Sum([]byte(key + acceptGUID))
 	return base64.StdEncoding.EncodeToString(sum[:])
 }
 
 // Dial opens a client connection to a ws:// or wss:// URL, sending header with
-// the upgrade request. Redirects and any status other than 101 fail. Errors
-// name the host and path only, never header values or the query.
+// the upgrade request. Redirects and any status other than 101 fail with a
+// *StatusError. Errors name the host and path only, never header values or
+// the query.
 func Dial(ctx context.Context, rawURL string, header http.Header, opts Options) (*Conn, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -48,9 +65,13 @@ func Dial(ctx context.Context, rawURL string, header http.Header, opts Options) 
 			port = "443"
 		}
 	}
-	if opts.HandshakeTimeout > 0 {
+	timeout := opts.HandshakeTimeout
+	if _, ok := ctx.Deadline(); !ok && timeout <= 0 {
+		timeout = defaultHandshakeTimeout
+	}
+	if timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, opts.HandshakeTimeout)
+		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
 
@@ -119,10 +140,8 @@ func handshake(ctx context.Context, nc net.Conn, u *url.URL, header http.Header,
 	}
 	resp.Body.Close()
 	switch {
-	case resp.StatusCode >= 300 && resp.StatusCode < 400:
-		return nil, fmt.Errorf("redirect refused (status %d)", resp.StatusCode)
 	case resp.StatusCode != http.StatusSwitchingProtocols:
-		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
+		return nil, &StatusError{Code: resp.StatusCode}
 	case !hasToken(resp.Header, "Upgrade", "websocket") || !hasToken(resp.Header, "Connection", "upgrade"):
 		return nil, errors.New("response is not a websocket upgrade")
 	case resp.Header.Get("Sec-WebSocket-Accept") != acceptKey(key):
