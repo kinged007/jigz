@@ -15,6 +15,8 @@ import (
 	_ "time/tzdata"
 
 	"gopkg.in/yaml.v3"
+
+	fleetconfig "github.com/kinged007/jigz/internal/fleetconfig"
 )
 
 // Config holds the resolved runtime settings for one loop run.
@@ -43,6 +45,8 @@ type Config struct {
 	// Budgets are the per-workflow spend caps by loop name. An entry with
 	// MaxTokens 0 is disabled.
 	Budgets map[string]Budget
+	// GitHub is the dashboard's GitHub enrichment and question scanning.
+	GitHub fleetconfig.GitHub
 }
 
 // Budget caps the tokens one workflow may use per period.
@@ -336,9 +340,13 @@ func Load(dir string) (*Config, error) {
 			Workflows map[string]struct {
 				Budget budgetFile `yaml:"budget"`
 			} `yaml:"workflows"`
+			GitHub yaml.Node `yaml:"github"`
 		}
 		if err := yaml.Unmarshal(raw, &file); err != nil {
 			return nil, fmt.Errorf("parse .jigz/config.yaml: %w", err)
+		}
+		if c.GitHub, err = parseGitHub(&file.GitHub); err != nil {
+			return nil, err
 		}
 		c.Repo, c.Token, c.Milestone = file.Repo, file.Token, file.Milestone
 		c.Assignee = file.Assignee
@@ -402,6 +410,45 @@ func Load(dir string) (*Config, error) {
 	c.Tracker = c.Repo
 	c.Workspaces = filepath.Join(dir, ".jigz", "workspaces")
 	return c, nil
+}
+
+// LoadGitHub reads only the github block of dir's .jigz/config.yaml. It is
+// the cheap read the dashboard repeats so a config edit applies without a
+// restart.
+func LoadGitHub(dir string) (fleetconfig.GitHub, error) {
+	raw, err := os.ReadFile(filepath.Join(dir, ".jigz", "config.yaml"))
+	if err != nil {
+		return fleetconfig.GitHub{}, fmt.Errorf("read config: %w", err)
+	}
+	var file struct {
+		GitHub yaml.Node `yaml:"github"`
+	}
+	if err := yaml.Unmarshal(raw, &file); err != nil {
+		return fleetconfig.GitHub{}, fmt.Errorf("parse .jigz/config.yaml: %w", err)
+	}
+	return parseGitHub(&file.GitHub)
+}
+
+// parseGitHub decodes and validates the github block. Unknown keys in the
+// block are rejected so a misspelt enrich does not silently stay off.
+func parseGitHub(node *yaml.Node) (fleetconfig.GitHub, error) {
+	var g fleetconfig.GitHub
+	if node.Kind == 0 {
+		return g, nil
+	}
+	raw, err := yaml.Marshal(node)
+	if err != nil {
+		return g, fmt.Errorf("github: %w", err)
+	}
+	dec := yaml.NewDecoder(strings.NewReader(string(raw)))
+	dec.KnownFields(true)
+	if err := dec.Decode(&g); err != nil {
+		return fleetconfig.GitHub{}, fmt.Errorf("parse .jigz/config.yaml: github: %w", err)
+	}
+	if err := g.Validate(); err != nil {
+		return fleetconfig.GitHub{}, err
+	}
+	return g, nil
 }
 
 // MigrateRepoDir moves a repo-local `.sortie/` directory to `.jigz/`

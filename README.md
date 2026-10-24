@@ -659,6 +659,28 @@ schedule and the status document keep running. `stop` ends the run.
 `restart --when-idle` wakes the loops, and a restart without
 `--when-idle` replaces the process as usual.
 
+### GitHub enrichment and questions
+
+`github:` in `.jigz/config.yaml` lets the dashboard read GitHub with the
+repo's token: pull requests for run history, and agent questions on the
+Questions page. It is off by default:
+
+```yaml
+github:
+  enrich: false             # default; true turns on enrichment and questions
+  interval: 10m             # enrichment pass interval, at least 1m
+  api_url: https://api.github.com   # default; set it for GitHub Enterprise Server
+  details: false            # also read commits, changed files and check runs
+  questions_interval: 2m    # question scan interval, at least 1m
+  questions_window: 168h    # how far back a scan looks for runs
+```
+
+The dashboard reads the block on each pass, so an edit applies without a
+restart. The token is resolved as for the loops: `JIG_TOKEN`, then
+`token:`, then `GITHUB_TOKEN` and `GH_TOKEN`. An unknown key or an invalid
+value in the block stops `jig` from starting. A `--unite` page uses the
+block of the first project, by slug, that sets `enrich: true`.
+
 ### Spend controls
 
 `workflows:` in `.jigz/config.yaml` caps the tokens one workflow may use

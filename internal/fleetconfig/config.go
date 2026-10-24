@@ -280,6 +280,14 @@ func (g GitHub) BaseURL() string {
 	return strings.TrimRight(g.APIURL, "/")
 }
 
+// Validate checks the block's durations and API URL.
+func (g GitHub) Validate() error {
+	if fe := g.validate(); fe != nil {
+		return fe
+	}
+	return nil
+}
+
 func (g GitHub) validate() *FieldError {
 	if g.Interval != "" {
 		d, err := time.ParseDuration(g.Interval)
