@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kinged007/jigz/schemas/hub-protocol/v0/enroll.request.schema.json",
+  "title": "POST enroll request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["token", "name", "host", "jig_version", "engine_version", "tracker_login"],
+  "properties": {
+    "token": {"type": "string", "minLength": 1, "description": "One-time enrollment token."},
+    "name": {"type": "string", "minLength": 1, "maxLength": 40, "description": "Daemon name; default is the host name."},
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "arch", "cpus", "memory_bytes"],
+      "properties": {
+        "os": {"type": "string", "minLength": 1, "description": "Go runtime.GOOS."},
+        "arch": {"type": "string", "minLength": 1, "description": "Go runtime.GOARCH."},
+        "cpus": {"type": "integer", "minimum": 1},
+        "memory_bytes": {"type": "integer", "minimum": 0, "description": "0 when the daemon cannot read it."}
+      }
+    },
+    "jig_version": {"type": "string", "minLength": 1},
+    "engine_version": {"type": "string", "minLength": 1},
+    "tracker_login": {"type": "string", "minLength": 1, "description": "Login of the tracker token on the machine."}
+  }
+}

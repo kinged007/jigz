@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kinged007/jigz/schemas/hub-protocol/v0/config.response.schema.json",
+  "title": "GET config response (200)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["member", "projects", "files", "labels"],
+  "properties": {
+    "member": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["login"],
+      "properties": {
+        "login": {"type": "string", "minLength": 1, "description": "Member login on the provider; the assignee of every loop."}
+      }
+    },
+    "projects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["provider", "repo", "workflows", "filter_additions"],
+        "properties": {
+          "provider": {"enum": ["github"]},
+          "repo": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+          "workflows": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"},
+            "description": "Enabled workflow names; each is the stem of a WORKFLOW.<name>.md file in files."
+          },
+          "filter_additions": {"type": "string", "description": "Search qualifiers appended to each workflow's query filter; may be empty."}
+        }
+      }
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256", "content"],
+        "properties": {
+          "path": {"type": "string", "pattern": "^[A-Za-z0-9_-][A-Za-z0-9_.-]*(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*$", "description": "Relative to .jigz/workflows/; no segment starts with a dot."},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "content": {"type": "string"}
+        }
+      }
+    },
+    "labels": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "color", "description"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1, "maxLength": 50},
+          "color": {"type": "string", "pattern": "^[0-9a-f]{6}$"},
+          "description": {"type": "string"}
+        }
+      }
+    }
+  }
+}

@@ -463,3 +463,42 @@ the protocol and the code.
 Code finding outside this scope: `internal/supervise.Supervisor` and the
 `repos:` resolution in `internal/fleetconfig` have no production caller
 (WP6 reuses the first).
+
+### Engine facts
+
+Read from the engine source at the pinned tags, `v1.28.1` (default,
+`kinged007/sortie`, `internal/engine/engine.go` `DefaultTag`) and
+`v1.29.0` (upstream, `TestAcceptanceUpstreamEngine`). Line numbers are
+`v1.28.1`, then `v1.29.0` where they differ.
+
+**The engine re-reads its workflow file while running.** Two paths:
+
+- `workflow.Manager.Start` watches the workflow file's directory with
+  `fsnotify` and reloads on a write or create of the file, after a 50 ms
+  debounce (`internal/workflow/manager.go:323`, `:378`; `:402`, `:457`).
+  `cmd/sortie/boot.go:194` (`:191`) starts it.
+- Every poll tick runs a defensive `Reload()` in preflight before
+  dispatch (`internal/orchestrator/orchestrator.go:927`; `:948`). It
+  reads the workflow by path, so it also picks up a file whose directory
+  was renamed over, which the watcher misses.
+
+A reload re-reads the workflow and the prompt and partial files it names
+(`manager.go:442`; `:499`). A failed reload keeps the last good config.
+Agent settings are resolved once per attempt, so a reload reaches a claim
+already held at its next attempt
+(`internal/orchestrator/attempt_settings.go:23`; `:24`). For 2.3: files
+swapped under a running engine take effect at its next tick, whether or
+not the daemon restarts it.
+
+**The `github` tracker sends `query_filter` to the search API.** With a
+non-empty filter, `FetchCandidateIssues` calls `GET /search/issues` with
+`q=repo:<owner>/<repo> type:issue state:open <query_filter>`
+(`internal/scm/github/tracker.go:182`, `:239`, same lines at both tags);
+with an empty filter it lists `/repos/{owner}/{repo}/issues` with no
+filter. The `github-pr` tracker (`v1.28.1` only; `v1.29.0` has none)
+does the same with `type:pr` (`internal/scm/githubpr/tracker.go:142`,
+`:164`). The adapter reads `query_filter` when it is built
+(`tracker.go:125`), once at boot (`cmd/sortie/boot.go:267`; `:265`), and
+a workflow reload does not rebuild it. `jig` passes the filter as
+`SORTIE_TRACKER_QUERY_FILTER` (`cmd/jig/supervise.go:201`), so a filter
+change reaches the engine only when its process restarts.

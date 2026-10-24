@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kinged007/jigz/schemas/hub-protocol/v0/enroll.response.schema.json",
+  "title": "POST enroll response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["daemon_id", "credential", "runner_label"],
+  "properties": {
+    "daemon_id": {"type": "string", "minLength": 1},
+    "credential": {"type": "string", "minLength": 1, "description": "Bearer token for every later request."},
+    "runner_label": {"type": "string", "pattern": "^runner:[a-z0-9][a-z0-9-]*$", "maxLength": 50}
+  }
+}

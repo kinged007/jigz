@@ -1,0 +1,1 @@
+{"events": [{"id": "r-1", "type": "started", "workflow": "issues", "item": {"project": "acme/widgets", "number": 12, "kind": "issue"}, "attempt": 1, "started_at": "2026-10-24T10:00:00Z", "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2, "measured": true}}]}

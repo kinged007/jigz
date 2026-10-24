@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kinged007/jigz/schemas/hub-protocol/v0/status.response.schema.json",
+  "title": "POST status response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["interval_seconds", "config_etag"],
+  "properties": {
+    "interval_seconds": {"type": "integer", "minimum": 5, "description": "Seconds until the next heartbeat."},
+    "config_etag": {"type": "string", "minLength": 1, "description": "ETag of the current config; the daemon fetches config when it differs from the stored one."}
+  }
+}
