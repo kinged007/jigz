@@ -1,8 +1,8 @@
 # Jigz: handoff
 
 Status: 2026-10-24, Phase 3 (Questions) is merged into `main` (PR #22,
-commit `d940a08`). Phase 4 (Connected mode) is implemented on branch
-`feat/connected-mode`; the PR is pending. No release is requested. Read this first in a new
+commit `d940a08`). Phase 4 (Connected mode) is merged into `main` (PR #24,
+commit `7653f10`). No release is requested. Read this first in a new
 session working on Jigz. The hub is a separate stream; its plans are in
 `plans/hub/` and it has no code yet.
 
@@ -16,7 +16,7 @@ release or release notes; releases are deferred until the user asks. The
 rename to Jigz is done, including the repo directory `.sortie/` to
 `.jigz/`. CI runs the acceptance test. Phase 3 (Questions) is merged into `main`; its plan is
 `plans/jigz/questions.md`. Phase 4 plan: `plans/jigz/connected-mode.md`,
-approved by delegation; implemented on `feat/connected-mode`.
+approved by delegation; merged into `main` as PR #24.
 
 Read, in order:
 
@@ -132,6 +132,9 @@ squash, with CI green (check, acceptance, four builds):
 - #17, #19, #21: plans. `needs-human` for blocking questions, engine
   findings, and `plans/jigz/questions.md` as the Phase 3 plan.
 - #22: Phase 3 (blocking questions, answers, Questions page).
+- #23: the Phase 4 plan and its decisions.
+- #24: Phase 4 (connected mode: `jig join`, `jig daemon`, hub client). The
+  CI `acceptance` job ran 8m4s on this PR.
 - #18: the default agent runtime `claude-code` with `claude-haiku-5-5`,
   and removal of the `pi` to `claude-code` fallback.
 
@@ -241,19 +244,21 @@ Outside this repository:
 
 ## 6. Outstanding work
 
-1. Phase 4 (Connected mode): work packages WP0 to WP10 of
-   `plans/jigz/connected-mode.md` are implemented on `feat/connected-mode`.
-   Open the PR after the user approves it. The hub repository side is not
-   built.
+1. Phase 4 (Connected mode) is merged into `main` (PR #24). Work
+   packages WP0 to WP10 of `plans/jigz/connected-mode.md` are done. The hub
+   repository side is not built.
 2. Remove the worktrees under `/home/coder/sortie-loop-wt/`.
 3. Phase 1 and Phase 2 releases and release notes: deferred; only when
    the user asks.
-4. Phase 5 (previews) and Phase 6 (agent sessions, `task.run`).
-5. User decisions pending:
-   - Approval for `github.com/coder/websocket` as a replacement for
-     `internal/wsclient`.
-   - Whether top-level config keys are validated strictly.
-   - Issue #20.
+4. Phase 5 (previews) and Phase 6 (agent session host, `task.run`) are not
+   started.
+5. Decisions waiting for the user:
+   - Approve `github.com/coder/websocket` or keep `internal/wsclient`.
+   - Whether top-level config keys in `.jigz/config.yaml` are validated
+     strictly.
+   - Issue #20 (author trust in the prompts).
+   - Whether to raise `timeout-minutes` of the CI `acceptance` job if it
+     approaches 15 minutes. It ran 8m4s on the Phase 4 PR.
 
 Issue #20 (trust only comments from authorized authors) is open: the
 scanner filters authors (`internal/collector/questions.go`), the prompts
@@ -341,8 +346,9 @@ dashboard, because an earlier instance used 7677 with engine children on
 7679 and 7680. Tests isolate `HOME` and `XDG_*` to temporary directories;
 keep doing that.
 
-Installed binaries: `~/.local/bin/jig` is built from branch
-`feat/questions` at its merge. There is no `make install` target; build it
+Installed binaries: `~/.local/bin/jig` is built from
+`main` at `7653f10` (Phase 4 merged). The previous binary is kept as
+`~/.local/bin/jig.bak`. There is no `make install` target; build it
 with `go build -o ~/.local/bin/jig ./cmd/jig`. `~/.local/bin/sortie-loop` is
 the binary from before the rename.
 
@@ -395,5 +401,6 @@ the binary from before the rename.
 
 ## 9. Next action
 
-1. Open the Phase 4 PR from `feat/connected-mode` when the user asks, then
-   start the hub repository side or Phase 5.
+1. No PR is pending. Remaining work: the hub repository side, Phase 5
+   (previews) and Phase 6 (agent session host), both not started, and the
+   decisions listed in section 6. Ask the user which to start.

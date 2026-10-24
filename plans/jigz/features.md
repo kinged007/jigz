@@ -2,8 +2,7 @@
 
 Status: draft for discussion (2026-10-21)
 
-"exists" means implemented on `main`, on `feat/united-dashboard`, on
-`feat/questions`, or on `feat/connected-mode`. A
+"exists" means implemented on `main`. A
 number in brackets is the phase in `plans/jigz/vision-and-roadmap.md`
 section 6.
 
