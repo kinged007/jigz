@@ -4,10 +4,13 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +19,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -30,6 +34,8 @@ import (
 	"github.com/kinged007/jigz/internal/config"
 	"github.com/kinged007/jigz/internal/engine"
 	"github.com/kinged007/jigz/internal/fakegithub"
+	"github.com/kinged007/jigz/internal/fakehub"
+	"github.com/kinged007/jigz/internal/hubproto"
 	"github.com/kinged007/jigz/internal/machine"
 	"github.com/kinged007/jigz/internal/rollup"
 )
@@ -117,16 +123,7 @@ func TestAcceptance(t *testing.T) {
 	defer logf.Close()
 	cmd := exec.Command(loopBin, "--host", "127.0.0.1", "--dashboard-port", strconv.Itoa(dashPort), repoDir)
 	cmd.Dir = repoDir
-	env := []string{
-		"PATH=" + os.Getenv("PATH"),
-		"HOME=" + home,
-		"XDG_CACHE_HOME=" + filepath.Join(home, ".cache"),
-		"XDG_DATA_HOME=" + filepath.Join(home, ".local", "share"),
-		"XDG_CONFIG_HOME=" + filepath.Join(home, ".config"),
-		"XDG_STATE_HOME=" + filepath.Join(home, ".local", "state"),
-		"JIG_ENGINE_BIN=" + engineBin,
-		"JIG_ONLY=issues",
-	}
+	env := append(isolatedEnv(home), "JIG_ENGINE_BIN="+engineBin, "JIG_ONLY=issues")
 	cmd.Env = env
 	cmd.Stdout, cmd.Stderr = logf, logf
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -140,55 +137,10 @@ func TestAcceptance(t *testing.T) {
 		_ = syscall.Kill(-pgid, syscall.SIGKILL)
 		<-exited
 	}()
-	focus := planned
-	fail := func(format string, args ...any) {
-		t.Helper()
-		t.Errorf(format, args...)
-		t.Logf("Jigz output (tail):\n%s", logTail(logPath, 60))
-		t.Logf("fake GitHub label events for #%d: %v", focus, labelLog(gh, slug, focus))
-		t.FailNow()
-	}
-	waitFor := func(what string, d time.Duration, ok func() bool) {
-		t.Helper()
-		deadline := time.Now().Add(d)
-		for !ok() {
-			select {
-			case <-exited:
-				fail("Jigz exited while waiting for %s", what)
-			default:
-			}
-			if time.Now().After(deadline) {
-				fail("timed out after %s waiting for %s", d, what)
-			}
-			time.Sleep(250 * time.Millisecond)
-		}
-	}
+	run := &acceptanceRun{t: t, gh: gh, slug: slug, name: "Jigz", logPath: logPath, exited: exited, focus: planned}
+	waitFor, assertHandedOff := run.waitFor, run.assertHandedOff
 	dash := fmt.Sprintf("http://127.0.0.1:%d", dashPort)
 
-	assertHandedOff := func(t *testing.T, n int, d time.Duration) []string {
-		t.Helper()
-		focus = n
-		waitFor(fmt.Sprintf("issue #%d to reach agent:done", n), d, func() bool {
-			it, _ := gh.Get(slug, n)
-			return slices.Contains(it.Labels, "agent:done") && !slices.Contains(it.Labels, "in-progress")
-		})
-		log := labelLog(gh, slug, n)
-		addedClaim := slices.Index(log, "+in-progress")
-		addedDone := slices.Index(log, "+agent:done")
-		if addedClaim < 0 || addedDone < 0 || addedClaim > addedDone {
-			t.Errorf("want +in-progress before +agent:done, got %v", log)
-		}
-		for _, want := range []string{"-in-progress", "-agent:plan"} {
-			if !slices.Contains(log, want) {
-				t.Errorf("label event %s missing from %v", want, log)
-			}
-		}
-		it, _ := gh.Get(slug, n)
-		if !slices.Equal(it.Labels, []string{"agent:done"}) {
-			t.Errorf("final labels %v, want [agent:done]", it.Labels)
-		}
-		return log
-	}
 	writeMachine := func(content string) {
 		t.Helper()
 		path := filepath.Join(home, ".config", "jigz", "machine.yaml")
@@ -380,7 +332,7 @@ func TestAcceptance(t *testing.T) {
 
 		held := gh.Add(fakegithub.Item{Repo: slug, Title: "Outside hours", Body: "Wait for the window.",
 			Labels: []string{"agent:plan"}, Assignees: []string{owner}})
-		focus = held
+		run.focus = held
 		searches := countSearches(gh)
 		time.Sleep(5 * time.Second)
 		it, _ := gh.Get(slug, held)
@@ -645,7 +597,7 @@ func TestAcceptance(t *testing.T) {
 			}
 		}
 
-		focus = a
+		run.focus = a
 		waitFor(fmt.Sprintf("issue #%d to be claimed and handed off again", a), 90*time.Second, func() bool {
 			it, _ := gh.Get(slug, a)
 			return claims(a) == 2 && slices.Contains(it.Labels, "agent:done") && !slices.Contains(it.Labels, "in-progress")
@@ -783,14 +735,7 @@ func TestAcceptanceUpstreamEngine(t *testing.T) {
 	defer logf.Close()
 	cmd := exec.Command(loopBin, "--host", "127.0.0.1", "--dashboard-port", strconv.Itoa(dashPort), repoDir)
 	cmd.Dir = repoDir
-	env := []string{
-		"PATH=" + os.Getenv("PATH"),
-		"HOME=" + home,
-		"XDG_CACHE_HOME=" + filepath.Join(home, ".cache"),
-		"XDG_DATA_HOME=" + filepath.Join(home, ".local", "share"),
-		"XDG_CONFIG_HOME=" + filepath.Join(home, ".config"),
-		"XDG_STATE_HOME=" + filepath.Join(home, ".local", "state"),
-	}
+	env := isolatedEnv(home)
 	cmd.Env = env
 	cmd.Stdout, cmd.Stderr = logf, logf
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -930,6 +875,511 @@ func TestAcceptanceUpstreamEngine(t *testing.T) {
 		}
 		t.Logf("upstream scenario b: %s, total %s", time.Since(t0).Round(time.Millisecond), time.Since(start).Round(time.Second))
 	})
+}
+
+// TestAcceptanceConnected runs `jig join` and `jig daemon` against the fake
+// hub and the fake GitHub, with the pinned engine and its mock agent. The
+// hub serves the acceptance variant of the issues workflow (see
+// TestAcceptance) and the shipped prompts for acme/widgets, member octo.
+//
+// machine.yaml sets the idle time and the fallback interval to 1m, the
+// shortest value machine.Load accepts, and the fake hub asks for a heartbeat
+// every 5 seconds, the shortest it serves.
+func TestAcceptanceConnected(t *testing.T) {
+	start := time.Now()
+	engineBin := acceptanceEngine(t)
+	spec, err := engine.Configured()
+	if err != nil {
+		t.Fatal(err)
+	}
+	loopBin := buildLoop(t)
+
+	const (
+		slug        = "acme/widgets"
+		owner       = "octo"
+		token       = "connected-tracker-token"
+		enrollToken = "connected-enroll-token"
+		runner      = "runner:ci-1"
+		fallback    = time.Minute
+	)
+	gh := fakegithub.New(owner, token)
+	gh.Logf = t.Logf
+	gh.AddRepo(slug, append(labelNames(config.DefaultLabels), runner, "runner:other", "backlog")...)
+	srv := httptest.NewServer(gh)
+	defer srv.Close()
+	hub := fakehub.New(enrollToken)
+	hub.SetInterval(5)
+	hubSrv := httptest.NewServer(hub)
+	defer hubSrv.Close()
+
+	shipped, err := embeddedWorkflows.ReadFile("workflows/WORKFLOW.issues.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow, err := acceptanceWorkflow(string(shipped), srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompts, err := fs.ReadDir(embeddedWorkflows, "workflows/prompts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hubFile := func(path, content string) hubproto.ConfigFile {
+		return hubproto.ConfigFile{Path: path, SHA256: sha256Hex(content), Content: content}
+	}
+	hubConfig := func(workflow, additions string) hubproto.ConfigResponse {
+		files := []hubproto.ConfigFile{hubFile("WORKFLOW.issues.md", workflow)}
+		for _, e := range prompts {
+			raw, err := embeddedWorkflows.ReadFile("workflows/prompts/" + e.Name())
+			if err != nil {
+				t.Fatal(err)
+			}
+			files = append(files, hubFile("prompts/"+e.Name(), string(raw)))
+		}
+		labels := []hubproto.Label{}
+		for _, l := range config.DefaultLabels {
+			labels = append(labels, hubproto.Label{Name: l.Name, Color: l.Color, Description: l.Description})
+		}
+		return hubproto.ConfigResponse{
+			Member: hubproto.Member{Login: owner},
+			Projects: []hubproto.ConfigProject{{Provider: hubproto.ProviderGitHub, Repo: slug,
+				Workflows: []string{"issues"}, FilterAdditions: additions}},
+			Files:  files,
+			Labels: labels,
+		}
+	}
+	etag := hub.SetConfig(hubConfig(workflow, ""))
+
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	env := append(isolatedEnv(home), "JIG_ENGINE_BIN="+engineBin)
+	cfgDir := filepath.Join(home, ".config", "jigz")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	machineYAML := fmt.Sprintf("connected:\n  idle_timeout: %s\n  fallback_interval: %s\n", "1m", fallback)
+	if err := os.WriteFile(filepath.Join(cfgDir, "machine.yaml"), []byte(machineYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Join.
+	join := exec.Command(loopBin, "join", hubSrv.URL, "-", "--no-service", "--name", "ci-1")
+	join.Env = append(slices.Clone(env), "JIG_TOKEN="+token, "JIG_GITHUB_API_URL="+srv.URL)
+	join.Stdin = strings.NewReader(enrollToken + "\n")
+	joinOut, err := join.CombinedOutput()
+	if err != nil {
+		t.Fatalf("jig join: %v\n%s", err, joinOut)
+	}
+	enrolled := hub.Enrollments()
+	if len(enrolled) != 1 {
+		t.Fatalf("%d enrollments, want 1", len(enrolled))
+	}
+	e := enrolled[0]
+	if e.Name != "ci-1" || e.Host.OS != runtime.GOOS || e.Host.Arch != runtime.GOARCH || e.Host.CPUs != runtime.NumCPU() ||
+		e.JigVersion != version || e.EngineVersion != spec.Version() || e.TrackerLogin != owner {
+		t.Errorf("enrollment %+v, want name ci-1, %s/%s, %d CPUs, jig %s, engine %s, login %s",
+			e, runtime.GOOS, runtime.GOARCH, runtime.NumCPU(), version, spec.Version(), owner)
+	}
+	for path, want := range map[string]os.FileMode{filepath.Join(cfgDir, "hub.json"): 0o600, cfgDir: 0o700} {
+		if st, err := os.Stat(path); err != nil {
+			t.Error(err)
+		} else if st.Mode().Perm() != want {
+			t.Errorf("%s: mode %04o, want %04o", path, st.Mode().Perm(), want)
+		}
+	}
+
+	// 2. Start the daemon.
+	jigdLog := filepath.Join(home, ".local", "state", "jigz", "jigd.log")
+	outPath := filepath.Join(root, "daemon.out")
+	outf, err := os.Create(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer outf.Close()
+	cmd := exec.Command(loopBin, "daemon")
+	cmd.Dir = root
+	cmd.Env = env
+	cmd.Stdout, cmd.Stderr = outf, outf
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	pid := cmd.Process.Pid
+	exited := make(chan struct{})
+	var exitErr error
+	go func() { exitErr = cmd.Wait(); close(exited) }()
+	// Loop children lead their own process groups.
+	groups := map[int]bool{}
+	watch := func() []proc {
+		ps := descendants(pid)
+		for _, p := range ps {
+			if p.pgid != pid {
+				groups[p.pgid] = true
+			}
+		}
+		return ps
+	}
+	defer func() {
+		watch()
+		for g := range groups {
+			_ = syscall.Kill(-g, syscall.SIGKILL)
+		}
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		<-exited
+	}()
+	engines := func() []proc {
+		var out []proc
+		for _, p := range watch() {
+			if f := strings.Fields(p.args); len(f) > 0 && f[0] == engineBin && (len(f) < 2 || f[1] != "validate") {
+				out = append(out, p)
+			}
+		}
+		return out
+	}
+	run := &acceptanceRun{t: t, gh: gh, slug: slug, name: "the daemon", logPath: jigdLog, exited: exited, keep: []string{runner}}
+	waitFor, assertHandedOff := run.waitFor, run.assertHandedOff
+	logHas := func(s string) bool {
+		raw, _ := os.ReadFile(jigdLog)
+		return strings.Contains(string(raw), s)
+	}
+	loop := func() (hubproto.Loop, bool) {
+		st := hub.Statuses()
+		if len(st) == 0 {
+			return hubproto.Loop{}, false
+		}
+		for _, l := range st[len(st)-1].Loops {
+			if l.Project == slug && l.Workflow == "issues" {
+				return l, true
+			}
+		}
+		return hubproto.Loop{}, false
+	}
+	send := func(typ hubproto.CommandType, args string) hubproto.Ack {
+		t.Helper()
+		waitFor("the command socket", 90*time.Second, hub.Connected)
+		ack, err := hub.Send(hubproto.Command{Type: typ, Args: json.RawMessage(args)})
+		if err != nil {
+			run.fail("send %s: %v", typ, err)
+		}
+		return ack
+	}
+	loopArgs := `{"project":"` + slug + `","workflow":"issues"}`
+	add := func(title string, labels ...string) int {
+		return gh.Add(fakegithub.Item{Repo: slug, Title: title, Body: title + ".", Labels: labels, Assignees: []string{owner}})
+	}
+	fallbackQ := "state:open label:" + runner + " repo:" + slug
+	fallbacks := func() int {
+		_, fb := splitSearches(gh)
+		n := 0
+		for _, q := range fb {
+			if q == fallbackQ {
+				n++
+			}
+		}
+		return n
+	}
+
+	t.Run("2_daemon_starts_without_a_loop", func(t *testing.T) {
+		waitFor("the config fetch, a heartbeat with the loop stopped and the socket", 40*time.Second, func() bool {
+			l, ok := loop()
+			return logHas("config "+etag+" fetched") && ok && l.State == hubproto.LoopStopped && hub.Connected()
+		})
+		if ps := engines(); len(ps) != 0 {
+			t.Errorf("engine processes before any wake: %+v", ps)
+		}
+		t.Logf("daemon up after %s", time.Since(start).Round(time.Second))
+	})
+
+	// 3. Items with and without this runner's label.
+	a := add("Plan A", "agent:plan", runner)
+	b := add("Plan B", "agent:plan")
+	c := add("Plan C", "agent:plan", "runner:other")
+
+	t.Run("4_wake_runs_only_this_runners_item", func(t *testing.T) {
+		if ack := send(hubproto.CmdWake, loopArgs); !ack.OK {
+			t.Fatalf("wake ack %+v, want ok", ack)
+		}
+		assertHandedOff(t, a, 90*time.Second)
+		// The engine stays up until the idle time; this also proves the
+		// engine process checks can see it.
+		if len(engines()) == 0 {
+			t.Errorf("no engine process under the daemon after the wake")
+		}
+		engineQ, _ := splitSearches(gh)
+		if len(engineQ) == 0 {
+			t.Errorf("no engine search")
+		}
+		for _, q := range engineQ {
+			if !slices.Contains(strings.Fields(q), "label:"+runner) {
+				t.Errorf("engine search without label:%s: %q", runner, q)
+			}
+		}
+		for _, n := range []int{b, c} {
+			if ev := labelLog(gh, slug, n); len(ev) != 0 {
+				t.Errorf("issue #%d got label events %v", n, ev)
+			}
+		}
+	})
+
+	finishedA := func() []hubproto.RunEvent {
+		var out []hubproto.RunEvent
+		for _, ev := range hub.Runs() {
+			if ev.Type == hubproto.EventFinished && ev.Item.Project == slug && ev.Item.Number == a {
+				out = append(out, ev)
+			}
+		}
+		return out
+	}
+	t.Run("5_the_run_reaches_the_hub", func(t *testing.T) {
+		waitFor(fmt.Sprintf("the finished run of #%d", a), 120*time.Second, func() bool { return len(finishedA()) > 0 })
+		ev := finishedA()[0]
+		if ev.Outcome != hubproto.OutcomeSucceeded || ev.Usage == nil || ev.Usage.InputTokens != 100 || ev.Usage.OutputTokens != 50 ||
+			ev.Item.Kind != hubproto.KindIssue || ev.Workflow != "issues" {
+			t.Errorf("run event %+v (usage %+v), want succeeded issue run with 100 input and 50 output tokens", ev, ev.Usage)
+		}
+	})
+
+	t.Run("6_idle_loop_sleeps", func(t *testing.T) {
+		// Idle time 1m plus the child's 30s idle poll.
+		waitFor("a heartbeat with the loop sleeping", 150*time.Second, func() bool {
+			l, ok := loop()
+			return ok && l.State == hubproto.LoopSleeping
+		})
+		waitFor("the engine to exit", 30*time.Second, func() bool { return len(engines()) == 0 })
+	})
+
+	var d int
+	t.Run("7_fallback_search_while_the_hub_is_down", func(t *testing.T) {
+		before := fallbacks()
+		hub.SetDown(true)
+		d = add("Plan D", "agent:plan", runner)
+		waitFor("a fallback search while the hub is down", 60*time.Second, func() bool { return fallbacks() > before })
+		assertHandedOff(t, d, 90*time.Second)
+	})
+
+	t.Run("8_config_change_reaches_the_engine", func(t *testing.T) {
+		hub.SetDown(false)
+		// The workflow changes too, so the status reports a new hash.
+		changed := workflow + "\n"
+		etag2 := hub.SetConfig(hubConfig(changed, "-label:backlog"))
+		waitFor("the new config to be fetched", 90*time.Second, func() bool { return logHas("config " + etag2 + " fetched") })
+		want := hubproto.FileHash{Path: "WORKFLOW.issues.md", SHA256: sha256Hex(changed)}
+		waitFor("the status to show the new workflow hash", 90*time.Second, func() bool {
+			l, ok := loop()
+			return ok && slices.Contains(l.Files, want)
+		})
+		seen, _ := splitSearches(gh)
+		// The loop may have gone to sleep since D; wake is a no-op on an
+		// awake loop.
+		if ack := send(hubproto.CmdWake, loopArgs); !ack.OK {
+			t.Fatalf("wake ack %+v, want ok", ack)
+		}
+		first := -1
+		waitFor("an engine search with -label:backlog", 90*time.Second, func() bool {
+			q, _ := splitSearches(gh)
+			for i := len(seen); i < len(q); i++ {
+				if slices.Contains(strings.Fields(q[i]), "-label:backlog") {
+					first = i
+					return true
+				}
+			}
+			return false
+		})
+		time.Sleep(3 * time.Second)
+		q, _ := splitSearches(gh)
+		for _, s := range q[first:] {
+			if f := strings.Fields(s); !slices.Contains(f, "-label:backlog") || !slices.Contains(f, "label:"+runner) {
+				t.Errorf("engine search after the change lacks -label:backlog or label:%s: %q", runner, s)
+			}
+		}
+	})
+
+	t.Run("9_pause_holds_and_resume_runs", func(t *testing.T) {
+		if ack := send(hubproto.CmdPause, `{}`); !ack.OK {
+			t.Fatalf("pause ack %+v, want ok", ack)
+		}
+		waitFor("the loop to drain", 90*time.Second, func() bool {
+			l, ok := loop()
+			return ok && l.State == hubproto.LoopStopped && len(engines()) == 0
+		})
+		e := add("Plan E", "agent:plan", runner)
+		run.focus = e
+		until := time.Now().Add(2*fallback + 5*time.Second)
+		for time.Now().Before(until) {
+			if ev := labelLog(gh, slug, e); len(ev) != 0 {
+				run.fail("issue #%d got label events while paused: %v", e, ev)
+			}
+			select {
+			case <-exited:
+				run.fail("the daemon exited while paused")
+			default:
+			}
+			time.Sleep(time.Second)
+		}
+		if ack := send(hubproto.CmdResume, `{}`); !ack.OK {
+			t.Fatalf("resume ack %+v, want ok", ack)
+		}
+		assertHandedOff(t, e, 120*time.Second)
+	})
+
+	t.Run("10_unsupported_command_and_no_listener", func(t *testing.T) {
+		ack := send(hubproto.CmdSessionOpen, `{}`)
+		if ack.OK || ack.Error == nil || ack.Error.Code != hubproto.AckUnsupported {
+			t.Errorf("session.open ack %+v, want ok false with code unsupported", ack)
+		}
+		if runtime.GOOS != "linux" {
+			t.Skip("listening sockets are read from /proc")
+		}
+		if l := listeningSockets(pid); len(l) != 0 {
+			t.Errorf("the daemon listens on %v", l)
+		}
+	})
+
+	// 11. Shut down as the service manager does.
+	t0 := time.Now()
+	before := watch()
+	_ = syscall.Kill(pid, syscall.SIGTERM)
+	select {
+	case <-exited:
+		if exitErr != nil {
+			t.Errorf("daemon exit: %v", exitErr)
+		}
+	case <-time.After(120 * time.Second):
+		t.Errorf("the daemon did not exit within 120s of SIGTERM")
+	}
+	for g := range groups {
+		if left := groupMembers(g); len(left) > 0 {
+			t.Errorf("processes left in loop child group %d: %v", g, left)
+		}
+	}
+	if left := groupMembers(pid); len(left) > 0 {
+		t.Errorf("processes left in the daemon's group: %v", left)
+	}
+	for _, p := range before {
+		if syscall.Kill(p.pid, 0) == nil {
+			t.Errorf("process %d (%s) survived the daemon", p.pid, p.args)
+		}
+	}
+	t.Logf("shutdown %s: %d processes and %d loop child groups before SIGTERM", time.Since(t0).Round(time.Millisecond), len(before), len(groups))
+
+	// 12. Protocol and secrets.
+	if n := len(finishedA()); n != 1 {
+		t.Errorf("the finished run of #%d was sent %d times, want once", a, n)
+	}
+	if un := gh.Unexpected(); len(un) > 0 {
+		t.Errorf("the fake GitHub rejected requests:\n%s", strings.Join(un, "\n"))
+	}
+	if un := hub.Unexpected(); len(un) > 0 {
+		t.Errorf("the fake hub rejected requests:\n%s", strings.Join(un, "\n"))
+	}
+	secrets := map[string]string{"credential": hub.Credential(), "enrollment token": enrollToken, "JIG_TOKEN": token}
+	logs := map[string]string{"jig join output": string(joinOut)}
+	_ = filepath.WalkDir(root, func(p string, de fs.DirEntry, err error) error {
+		if err == nil && !de.IsDir() && (strings.HasSuffix(p, ".log") || strings.Contains(filepath.Base(p), ".log.") || p == outPath) {
+			raw, _ := os.ReadFile(p)
+			logs[p] = string(raw)
+		}
+		return nil
+	})
+	if _, ok := logs[jigdLog]; !ok {
+		t.Errorf("no daemon log at %s", jigdLog)
+	}
+	for i, body := range hub.Bodies() {
+		logs[fmt.Sprintf("hub request body %d", i)] = body
+	}
+	for name, s := range secrets {
+		if s == "" {
+			t.Errorf("%s is empty", name)
+			continue
+		}
+		for where, text := range logs {
+			if strings.Contains(text, s) {
+				t.Errorf("the %s appears in %s", name, where)
+			}
+		}
+	}
+	t.Logf("connected: %d log files checked, total %s", len(logs)-len(hub.Bodies())-1, time.Since(start).Round(time.Second))
+}
+
+// isolatedEnv is the environment of a Jigz process whose home, cache, data,
+// config and state directories all lie under home.
+func isolatedEnv(home string) []string {
+	return []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + home,
+		"XDG_CACHE_HOME=" + filepath.Join(home, ".cache"),
+		"XDG_DATA_HOME=" + filepath.Join(home, ".local", "share"),
+		"XDG_CONFIG_HOME=" + filepath.Join(home, ".config"),
+		"XDG_STATE_HOME=" + filepath.Join(home, ".local", "state"),
+	}
+}
+
+// acceptanceRun waits on a running process under test and checks handoffs
+// on the fake GitHub. A failure prints the tail of logPath and the label
+// events of the focused item.
+type acceptanceRun struct {
+	t       *testing.T
+	gh      *fakegithub.Server
+	slug    string
+	name    string
+	logPath string
+	exited  <-chan struct{}
+	focus   int
+	// keep are labels a handed-off item keeps beside agent:done.
+	keep []string
+}
+
+func (r *acceptanceRun) fail(format string, args ...any) {
+	r.t.Helper()
+	r.t.Errorf(format, args...)
+	r.t.Logf("%s output (tail):\n%s", r.name, logTail(r.logPath, 60))
+	r.t.Logf("fake GitHub label events for #%d: %v", r.focus, labelLog(r.gh, r.slug, r.focus))
+	r.t.FailNow()
+}
+
+func (r *acceptanceRun) waitFor(what string, d time.Duration, ok func() bool) {
+	r.t.Helper()
+	deadline := time.Now().Add(d)
+	for !ok() {
+		select {
+		case <-r.exited:
+			r.fail("%s exited while waiting for %s", r.name, what)
+		default:
+		}
+		if time.Now().After(deadline) {
+			r.fail("timed out after %s waiting for %s", d, what)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+// assertHandedOff waits for issue n to reach agent:done and checks the
+// claim and handoff label events.
+func (r *acceptanceRun) assertHandedOff(t *testing.T, n int, d time.Duration) []string {
+	t.Helper()
+	r.focus = n
+	gh, slug := r.gh, r.slug
+	r.waitFor(fmt.Sprintf("issue #%d to reach agent:done", n), d, func() bool {
+		it, _ := gh.Get(slug, n)
+		return slices.Contains(it.Labels, "agent:done") && !slices.Contains(it.Labels, "in-progress")
+	})
+	log := labelLog(gh, slug, n)
+	addedClaim := slices.Index(log, "+in-progress")
+	addedDone := slices.Index(log, "+agent:done")
+	if addedClaim < 0 || addedDone < 0 || addedClaim > addedDone {
+		t.Errorf("want +in-progress before +agent:done, got %v", log)
+	}
+	for _, want := range []string{"-in-progress", "-agent:plan"} {
+		if !slices.Contains(log, want) {
+			t.Errorf("label event %s missing from %v", want, log)
+		}
+	}
+	it, _ := gh.Get(slug, n)
+	want := slices.Sorted(slices.Values(append([]string{"agent:done"}, r.keep...)))
+	if !slices.Equal(slices.Sorted(slices.Values(it.Labels)), want) {
+		t.Errorf("final labels %v, want %v", it.Labels, want)
+	}
+	return log
 }
 
 func labelNames(ls []config.Label) []string {
@@ -1147,6 +1597,85 @@ func searchQueries(gh *fakegithub.Server) []string {
 		out = append(out, q)
 	}
 	return out
+}
+
+// splitSearches splits the search queries into the engine's and the
+// connected daemon's fallback searches, which start with state:open and
+// name no type.
+func splitSearches(gh *fakegithub.Server) (engine, fallback []string) {
+	for _, q := range searchQueries(gh) {
+		if strings.HasPrefix(q, "state:open label:runner:") {
+			fallback = append(fallback, q)
+		} else {
+			engine = append(engine, q)
+		}
+	}
+	return engine, fallback
+}
+
+type proc struct {
+	pid, ppid, pgid int
+	args            string
+}
+
+// descendants lists the processes below pid.
+func descendants(pid int) []proc {
+	out, err := exec.Command("ps", "-eo", "pid=,ppid=,pgid=,args=").Output()
+	if err != nil {
+		return nil
+	}
+	children := map[int][]proc{}
+	for _, line := range strings.Split(string(out), "\n") {
+		f := strings.Fields(line)
+		if len(f) < 4 {
+			continue
+		}
+		var p proc
+		p.pid, _ = strconv.Atoi(f[0])
+		p.ppid, _ = strconv.Atoi(f[1])
+		p.pgid, _ = strconv.Atoi(f[2])
+		p.args = strings.Join(f[3:], " ")
+		children[p.ppid] = append(children[p.ppid], p)
+	}
+	var res []proc
+	queue := []int{pid}
+	for len(queue) > 0 {
+		for _, c := range children[queue[0]] {
+			res = append(res, c)
+			queue = append(queue, c.pid)
+		}
+		queue = queue[1:]
+	}
+	return res
+}
+
+// listeningSockets lists the TCP sockets in LISTEN state that pid holds,
+// as local addresses from /proc (Linux only).
+func listeningSockets(pid int) []string {
+	fds, _ := filepath.Glob(fmt.Sprintf("/proc/%d/fd/*", pid))
+	held := map[string]bool{}
+	for _, fd := range fds {
+		if link, err := os.Readlink(fd); err == nil && strings.HasPrefix(link, "socket:[") {
+			held[strings.TrimSuffix(strings.TrimPrefix(link, "socket:["), "]")] = true
+		}
+	}
+	var out []string
+	for _, table := range []string{"tcp", "tcp6"} {
+		raw, _ := os.ReadFile(fmt.Sprintf("/proc/%d/net/%s", pid, table))
+		for _, line := range strings.Split(string(raw), "\n") {
+			f := strings.Fields(line)
+			// local_address is field 1, st field 3 (0A is LISTEN), inode field 9.
+			if len(f) > 9 && f[3] == "0A" && held[f[9]] {
+				out = append(out, table+" "+f[1])
+			}
+		}
+	}
+	return out
+}
+
+func sha256Hex(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
 }
 
 func hasSearch(gh *fakegithub.Server, q string) bool { return slices.Contains(searchQueries(gh), q) }
