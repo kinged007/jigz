@@ -194,6 +194,7 @@ table.agents td { white-space: nowrap; }
 <nav class="side" aria-label="Main">
   <a href="/" {{if eq .Nav "ops"}}aria-current="page"{{end}}>{{template "icon-ops"}}<span>Operations</span></a>
   <a href="/runs" {{if eq .Nav "runs"}}aria-current="page"{{end}}>{{template "icon-list"}}<span>Runs</span></a>
+  <a href="/questions" {{if eq .Nav "questions"}}aria-current="page"{{end}}>{{template "icon-question"}}<span>Questions</span></a>
   <a href="/usage" {{if eq .Nav "usage"}}aria-current="page"{{end}}>{{template "icon-chart"}}<span>Usage</span></a>
   <a href="/workflows" {{if eq .Nav "workflows"}}aria-current="page"{{end}}>{{template "icon-flow"}}<span>Workflows</span></a>
   <a href="/projects" {{if eq .Nav "projects"}}aria-current="page"{{end}}>{{template "icon-folder"}}<span>Projects</span></a>

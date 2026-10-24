@@ -1,0 +1,98 @@
+{{define "questions"}}{{template "shell-top" .}}
+<div class="pagehead">
+  <div>
+    <h1>Questions</h1>
+    <p class="sub">{{len .Questions}} questions{{if .Items}}, {{len .Items}} items need attention{{end}}.</p>
+  </div>
+  {{if .Enrich}}<form class="inline" method="post" action="/questions/refresh"><button>Refresh</button></form>{{end}}
+</div>
+{{if not .Enrich}}
+<div class="empty">Set github.enrich to see questions</div>
+{{else}}
+{{with .Draft}}
+<form class="card" method="post" action="/questions/answer">
+  {{if .Existing}}<p class="banner warn">Already answered: {{.Existing}}</p><input type="hidden" name="confirm" value="1">{{end}}
+  <input type="hidden" name="project" value="{{.Project}}">
+  <input type="hidden" name="number" value="{{.Number}}">
+  <input type="hidden" name="qid" value="{{.QID}}">
+  <input type="hidden" name="token" value="{{.Token}}">
+  <div class="field"><label>Answer<textarea name="text">{{.Text}}</textarea></label></div>
+  <p class="row"><button class="primary" type="submit">Submit</button></p>
+</form>
+{{end}}
+<form class="filters" method="get" action="/questions" role="search">
+  <label class="f">Audience<select name="audience"><option value="">all</option><option value="product" {{if eq .Filter.Audience "product"}}selected{{end}}>product</option><option value="project" {{if eq .Filter.Audience "project"}}selected{{end}}>project</option></select></label>
+  <label class="f">Blocking<select name="blocking"><option value="">all</option><option value="true" {{if eq .Filter.Blocking "true"}}selected{{end}}>blocking</option><option value="false" {{if eq .Filter.Blocking "false"}}selected{{end}}>non-blocking</option></select></label>
+  <label class="f">Project<input type="search" name="project" value="{{.Filter.Project}}" placeholder="owner/repo"></label>
+  <label class="f">State<select name="state"><option value="open" {{if eq .Filter.State "open"}}selected{{end}}>open</option><option value="answered" {{if eq .Filter.State "answered"}}selected{{end}}>answered</option></select></label>
+  <button class="primary" type="submit">Apply</button>
+  <a class="btn" href="/questions">Reset</a>
+</form>
+{{if or .Remove .Retry .Items}}
+<h2>Items needing attention</h2>
+{{with .Remove}}
+<form class="card" method="post" action="/questions/remove-labels">
+  <input type="hidden" name="confirm" value="1">
+  <input type="hidden" name="project" value="{{.Project}}">
+  <input type="hidden" name="number" value="{{.Number}}">
+  <input type="hidden" name="token" value="{{.Token}}">
+  {{if .Trigger}}<p>Remove needs-human and agent:done, add {{.Trigger}}.</p>
+  {{else}}<div class="field"><label>Trigger<select name="trigger">{{range .Choices}}<option>{{.}}</option>{{end}}</select></label></div>{{end}}
+  <p class="row"><button class="primary" type="submit">Remove labels</button></p>
+</form>
+{{end}}
+{{with .Retry}}<div class="card"><p class="row">{{template "question-retry" .}}</p></div>{{end}}
+{{range .Items}}
+<div class="card">
+  <h2><a href="{{.URL}}">{{.Project}}#{{.Number}}</a> <span class="muted">{{.Title}}</span></h2>
+  <ul>{{range .Problems}}<li>{{.Message}}{{with .CommentURL}} <a href="{{.}}">comment</a>{{end}}</li>{{end}}</ul>
+  <p class="row">
+    {{if .RetryToken}}{{template "question-retry" .}}{{end}}
+    {{if .Malformed}}<form class="inline" method="post" action="/questions/remove-labels"><input type="hidden" name="project" value="{{.Project}}"><input type="hidden" name="number" value="{{.Number}}"><input type="hidden" name="token" value="{{.Token}}"><button>Remove labels</button></form>{{end}}
+  </p>
+</div>
+{{end}}
+{{end}}
+{{if .Questions}}
+{{range $i, $q := .Questions}}
+<div class="card">
+  <h2><a href="{{$q.URL}}">{{$q.Project}}#{{$q.Number}}</a> <span class="muted">{{$q.Title}}</span></h2>
+  <p class="row">
+    <span class="chip">{{$q.Audience}}</span>
+    {{if $q.Blocking}}<span class="chip s-warn">blocking</span>{{else}}<span class="chip">non-blocking</span>{{end}}
+    {{if $q.AnsweredAt}}<span class="chip s-succeeded">answered</span>{{end}}
+    {{if $q.AskedAt}}<span class="muted" title="{{$q.AskedAt}}">asked {{since $q.AskedAt}} ago</span>{{end}}
+    {{with $q.AskedCommentURL}}<a href="{{.}}">comment</a>{{end}}
+  </p>
+  <p>{{$q.Question.Question}}</p>
+  {{with $q.Suggested}}<p><b>Suggested answer:</b> <span id="sug-{{$i}}">{{.}}</span></p>{{end}}
+  {{range $q.IgnoredAnswers}}<p class="muted">ignored: {{.Author}}</p>{{end}}
+  <form method="post" action="/questions/answer">
+    <input type="hidden" name="project" value="{{$q.Project}}">
+    <input type="hidden" name="number" value="{{$q.Number}}">
+    <input type="hidden" name="qid" value="{{$q.QID}}">
+    <input type="hidden" name="token" value="{{$q.Token}}">
+    <div class="field"><label>Answer<textarea name="text" id="answer-{{$i}}"></textarea></label></div>
+    <p class="row">
+      {{if $q.Suggested}}<button type="button" data-fill="answer-{{$i}}" data-suggested="sug-{{$i}}">Use suggested answer</button>{{end}}
+      <button class="primary" type="submit">Submit</button>
+    </p>
+  </form>
+</div>
+{{end}}
+<script>
+document.querySelectorAll("button[data-fill]").forEach(function (b) {
+  b.addEventListener("click", function () {
+    var t = document.getElementById(b.dataset.fill);
+    var s = document.getElementById(b.dataset.suggested);
+    if (t && s) { t.value = s.textContent; }
+  });
+});
+</script>
+{{else if and (not .Draft) (not .Remove) (not .Retry) (not .Items)}}
+<div class="empty"><b>No questions match these filters.</b><br>Try a wider state or clear the search.<br><br><a class="btn" href="/questions">Reset filters</a></div>
+{{end}}
+{{end}}
+{{template "shell-bottom" .}}{{end}}
+
+{{define "question-retry"}}<form class="inline" method="post" action="/questions/retry"><input type="hidden" name="project" value="{{.Project}}"><input type="hidden" name="number" value="{{.Number}}"><input type="hidden" name="token" value="{{.RetryToken}}"><button>Retry</button></form>{{end}}

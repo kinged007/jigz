@@ -5,8 +5,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"html/template"
-	"log"
 	"net/http"
 	"net/url"
 	"slices"
@@ -249,38 +247,8 @@ func (a *app) renderQuestions(w http.ResponseWriter, r *http.Request, draft *ans
 			v.Retry = &questionItem{QuestionItem: it, Problems: collector.Problems(it), RetryToken: a.questions.issue(actRetry, itemKey(project, n))}
 		}
 	}
-	if page.Lookup("questions") != nil {
-		execPage(w, "questions", v)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := questionsPlaceholder.Execute(w, v); err != nil {
-		log.Printf("questions: %v", err)
-	}
+	execPage(w, "questions", v)
 }
-
-// questionsPlaceholder renders the page until templates/questions.html
-// defines "questions".
-var questionsPlaceholder = template.Must(template.New("questions-placeholder").Parse(`{{define "retry"}}<form method="post" action="/questions/retry"><input type="hidden" name="project" value="{{.Project}}"><input type="hidden" name="number" value="{{.Number}}"><input type="hidden" name="token" value="{{.RetryToken}}"><button>Retry</button></form>{{end}}
-<!doctype html>
-<title>Questions</title>
-{{with .Msg}}<p class="msg">{{.}}</p>{{end}}{{with .Err}}<p class="err">{{.}}</p>{{end}}
-{{if not .Enrich}}<p>Set github.enrich to see questions</p>{{else}}
-<form method="post" action="/questions/refresh"><button>Refresh</button></form>
-{{with .Draft}}<form method="post" action="/questions/answer">{{if .Existing}}<p>Already answered: {{.Existing}}</p><input type="hidden" name="confirm" value="1">{{end}}
-<input type="hidden" name="project" value="{{.Project}}"><input type="hidden" name="number" value="{{.Number}}"><input type="hidden" name="qid" value="{{.QID}}"><input type="hidden" name="token" value="{{.Token}}">
-<textarea name="text">{{.Text}}</textarea><button>Submit</button></form>{{end}}
-{{with .Remove}}<form method="post" action="/questions/remove-labels"><input type="hidden" name="confirm" value="1">
-<input type="hidden" name="project" value="{{.Project}}"><input type="hidden" name="number" value="{{.Number}}"><input type="hidden" name="token" value="{{.Token}}">
-{{if .Trigger}}<p>Remove needs-human and agent:done, add {{.Trigger}}</p>{{else}}<select name="trigger">{{range .Choices}}<option>{{.}}</option>{{end}}</select>{{end}}<button>Remove labels</button></form>{{end}}
-{{with .Retry}}{{template "retry" .}}{{end}}
-{{range .Items}}<div class="item"><a href="{{.URL}}">{{.Project}}#{{.Number}}</a> {{.Title}}<ul>{{range .Problems}}<li>{{.Message}}{{with .CommentURL}} <a href="{{.}}">comment</a>{{end}}</li>{{end}}</ul>
-{{if .RetryToken}}{{template "retry" .}}{{end}}{{if .Malformed}}<form method="post" action="/questions/remove-labels"><input type="hidden" name="project" value="{{.Project}}"><input type="hidden" name="number" value="{{.Number}}"><input type="hidden" name="token" value="{{.Token}}"><button>Remove labels</button></form>{{end}}</div>{{end}}
-{{range .Questions}}<div class="question"><a href="{{.URL}}">{{.Project}}#{{.Number}}</a> {{.Title}} {{.QID}} {{.Audience}} blocking={{.Blocking}}
-<p>{{.Question.Question}}</p>{{with .Suggested}}<p class="suggested">{{.}}</p>{{end}}{{range .IgnoredAnswers}}<p>ignored: {{.Author}}</p>{{end}}
-<form method="post" action="/questions/answer"><input type="hidden" name="project" value="{{.Project}}"><input type="hidden" name="number" value="{{.Number}}"><input type="hidden" name="qid" value="{{.QID}}"><input type="hidden" name="token" value="{{.Token}}">
-<textarea name="text"></textarea><button>Submit</button></form></div>{{end}}
-{{end}}`))
 
 // questionForm is the common part of the answer path's forms.
 type questionForm struct {
