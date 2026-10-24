@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -477,5 +478,134 @@ func TestBodiesHoldNoEnrollToken(t *testing.T) {
 	}
 	if len(h.hub.Bodies()) != 2 {
 		t.Errorf("bodies = %d, want 2", len(h.hub.Bodies()))
+	}
+}
+
+func TestReconnectWhilePending(t *testing.T) {
+	h := newHarness(t)
+	h.enroll()
+	conn1 := h.dial()
+	waitConnected(t, h.hub, true)
+
+	got1 := make(chan hubproto.Command, 1)
+	go func() {
+		for {
+			msg, err := conn1.Read(context.Background())
+			if err != nil {
+				return
+			}
+			var cmd hubproto.Command
+			json.Unmarshal(msg, &cmd)
+			got1 <- cmd
+		}
+	}()
+	err1 := make(chan error, 1)
+	go func() {
+		_, err := h.hub.Send(hubproto.Command{ID: "old", Type: hubproto.CmdPause})
+		err1 <- err
+	}()
+	<-got1
+
+	conn2 := h.dial()
+	cmd2 := make(chan hubproto.Command, 1)
+	go func() {
+		msg, err := conn2.Read(context.Background())
+		if err != nil {
+			return
+		}
+		var cmd hubproto.Command
+		json.Unmarshal(msg, &cmd)
+		cmd2 <- cmd
+	}()
+	res2 := make(chan error, 1)
+	go func() {
+		ack, err := h.hub.Send(hubproto.Command{ID: "new", Type: hubproto.CmdResume})
+		if err == nil && !ack.OK {
+			err = errors.New("not ok")
+		}
+		res2 <- err
+	}()
+	cmd := <-cmd2
+	if cmd.ID != "new" {
+		t.Fatalf("second socket received %+v", cmd)
+	}
+
+	if err := <-err1; err == nil {
+		t.Error("command pending on the replaced socket did not fail")
+	}
+	late, _ := json.Marshal(hubproto.Ack{ID: "old", Type: "ack", OK: true})
+	conn1.Write(context.Background(), late)
+	time.Sleep(50 * time.Millisecond)
+	if !h.hub.Connected() {
+		t.Fatal("the replacement socket was dropped")
+	}
+	ack, _ := json.Marshal(hubproto.Ack{ID: "new", Type: "ack", OK: true})
+	if err := conn2.Write(context.Background(), ack); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-res2; err != nil {
+		t.Errorf("command on the replacement socket: %v", err)
+	}
+}
+
+func TestConfigIfNoneMatchForms(t *testing.T) {
+	h := newHarness(t)
+	h.enroll()
+	etag := h.hub.SetConfig(testConfig())
+	for _, c := range []struct {
+		header string
+		status int
+	}{
+		{"W/" + etag, 304},
+		{`"other", ` + etag, 304},
+		{`"a",W/` + etag + `,"b"`, 304},
+		{"*", 304},
+		{`"other"`, 200},
+		{"", 200},
+	} {
+		hdr := h.auth()
+		if c.header != "" {
+			hdr["If-None-Match"] = c.header
+		}
+		if resp, _ := h.do("GET", base+"config", "", hdr); resp.StatusCode != c.status {
+			t.Errorf("If-None-Match %q = %d, want %d", c.header, resp.StatusCode, c.status)
+		}
+	}
+}
+
+func TestEnrollTokenCheckedBeforeBody(t *testing.T) {
+	h := newHarness(t)
+	hdr := map[string]string{"Jig-Version": "1"}
+	if resp, _ := h.do("POST", base+"enroll", `{"token":"nope","bogus":1}`, hdr); resp.StatusCode != 401 {
+		t.Errorf("wrong token with a bad body = %d, want 401", resp.StatusCode)
+	}
+	if resp, _ := h.do("POST", base+"enroll", `{"token":"enroll-secret"}`, hdr); resp.StatusCode != 400 {
+		t.Errorf("right token with a bad body = %d, want 400", resp.StatusCode)
+	}
+	h.enroll()
+}
+
+func TestFailRuns(t *testing.T) {
+	h := newHarness(t)
+	h.enroll()
+	h.hub.FailRuns(429, 1)
+	resp, _ := h.do("POST", base+"runs", runsBody("e1"), h.auth())
+	if resp.StatusCode != 429 || resp.Header.Get("Retry-After") == "" {
+		t.Errorf("first = %d Retry-After %q", resp.StatusCode, resp.Header.Get("Retry-After"))
+	}
+	if len(h.hub.Runs()) != 0 {
+		t.Error("failed batch was recorded")
+	}
+	h.hub.FailRuns(503, 2)
+	for range 2 {
+		if resp, _ := h.do("POST", base+"runs", runsBody("e1"), h.auth()); resp.StatusCode != 503 {
+			t.Errorf("status = %d, want 503", resp.StatusCode)
+		}
+	}
+	if resp, _ := h.do("POST", base+"runs", runsBody("e1"), h.auth()); resp.StatusCode != 200 {
+		t.Errorf("after the failures = %d, want 200", resp.StatusCode)
+	}
+	if len(h.hub.Runs()) != 1 || len(h.hub.Unexpected()) != 0 {
+		t.Errorf("runs = %d, unexpected = %v", len(h.hub.Runs()), h.hub.Unexpected())
 	}
 }

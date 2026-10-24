@@ -1,0 +1,34 @@
+{
+  "member": {
+    "login": "octo"
+  },
+  "projects": [
+    {
+      "provider": "github",
+      "repo": "acme/..",
+      "workflows": [
+        "issues"
+      ],
+      "filter_additions": "-label:backlog"
+    }
+  ],
+  "files": [
+    {
+      "path": "WORKFLOW.issues.md",
+      "sha256": "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881",
+      "content": "x"
+    },
+    {
+      "path": "prompts/plan.md",
+      "sha256": "a1fce4363854ff888cff4b8e7875d600c2682390412a8cf79b37d0b11148b0fa",
+      "content": "y"
+    }
+  ],
+  "labels": [
+    {
+      "name": "runner:ci-1",
+      "color": "5319e7",
+      "description": "Routed to daemon ci-1"
+    }
+  ]
+}

@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strings"
 )
 
 var (
 	repoRe     = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+	dotsRe     = regexp.MustCompile(`^\.{1,2}$`)
 	workflowRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
-	pathRe     = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9_.-]*(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*$`)
+	pathRe     = regexp.MustCompile(`^(WORKFLOW\.[A-Za-z0-9][A-Za-z0-9_-]*\.md|prompts(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)+)$`)
+	dbFileRe   = regexp.MustCompile(`\.db(-wal|-shm)?$`)
 	sha256Re   = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	colorRe    = regexp.MustCompile(`^[0-9a-f]{6}$`)
 	runnerRe   = regexp.MustCompile(`^runner:[a-z0-9][a-z0-9-]*$`)
@@ -45,6 +48,18 @@ func (c *check) sub(field string, err error) {
 
 func (c *check) matches(re *regexp.Regexp, v, field string) {
 	c.that(re.MatchString(v), field, "does not match "+re.String())
+}
+
+// repo checks owner/name; neither part may be "." or "..".
+func (c *check) repo(v, field string) {
+	owner, name, _ := strings.Cut(v, "/")
+	c.that(repoRe.MatchString(v) && !dotsRe.MatchString(owner) && !dotsRe.MatchString(name), field, "not a valid owner/name")
+}
+
+// path checks a served file name: WORKFLOW.<name>.md or a file under prompts/,
+// never a database file.
+func (c *check) path(v, field string) {
+	c.that(pathRe.MatchString(v) && !dbFileRe.MatchString(v), field, "not an allowed file path")
 }
 
 func (c *check) nonEmpty(v, field string) { c.that(v != "", field, "required") }
@@ -83,7 +98,7 @@ func (r ConfigResponse) Validate() error {
 	for i, p := range r.Projects {
 		f := fmt.Sprintf("projects[%d]", i)
 		c.oneOf(p.Provider == ProviderGitHub, f+".provider")
-		c.matches(repoRe, p.Repo, f+".repo")
+		c.repo(p.Repo, f+".repo")
 		c.that(p.Workflows != nil, f+".workflows", "required")
 		for _, w := range p.Workflows {
 			c.matches(workflowRe, w, f+".workflows")
@@ -92,7 +107,7 @@ func (r ConfigResponse) Validate() error {
 	}
 	for i, file := range r.Files {
 		f := fmt.Sprintf("files[%d]", i)
-		c.matches(pathRe, file.Path, f+".path")
+		c.path(file.Path, f+".path")
 		c.matches(sha256Re, file.SHA256, f+".sha256")
 	}
 	for i, l := range r.Labels {
@@ -116,7 +131,7 @@ func (r StatusRequest) Validate() error {
 	c.that(r.Hours != nil, "hours", "required")
 	for i, l := range r.Loops {
 		f := fmt.Sprintf("loops[%d]", i)
-		c.matches(repoRe, l.Project, f+".project")
+		c.repo(l.Project, f+".project")
 		c.matches(workflowRe, l.Workflow, f+".workflow")
 		c.oneOf(slices.Contains(states, l.State), f+".state")
 		c.oneOf(slices.Contains(details, l.Detail), f+".detail")
@@ -124,7 +139,7 @@ func (r StatusRequest) Validate() error {
 		c.that(l.Retrying >= 0, f+".retrying", "negative")
 		c.that(l.Files != nil, f+".files", "required")
 		for j, h := range l.Files {
-			c.matches(pathRe, h.Path, fmt.Sprintf("%s.files[%d].path", f, j))
+			c.path(h.Path, fmt.Sprintf("%s.files[%d].path", f, j))
 			c.matches(sha256Re, h.SHA256, fmt.Sprintf("%s.files[%d].sha256", f, j))
 		}
 		if b := l.Budget; b != nil {
@@ -163,7 +178,7 @@ func (e RunEvent) Validate() error {
 	c.that(e.ID != "" && len(e.ID) <= 200, "id", "length 1 to 200")
 	c.oneOf(slices.Contains(events, e.Type), "type")
 	c.matches(workflowRe, e.Workflow, "workflow")
-	c.matches(repoRe, e.Item.Project, "item.project")
+	c.repo(e.Item.Project, "item.project")
 	c.that(e.Item.Number >= 1, "item.number", "at least 1")
 	c.oneOf(slices.Contains(kinds, e.Item.Kind), "item.kind")
 	c.that(e.Attempt >= 1, "attempt", "at least 1")
@@ -201,7 +216,7 @@ func (cmd Command) LoopArgs() (LoopArgs, error) {
 	}
 	var c check
 	if a.Project != "" {
-		c.matches(repoRe, a.Project, "project")
+		c.repo(a.Project, "project")
 	}
 	if a.Workflow != "" {
 		c.matches(workflowRe, a.Workflow, "workflow")

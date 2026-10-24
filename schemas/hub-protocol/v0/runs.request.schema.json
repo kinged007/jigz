@@ -23,7 +23,7 @@
             "additionalProperties": false,
             "required": ["project", "number", "kind"],
             "properties": {
-              "project": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+              "project": {"type": "string", "pattern": "^(?!\\.{1,2}/)(?!.*/\\.{1,2}$)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
               "number": {"type": "integer", "minimum": 1},
               "kind": {"enum": ["issue", "pr"]}
             }

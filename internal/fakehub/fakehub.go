@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,17 +51,25 @@ type Server struct {
 	statuses    []hubproto.StatusRequest
 	runs        []hubproto.RunEvent
 	bodies      []string
-	conn        *wsclient.Conn
-	pending     map[string]chan hubproto.Ack
+	sock        *socket
 	nextCmd     int
+	failRuns    int
+	failStatus  int
 
 	umu        sync.Mutex
 	unexpected []string
 }
 
+// socket is one accepted command connection. It owns the commands sent on it.
+type socket struct {
+	conn    *wsclient.Conn
+	pending map[string]chan hubproto.Ack
+	closed  chan struct{}
+}
+
 // New returns a hub that accepts enrollment with enrollToken, once.
 func New(enrollToken string) *Server {
-	return &Server{enrollToken: enrollToken, interval: defaultBeat, pending: map[string]chan hubproto.Ack{}}
+	return &Server{enrollToken: enrollToken, interval: defaultBeat}
 }
 
 // SetConfig makes cfg the served config under a new ETag and returns the
@@ -83,6 +92,14 @@ func (s *Server) SetInterval(seconds int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.interval = max(seconds, minBeat)
+}
+
+// FailRuns makes the next n runs requests answer status (429 or 503, with
+// Retry-After: 1) without recording their events.
+func (s *Server) FailRuns(status, n int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failStatus, s.failRuns = status, n
 }
 
 // Statuses returns every status document received, in order.
@@ -127,7 +144,7 @@ func (s *Server) Credential() string {
 func (s *Server) Connected() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.conn != nil
+	return s.sock != nil
 }
 
 // SetDown makes every request answer 503 and closes the socket while down.
@@ -159,7 +176,7 @@ func (s *Server) Unexpected() []string {
 // An empty ID is replaced by a generated one and nil Args by {}.
 func (s *Server) Send(cmd hubproto.Command) (hubproto.Ack, error) {
 	s.mu.Lock()
-	conn := s.conn
+	sk := s.sock
 	if cmd.ID == "" {
 		s.nextCmd++
 		cmd.ID = "c-" + strconv.Itoa(s.nextCmd)
@@ -167,20 +184,20 @@ func (s *Server) Send(cmd hubproto.Command) (hubproto.Ack, error) {
 	if cmd.Args == nil {
 		cmd.Args = json.RawMessage("{}")
 	}
-	if conn == nil {
+	if sk == nil {
 		s.mu.Unlock()
 		return hubproto.Ack{}, errors.New("fakehub: no socket connected")
 	}
-	if _, dup := s.pending[cmd.ID]; dup {
+	if _, dup := sk.pending[cmd.ID]; dup {
 		s.mu.Unlock()
 		return hubproto.Ack{}, fmt.Errorf("fakehub: command id %q already pending", cmd.ID)
 	}
 	ch := make(chan hubproto.Ack, 1)
-	s.pending[cmd.ID] = ch
+	sk.pending[cmd.ID] = ch
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
-		delete(s.pending, cmd.ID)
+		delete(sk.pending, cmd.ID)
 		s.mu.Unlock()
 	}()
 
@@ -193,15 +210,19 @@ func (s *Server) Send(cmd hubproto.Command) (hubproto.Ack, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), ackTimeout)
 	defer cancel()
-	if err := conn.Write(ctx, data); err != nil {
+	if err := sk.conn.Write(ctx, data); err != nil {
 		return hubproto.Ack{}, err
 	}
 	select {
-	case ack, ok := <-ch:
-		if !ok {
-			return hubproto.Ack{}, errors.New("fakehub: socket closed before the ack")
-		}
+	case ack := <-ch:
 		return ack, nil
+	case <-sk.closed:
+		select {
+		case ack := <-ch:
+			return ack, nil
+		default:
+		}
+		return hubproto.Ack{}, errors.New("fakehub: socket closed before the ack")
 	case <-ctx.Done():
 		return hubproto.Ack{}, errors.New("fakehub: timed out waiting for the ack")
 	}
@@ -209,11 +230,11 @@ func (s *Server) Send(cmd hubproto.Command) (hubproto.Ack, error) {
 
 func (s *Server) closeSocket() {
 	s.mu.Lock()
-	conn := s.conn
-	s.conn = nil
+	sk := s.sock
+	s.sock = nil
 	s.mu.Unlock()
-	if conn != nil {
-		go conn.Close(wsclient.StatusGoingAway, "")
+	if sk != nil {
+		go sk.conn.Close(wsclient.StatusGoingAway, "")
 	}
 }
 
@@ -299,12 +320,23 @@ func (s *Server) decode(w http.ResponseWriter, r *http.Request, body []byte, v v
 }
 
 func (s *Server) enroll(w http.ResponseWriter, r *http.Request, body []byte) {
+	var tok struct {
+		Token string `json:"token"`
+	}
+	json.Unmarshal(body, &tok)
+	s.mu.Lock()
+	refused := s.enrolled || tok.Token != s.enrollToken
+	s.mu.Unlock()
+	if refused {
+		s.reject(w, r, http.StatusUnauthorized, hubproto.ErrUnauthorized, "enrollment token refused")
+		return
+	}
 	var req hubproto.EnrollRequest
 	if !s.decode(w, r, body, &req) {
 		return
 	}
 	s.mu.Lock()
-	if s.enrolled || req.Token != s.enrollToken {
+	if s.enrolled {
 		s.mu.Unlock()
 		s.reject(w, r, http.StatusUnauthorized, hubproto.ErrUnauthorized, "enrollment token refused")
 		return
@@ -328,11 +360,22 @@ func (s *Server) getConfig(w http.ResponseWriter, r *http.Request, _ []byte) {
 		return
 	}
 	w.Header().Set("ETag", etag)
-	if r.Header.Get("If-None-Match") == etag {
+	if etagMatches(r.Header.Get("If-None-Match"), etag) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
 	writeJSON(w, http.StatusOK, cfg)
+}
+
+// etagMatches implements the weak comparison of If-None-Match.
+func etagMatches(header, etag string) bool {
+	for v := range strings.SplitSeq(header, ",") {
+		v = strings.TrimSpace(v)
+		if v == "*" || strings.TrimPrefix(v, "W/") == etag {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) postStatus(w http.ResponseWriter, r *http.Request, body []byte) {
@@ -351,6 +394,18 @@ func (s *Server) postStatus(w http.ResponseWriter, r *http.Request, body []byte)
 }
 
 func (s *Server) postRuns(w http.ResponseWriter, r *http.Request, body []byte) {
+	s.mu.Lock()
+	fail := s.failRuns > 0
+	if fail {
+		s.failRuns--
+	}
+	status := s.failStatus
+	s.mu.Unlock()
+	if fail {
+		w.Header().Set("Retry-After", "1")
+		writeError(w, status, hubproto.ErrUnavailable, "fakehub: runs failure injected")
+		return
+	}
 	var req hubproto.RunsRequest
 	if !s.decode(w, r, body, &req) {
 		return
@@ -371,28 +426,27 @@ func (s *Server) socket(w http.ResponseWriter, r *http.Request, _ []byte) {
 		s.note(r, "websocket upgrade: "+err.Error())
 		return
 	}
+	sk := &socket{conn: conn, pending: map[string]chan hubproto.Ack{}, closed: make(chan struct{})}
 	s.mu.Lock()
-	old := s.conn
-	s.conn = conn
+	old := s.sock
+	s.sock = sk
 	s.mu.Unlock()
 	if old != nil {
-		old.Close(wsclient.StatusGoingAway, "replaced")
+		go old.conn.Close(wsclient.StatusGoingAway, "replaced")
 	}
-	s.readAcks(conn)
+	s.readAcks(sk)
 }
 
 // readAcks delivers acknowledgements to Send until the connection ends.
-func (s *Server) readAcks(conn *wsclient.Conn) {
+func (s *Server) readAcks(sk *socket) {
+	conn := sk.conn
 	defer func() {
 		s.mu.Lock()
-		if s.conn == conn {
-			s.conn = nil
-		}
-		for id, ch := range s.pending {
-			close(ch)
-			delete(s.pending, id)
+		if s.sock == sk {
+			s.sock = nil
 		}
 		s.mu.Unlock()
+		close(sk.closed)
 		conn.Close(wsclient.StatusNormal, "")
 	}()
 	for {
@@ -412,8 +466,8 @@ func (s *Server) readAcks(conn *wsclient.Conn) {
 			continue
 		}
 		s.mu.Lock()
-		ch := s.pending[ack.ID]
-		delete(s.pending, ack.ID)
+		ch := sk.pending[ack.ID]
+		delete(sk.pending, ack.ID)
 		s.mu.Unlock()
 		if ch == nil {
 			s.noteMsg("ack for unknown command " + ack.ID)

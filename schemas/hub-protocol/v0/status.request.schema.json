@@ -15,7 +15,7 @@
         "additionalProperties": false,
         "required": ["project", "workflow", "state", "running", "retrying", "files"],
         "properties": {
-          "project": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+          "project": {"type": "string", "pattern": "^(?!\\.{1,2}/)(?!.*/\\.{1,2}$)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
           "workflow": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"},
           "state": {"enum": ["running", "sleeping", "stopped"]},
           "detail": {"enum": ["paused", "held", "disabled", "exited", "stopping"]},
@@ -29,7 +29,7 @@
               "additionalProperties": false,
               "required": ["path", "sha256"],
               "properties": {
-                "path": {"type": "string", "pattern": "^[A-Za-z0-9_-][A-Za-z0-9_.-]*(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*$"},
+                "path": {"type": "string", "pattern": "^(?!.*\\.db(-wal|-shm)?$)(WORKFLOW\\.[A-Za-z0-9][A-Za-z0-9_-]*\\.md|prompts(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)+)$"},
                 "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
               }
             }

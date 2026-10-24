@@ -22,7 +22,7 @@
         "required": ["provider", "repo", "workflows", "filter_additions"],
         "properties": {
           "provider": {"enum": ["github"]},
-          "repo": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+          "repo": {"type": "string", "pattern": "^(?!\\.{1,2}/)(?!.*/\\.{1,2}$)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
           "workflows": {
             "type": "array",
             "uniqueItems": true,
@@ -40,7 +40,7 @@
         "additionalProperties": false,
         "required": ["path", "sha256", "content"],
         "properties": {
-          "path": {"type": "string", "pattern": "^[A-Za-z0-9_-][A-Za-z0-9_.-]*(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*$", "description": "Relative to .jigz/workflows/; no segment starts with a dot."},
+          "path": {"type": "string", "pattern": "^(?!.*\\.db(-wal|-shm)?$)(WORKFLOW\\.[A-Za-z0-9][A-Za-z0-9_-]*\\.md|prompts(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)+)$", "description": "Relative to .jigz/workflows/; WORKFLOW.<name>.md at the top, or a file under prompts/; never a database file."},
           "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
           "content": {"type": "string"}
         }
