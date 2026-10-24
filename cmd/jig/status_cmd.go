@@ -6,6 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/kinged007/jigz/internal/dirs"
+	"github.com/kinged007/jigz/internal/hubstate"
 )
 
 // runStatus prints the status document of the Jigz registered for
@@ -13,7 +16,7 @@ import (
 // a registry entry or a live pid: a failed run leaves its last document
 // behind, and a dead supervisor's document reports "stale".
 func runStatus(args []string) {
-	dir := "."
+	dir := ""
 	asJSON := false
 	for i, a := range args {
 		switch {
@@ -29,6 +32,17 @@ func runStatus(args []string) {
 			dir = a
 		}
 	}
+	if dir == "" && asJSON && hubstate.Exists() {
+		out, err := hubStatusOutput()
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Println(out)
+		return
+	}
+	if dir == "" {
+		dir = "."
+	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		fatal(err)
@@ -42,6 +56,20 @@ func runStatus(args []string) {
 		fatal(err)
 	}
 	fmt.Println(out)
+}
+
+// hubStatusOutput returns the daemon's status document, written by
+// `jig daemon` next to the hub registry.
+func hubStatusOutput() (string, error) {
+	dir, err := dirs.State()
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "hub", "status.json"))
+	if err != nil {
+		return "", fmt.Errorf("no daemon status document: %w", err)
+	}
+	return strings.TrimRight(string(data), "\n"), nil
 }
 
 func statusOutput(root string, asJSON bool) (string, error) {

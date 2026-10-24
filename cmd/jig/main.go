@@ -72,6 +72,10 @@ func parseArgs(argv []string) (cmdline, error) {
 			c.remote = name
 			c.remoteArgs = argv[i+1:]
 			i = len(argv)
+		case "join", "leave":
+			c.remote = name
+			c.remoteArgs = argv[i+1:]
+			i = len(argv)
 		case "--dump-version":
 			c.dumpVersion = true
 		case "--version", "-V":
@@ -134,6 +138,8 @@ func usage() {
          jig budget override <workflow> [--json] [repo-root]
          jig reload [--json] [repo-root]
          jig validate [--json] [repo-root]
+         jig join <hub-url> <token> [--name <name>] [--no-service] [--yes]
+         jig leave
   Run every WORKFLOW.*.md loop in .jigz/workflows/ against the repo at repo-root (default: cwd).
   JIG_ONLY=plan,build  start only these loops (default: all of them)
   --host=ADDR is the address that binds the dashboard, default 127.0.0.1; 0.0.0.0 listens on all interfaces. The dashboard has no authentication.
@@ -148,6 +154,7 @@ func usage() {
   resume of a loop that is at or over its cap also turns the cap off for the rest of the period, because the loop would otherwise be paused again at the next poll.
   reload re-reads .jigz/config.yaml without restarting children; supervisor-level settings (sleep, cleanup, budgets) take effect immediately, workflow filter changes need restart --when-idle.
   validate checks .jigz/config.yaml (sleep, cleanup, budgets) and runs the engine's validation on each workflow.
+  join enrolls this machine with a hub and installs the jigd service; a token of - is read from stdin, the tracker token comes from JIG_TOKEN, GITHUB_TOKEN, GH_TOKEN or gh auth token. leave removes the service and hub.json and keeps the loop roots.
   --version prints the tool version and the engine it drives; --dump-version prints only the engine version.`)
 }
 
@@ -191,6 +198,14 @@ func run() (code int) {
 	}
 	if c.setup {
 		runSetup(c.dir, c.repo, c.setupJSON)
+		return 0
+	}
+	if c.remote == "join" {
+		runJoin(c.remoteArgs)
+		return 0
+	}
+	if c.remote == "leave" {
+		runLeave(c.remoteArgs)
 		return 0
 	}
 	if c.remote == "status" {
