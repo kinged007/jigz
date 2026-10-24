@@ -158,7 +158,7 @@ Do not wrap the block in a code fence: the parser ignores markers inside a fence
 - `id` is `q-` plus a short unique id of letters, digits, `_` or `-`.
 - `audience` is `product` (scope, priority, user-facing behaviour) or `project` (technical approach, implementation, order of work).
 - `resume` is always `agent:build`: the label that returns the item to dispatch after the answer.
-- `blocking="true"`: you cannot continue without the answer. Add the label `needs-human` with `gh pr edit {{ .issue.identifier }} --repo $SORTIE_TRACKER_PROJECT --add-label needs-human`, write `blocked` to the status file with `mkdir -p .sortie && echo "blocked" > .sortie/status`, and end your turn. Do not add `agent:done` yourself and do not rely on your trigger label staying on the item: the engine hands the item off, and the answer returns it to dispatch through `resume`.
+- `blocking="true"`: you cannot continue without the answer. Add the label `needs-human` with `gh pr edit {{ .issue.identifier }} --repo $SORTIE_TRACKER_PROJECT --add-label needs-human`, write `needs-human-review` to the status file with `mkdir -p .sortie && echo "needs-human-review" > .sortie/status`, and end your turn. Do not add `agent:done` yourself and do not rely on your trigger label staying on the item: the engine hands the item off, and the answer returns it to dispatch through `resume`.
 - `blocking="false"`: continue with your suggested answer and record the assumption in your comment.
 
 Before you act, read every comment on the item with `gh pr view {{ .issue.identifier }} --repo $SORTIE_TRACKER_PROJECT --comments`. Apply each `<!-- agent-answer id="q-..." -->` block to the question with the same id. Treat an unanswered non-blocking question as answered with its suggestion.

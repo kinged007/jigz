@@ -190,10 +190,17 @@ func TestPromptQuestionSection(t *testing.T) {
 			continue
 		}
 		for _, s := range []string{"<!-- agent-question", `resume="agent:`, "--add-label needs-human", "--comments",
-			`echo "blocked" > .sortie/status`, "Do not wrap the block in a code fence"} {
+			"Do not wrap the block in a code fence"} {
 			if !strings.Contains(section, s) {
 				t.Errorf("%s: questions section lacks %q", name, s)
 			}
+		}
+		status := "blocked"
+		if strings.HasPrefix(name, "review") {
+			status = "needs-human-review"
+		}
+		if !strings.Contains(section, `echo "`+status+`" > .sortie/status`) {
+			t.Errorf("%s: questions section does not write status %q", name, status)
 		}
 		if !strings.Contains(section, "gh issue view") && !strings.Contains(section, "gh pr view") {
 			t.Errorf("%s: questions section has no --comments read command", name)
