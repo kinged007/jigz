@@ -1,6 +1,8 @@
 # Jigz: handoff
 
-Status: 2026-10-24, Phase 3 (Questions) in progress. Read this first in a new
+Status: 2026-10-24, Phase 3 (Questions) implemented on the local branch
+`feat/questions`: WP1 to WP8 done. Remaining: the final review and the
+PR; the release is not requested. Read this first in a new
 session working on Jigz. The hub is a separate stream; its plans are in
 `plans/hub/` and it has no code yet.
 
@@ -12,7 +14,7 @@ Phase 0 is merged into `main` and pushed to `github.com/kinged007/jigz`.
 Phases 1 and 2 are complete in code, tests, and docs. Neither has a
 release or release notes; releases are deferred until the user asks. The
 rename to Jigz is done, including the repo directory `.sortie/` to
-`.jigz/`. CI runs the acceptance test. Phase 3 (Questions) is in progress
+`.jigz/`. CI runs the acceptance test. Phase 3 (Questions) is implemented
 on the local branch `feat/questions`; its plan is `plans/jigz/questions.md`.
 
 Read, in order:
@@ -131,9 +133,9 @@ squash, with CI green (check, acceptance, four builds):
 - #18: the default agent runtime `claude-code` with `claude-haiku-5-5`,
   and removal of the `pi` to `claude-code` fallback.
 
-PR #12 and issue #14 are closed. Issue #20 is open: prompts and the
-scanner should trust only comments from authorized authors. PR #10 is open
-and unrelated to this work.
+PR #12 and issue #14 are closed. Issue #20 is open: the scanner keeps
+only answers from authorized authors; the prompts still trust every
+comment. PR #10 is open and unrelated to this work.
 
 `gh` defaults to `kinged007/jigz` in this clone (`gh repo set-default`). A
 second remote, `upstream`, points to `sortie-ai/sortie`. Never push to it
@@ -146,21 +148,21 @@ removes every other configured state label, including the trigger and
 outranks the trigger. A run that exits 0 is `succeeded`. Poll dispatch
 does not pass comments to the prompt.
 
-Phase 3 (Questions) is on the local branch `feat/questions`: 7 commits on
-top of `main`, not pushed, no PR. The work packages (WP) are in
-`plans/jigz/questions.md` section 3. Done and committed on the branch:
+Phase 3 (Questions) is implemented on the local branch `feat/questions`:
+14 commits on top of `main`, not pushed, no PR. The work packages (WP)
+are in `plans/jigz/questions.md` section 3. Done and committed on the branch:
 
 | WP | Change |
 | -- | ------ |
 | WP1 | `internal/questions` parser. An independent review found two blockers; both are fixed and tested. |
 | WP2 | `internal/github` Post, Delete and User; `internal/store` tables `question_items` and `questions`; `internal/fleetconfig` keys `questions_interval` and `questions_window`. |
 | WP3 | `internal/fakegithub`: comments with ETag, `/user`, assignees, label DELETE and POST, PUT rejected, and the `EngineHandoff` helper. |
+| WP4 | `internal/collector/questions.go`: the scanner, the answer path (post the `agent-answer` comment, add the `resume` trigger, remove `agent:done` and `needs-human`), remove-labels for malformed blocks, and `cmd/jig/questions.go` with the `/questions` handlers and `/api/v1/questions`. |
+| WP5 | The Questions page (`cmd/jig/templates/questions.html`, the nav entry in `layout.html`). |
 | WP6 | The five prompts with the question block and `resume`, the prs workflow comment, and prompt tests. |
+| WP7 | The acceptance scenario `f_blocking_question_stops_and_answer_resumes` in `cmd/jig/acceptance_test.go`; `make acceptance` passes. |
+| WP8 | README (labels and the Questions section), `features.md` Phase 3 items, and this file. |
 
-Not done: the review of WP2 and WP3 (pending at the time of writing), WP4
-(scanner and answer path), WP5 (Questions page), WP7 (acceptance
-scenario), WP8 (README and docs). There is no scanner or Questions page
-yet, so the only change a user can see on the branch is in the prompts.
 The worktrees `/home/coder/sortie-loop-wt/wp1`, `wp2`, `wp3` and `wp6`
 (branches `wp/questions-1` and so on) can be removed after the PR.
 
@@ -238,16 +240,17 @@ Outside this repository:
 
 ## 6. Outstanding work
 
-1. Finish the review of WP2 and WP3 and fix any blockers.
-2. WP4 to WP8 per `plans/jigz/questions.md` section 3.
-3. One PR for Phase 3 with the focused commits (the user asks for pushes
+1. The final review pass over the Phase 3 diff on `feat/questions`
+   (review2 in `plans/jigz/questions.md` section 3, WP8).
+2. One PR for Phase 3 with the focused commits (the user asks for pushes
    and PRs). Then remove the worktrees under `/home/coder/sortie-loop-wt/`.
-4. Phase 4 is not started.
-5. Phase 1 and Phase 2 releases and release notes: deferred; only when
+3. Phase 4 is not started.
+4. Phase 1 and Phase 2 releases and release notes: deferred; only when
    the user asks.
 
-Issue #20 (trust only comments from authorized authors in prompts and the
-scanner) is open and applies to WP4.
+Issue #20 (trust only comments from authorized authors) is open: the
+scanner filters authors (`internal/collector/questions.go`), the prompts
+do not.
 
 The upstream PRs for the `pi` adapter and the `github-pr` tracker are in
 progress and owned by the user.
@@ -382,6 +385,6 @@ the binary from before the rename.
 
 ## 9. Next action
 
-1. Read the result of the WP2 and WP3 review and fix any blockers.
-2. Start WP4 (scanner and answer path) per `plans/jigz/questions.md`
-   section 3.
+1. The final review pass over the Phase 3 diff on `feat/questions`
+   (`plans/jigz/questions.md` section 3, WP8).
+2. One PR for Phase 3.

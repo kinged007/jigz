@@ -2,7 +2,8 @@
 
 Status: draft for discussion (2026-10-21)
 
-"exists" means implemented on `main` or on `feat/united-dashboard`. A
+"exists" means implemented on `main`, on `feat/united-dashboard`, or on
+`feat/questions`. A
 number in brackets is the phase in `plans/jigz/vision-and-roadmap.md`
 section 6.
 
@@ -51,7 +52,7 @@ section 6.
 - Outcome classes of the hub protocol, mapped in one adapter (`internal/store/outcome.go`) — exists
 - Disabled-feature notices from capability detection (`capabilities.go`, `alerts.go`) — exists
 - Questions page with answering; the last answer removes `needs-human`
-  and `agent:done` and adds the `resume` trigger [3] ([plan](questions.md))
+  and `agent:done` and adds the `resume` trigger — exists ([plan](questions.md))
 - Working hours and account pool status (`gate.go`, `agents.go`) — exists
 - Preview links on runs [5]
 
@@ -66,7 +67,7 @@ section 6.
 - PR workflow: review, review-fix, merge (needs `github-pr`, fork only) —
   exists
 - `agent-question` and `agent-answer` format in prompts; blocking
-  questions use `needs-human` [3] ([plan](questions.md))
+  questions use `needs-human` — exists ([plan](questions.md))
 - Preview stage or command [5]
 
 ## 6. Connected mode

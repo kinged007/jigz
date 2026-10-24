@@ -85,7 +85,7 @@ are set by the agents themselves.
 | `agent:docs` | yellow | Trigger: update the docs for merged changes and open a PR |
 | `in-progress` | purple | Claim: an agent is working on this right now |
 | `agent:done` | green | State: the agent finished |
-| `needs-human` | red | Escalation: a person has to look at this |
+| `needs-human` | red | Escalation: parks the item until a person removes the label |
 | `united-into` | blue | State: folded into another issue's fix; that issue is the one to read |
 | `backlog` | grey | Deferred by a person; no loop and no PM should touch it |
 | `P0` | red | Priority: dispatch before everything else |
@@ -104,6 +104,11 @@ parked until a person removes the label. `agent:done` is deliberately
 neither an active state nor a terminal one: it marks the item finished
 without closing it, and re-labelling the item with a trigger is how you
 run it again.
+
+Questions carry no label of their own: there is no `agent:question` or
+`needs-answer` label. An agent asks with an HTML comment block in an
+issue comment, and a blocking question parks the item by adding
+`needs-human` (see [Questions](#questions)).
 
 ### Chaining loops
 
@@ -672,7 +677,7 @@ github:
   api_url: https://api.github.com   # default; set it for GitHub Enterprise Server
   details: false            # also read commits, changed files and check runs
   questions_interval: 2m    # question scan interval, at least 1m
-  questions_window: 168h    # how far back a scan looks for runs
+  questions_window: 168h    # how far back a scan looks for stored runs
 ```
 
 The dashboard reads the block on each pass, so an edit applies without a
@@ -680,6 +685,46 @@ restart. The token is resolved as for the loops: `JIG_TOKEN`, then
 `token:`, then `GITHUB_TOKEN` and `GH_TOKEN`. An unknown key or an invalid
 value in the block stops `jig` from starting. A `--unite` page uses the
 block of the first project, by slug, that sets `enrich: true`.
+
+### Questions
+
+The dashboard lists open agent questions on the Questions page. The page
+needs `github.enrich`; without it the page shows only "Set github.enrich
+to see questions".
+
+An agent asks in an issue or PR comment, in an HTML comment block around
+the question text:
+
+```
+<!-- agent-question id="q-1" audience="project" blocking="true" resume="agent:plan" -->
+**Question:** Should this ship in the first release?
+**Suggested answer:** No; split the indexer into its own issue.
+<!-- /agent-question -->
+```
+
+`id` is required and matches `q-` followed by up to 64 letters, digits,
+`_` or `-`. `audience` is `product` or `project`. `blocking` is `true` or
+`false`; `resume` is the trigger label to add back when the item is
+answered, any `agent:` label except `agent:done`, and is required on a
+blocking question. A blocking question parks the item with `needs-human`;
+a non-blocking question does not stop the work. Markers inside fenced
+code blocks are ignored.
+
+To answer, use the form on the question on the Questions page: type the
+answer and Submit, or press "Use suggested answer" to fill the form with
+the agent's suggestion. The page posts the answer as an `agent-answer`
+comment with the same `id`, and when every blocking question on the item
+has an answer it adds the `resume` trigger and removes `agent:done` and
+`needs-human`, so the loop dispatches the item again on its next poll. An
+item with a malformed question block stays parked: its card has a
+"Remove labels" button that removes `needs-human` and `agent:done` and
+adds a trigger; the page offers a trigger to choose when it cannot
+determine one.
+
+The dashboard has no authentication and binds to `127.0.0.1` by default,
+and anyone who can reach it can post answers as the token account.
+Opening it to other hosts is the user's decision; use a private network
+or a reverse proxy with authentication.
 
 ### Spend controls
 
