@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -194,9 +195,9 @@ func TestHubStagesChangeAndAppliesOnlyWhenTold(t *testing.T) {
 }
 
 func TestHubKeepsInvalidWorkflowOut(t *testing.T) {
-	validate := func(root, wf string) error {
-		if !strings.HasPrefix(wf, filepath.Join(root, ".jigz.next.tmp", "workflows")) {
-			t.Errorf("validated %s, not a staged file under %s", wf, root)
+	validate := func(wf string, env []string) error {
+		if filepath.Base(filepath.Dir(filepath.Dir(wf))) != ".jigz.next.tmp" {
+			t.Errorf("validated %s, not a staged file", wf)
 		}
 		if strings.Contains(readFile(t, wf), "BROKEN") {
 			return errors.New("tracker.kind: unknown")
@@ -333,5 +334,175 @@ func TestNewHubRefusesBadRunnerLabel(t *testing.T) {
 		if _, err := NewHub(t.TempDir(), l, 0, nil); err == nil {
 			t.Errorf("NewHub(%q) accepted", l)
 		}
+	}
+}
+
+func TestHubApplyIsReplayTolerantAfterInterruption(t *testing.T) {
+	v1 := testConfig(project("acme/widgets", "", "issues"))
+	v2 := testConfig(project("acme/widgets", "-label:backlog", "issues"))
+	v2.Files[0] = file("WORKFLOW.issues.md", wfText("label:agent:build"))
+	v2.Files[2] = file("prompts/plan.md", "new plan prompt")
+	// A full apply renames the manifest, config.yaml, the workflow and the
+	// prompt.
+	for _, completeBy := range []string{"Apply", "Sync"} {
+		for n := 0; n < 4; n++ {
+			t.Run(fmt.Sprintf("%s after %d renames", completeBy, n), func(t *testing.T) {
+				h, _ := newTestHub(t, nil)
+				mustSync(t, h, v1)
+				old := loops(t, h)["acme/widgets issues"]
+				rep := mustSync(t, h, v2)
+				if len(rep.Pending) != 1 {
+					t.Fatalf("Pending = %+v", rep.Pending)
+				}
+				calls := 0
+				rename = func(a, b string) error {
+					if calls++; calls > n {
+						return errors.New("interrupted")
+					}
+					return os.Rename(a, b)
+				}
+				_, err := h.Apply(rep.Pending[0])
+				rename = os.Rename
+				if err == nil {
+					t.Fatal("interrupted Apply reported success")
+				}
+				if l, ok := loops(t, h)["acme/widgets issues"]; ok && l.Hash != old.Hash {
+					t.Fatalf("Loops served a half-applied root with hash %s", l.Hash)
+				}
+				if n > 0 {
+					if _, ok := loops(t, h)["acme/widgets issues"]; ok {
+						t.Fatal("Loops served a root whose manifest is ahead of its files")
+					}
+				}
+				var got Loop
+				if completeBy == "Apply" {
+					if got, err = h.Apply(rep.Pending[0]); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					// With no rename done the root is still complete on
+					// the old files, so Sync stages it again instead.
+					again := mustSync(t, h, v2)
+					if want := map[bool]int{true: 1, false: 0}[n == 0]; len(again.Pending) != want || len(again.Invalid) != 0 {
+						t.Fatalf("Sync after interruption = %+v, want %d pending", again, want)
+					}
+					if n == 0 {
+						if _, err := h.Apply(again.Pending[0]); err != nil {
+							t.Fatal(err)
+						}
+					}
+					got = loops(t, h)["acme/widgets issues"]
+				}
+				if got.Hash != rep.Pending[0].Hash {
+					t.Errorf("hash after completion = %s, want %s", got.Hash, rep.Pending[0].Hash)
+				}
+				if l := loops(t, h)["acme/widgets issues"]; l.Hash != rep.Pending[0].Hash {
+					t.Errorf("Loops hash = %s, want %s", l.Hash, rep.Pending[0].Hash)
+				}
+			})
+		}
+	}
+}
+
+func TestHubRefusesFilesOutsideWorkflowsAndPrompts(t *testing.T) {
+	for _, p := range []string{
+		"jigz-issues.db", "prompts/jigz-issues.db", "prompts/x.db-wal", "prompts/x.db-shm", "x.db",
+		".env", "prompts/.hidden", "notes.md", "WORKFLOW.issues.txt", "other/plan.md", "prompts",
+	} {
+		if checkPath(p) == nil {
+			t.Errorf("checkPath(%q) accepted", p)
+		}
+		h, data := newTestHub(t, nil)
+		cfg := testConfig(project("acme/widgets", "", "issues"))
+		cfg.Files = append(cfg.Files, file(p, "x"))
+		if _, err := h.Sync(cfg); err == nil {
+			t.Errorf("Sync accepted served file %q", p)
+		}
+		if entries, _ := os.ReadDir(data); len(entries) != 0 {
+			t.Errorf("refused %q wrote %v", p, entries)
+		}
+	}
+	for _, p := range []string{"WORKFLOW.issues.md", "prompts/plan.md", "prompts/sub/part.md"} {
+		if err := checkPath(p); err != nil {
+			t.Errorf("checkPath(%q) = %v", p, err)
+		}
+	}
+}
+
+func TestHubDoesNotWriteThroughSymlinks(t *testing.T) {
+	v2 := testConfig(project("acme/widgets", "", "issues"))
+	v2.Files[2] = file("prompts/plan.md", "new plan prompt")
+	for name, plant := range map[string]func(root, outside string){
+		"symlinked prompts dir": func(root, outside string) {
+			dir := filepath.Join(root, ".jigz", "workflows", "prompts")
+			os.RemoveAll(dir)
+			os.Symlink(outside, dir)
+		},
+		"symlinked prompt file": func(root, outside string) {
+			f := filepath.Join(root, ".jigz", "workflows", "prompts", "plan.md")
+			os.Remove(f)
+			os.Symlink(filepath.Join(outside, "plan.md"), f)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, _ := newTestHub(t, nil)
+			mustSync(t, h, testConfig(project("acme/widgets", "", "issues")))
+			root := loops(t, h)["acme/widgets issues"].Root
+			outside := t.TempDir()
+			os.WriteFile(filepath.Join(outside, "plan.md"), []byte("outside"), 0o644)
+			plant(root, outside)
+			rep, err := h.Sync(v2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rep.Pending) == 1 {
+				_, err = h.Apply(rep.Pending[0])
+			}
+			if err == nil && len(rep.Invalid) == 0 {
+				t.Error("files written through a symlink without an error")
+			}
+			if got := readFile(t, filepath.Join(outside, "plan.md")); got != "outside" {
+				t.Errorf("file outside the root changed to %q", got)
+			}
+		})
+	}
+}
+
+func TestHubRefusesCaseInsensitiveDuplicateRoots(t *testing.T) {
+	h, data := newTestHub(t, nil)
+	if _, err := h.Sync(testConfig(project("acme/W", "", "issues"), project("acme/w", "", "issues"))); err == nil {
+		t.Error("Sync accepted acme/W and acme/w")
+	}
+	if _, err := h.Sync(testConfig(project("acme/w", "", "issues", "Issues"))); err == nil {
+		t.Error("Sync accepted issues and Issues")
+	}
+	if entries, _ := os.ReadDir(data); len(entries) != 0 {
+		t.Errorf("refused config wrote %v", entries)
+	}
+}
+
+func TestHubValidatesWithMinimalEnv(t *testing.T) {
+	t.Setenv("JIG_TOKEN", testToken)
+	t.Setenv("GITHUB_TOKEN", testToken)
+	t.Setenv("JIG_CANARY", "canary")
+	var got []string
+	var staged string
+	h, _ := newTestHub(t, func(wf string, env []string) error {
+		got, staged = env, wf
+		return nil
+	})
+	mustSync(t, h, testConfig(project("acme/widgets", "", "issues")))
+	if got == nil {
+		t.Fatal("validator not called")
+	}
+	allowed := map[string]bool{"PATH": true, "HOME": true, "SORTIE_TRACKER_PROJECT": true, "SORTIE_TRACKER_API_KEY": true, "JIG_WORKSPACES": true}
+	for _, kv := range got {
+		k, v, _ := strings.Cut(kv, "=")
+		if !allowed[k] || strings.Contains(v, testToken) || strings.Contains(v, "canary") {
+			t.Errorf("validator env carries %q", kv)
+		}
+	}
+	if filepath.Base(filepath.Dir(filepath.Dir(staged))) != ".jigz.next.tmp" {
+		t.Errorf("validator got %s, not the staged file", staged)
 	}
 }
