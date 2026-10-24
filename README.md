@@ -145,7 +145,7 @@ trigger label:
 | Loop | Rule | Watches | Does |
 |------|------|---------|------|
 | `issues` | `plan` | issues with `agent:plan` | Writes an implementation plan as an issue comment. The agent removes `agent:plan` and adds `agent:done`; a human reviews the plan and labels the issue `agent:build` to trigger development. |
-| `issues` | `build` | issues with `agent:build` or `agent:plan-build` | Reads the issue's recent comments (the plan comment and later human comments), implements the change and opens a PR, then labels that PR `agent:review` and assigns it to the token owner. For `agent:plan-build` with no plan comment, it posts the plan first and implements in the same run. (The parked `agent:quick` track merges straight to the base branch with no PR — see `prompts/quick.md`.) |
+| `issues` | `build` | issues with `agent:build` or `agent:plan-build` | Reads the issue's recent comments (the plan comment and later human comments), implements the change and opens a PR, then labels that PR `agent:review` and assigns it to the token owner. For `agent:plan-build` with no plan comment, it posts the plan first and implements in the same run. |
 | `issues` | `docs` | issues with `agent:docs` | Updates the docs for merged changes and opens a PR. |
 | `prs` | `review` | PRs with `agent:review` | Reviews the PR in three passes, then routes on its own verdict: `agent:build` when there are findings to fix, `agent:done` when the review is clean. |
 | `prs` | `review-fix` | PRs with `agent:build` | Applies posted review feedback, pushes to the PR branch, then hands the PR back as `agent:review` for another pass. |
