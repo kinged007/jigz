@@ -36,6 +36,7 @@ func (a *app) startHistory() (stop func()) {
 		Host:     machine.New(a.stateDir).Read,
 	}
 	a.enricher = &collector.Enricher{Store: st, Settings: a.githubSettings, Targets: a.githubTargets}
+	a.questions = newQuestionsState(&collector.Scanner{Store: st, Settings: a.githubSettings, Targets: a.githubTargets})
 	go func() {
 		defer close(done)
 		c.Run(ctx)
@@ -45,10 +46,15 @@ func (a *app) startHistory() (stop func()) {
 		defer close(enrichDone)
 		a.enricher.Run(ctx)
 	}()
+	questionsDone := make(chan struct{})
+	go func() {
+		defer close(questionsDone)
+		a.questions.scanner.Run(ctx)
+	}()
 	return func() {
 		cancel()
 		wait := time.After(10 * time.Second)
-		for _, ch := range []chan struct{}{done, enrichDone} {
+		for _, ch := range []chan struct{}{done, enrichDone, questionsDone} {
 			select {
 			case <-ch:
 			case <-wait:
