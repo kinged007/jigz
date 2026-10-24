@@ -1,8 +1,8 @@
 # Jigz: handoff
 
-Status: 2026-10-24, Phase 3 (Questions) implemented on the local branch
-`feat/questions`: WP1 to WP8 done. Remaining: the final review and the
-PR; the release is not requested. Read this first in a new
+Status: 2026-10-24, Phase 3 (Questions) is merged into `main` (PR #22,
+commit `d940a08`). Phase 4 (Connected mode) is planned and not started;
+the release is not requested. Read this first in a new
 session working on Jigz. The hub is a separate stream; its plans are in
 `plans/hub/` and it has no code yet.
 
@@ -14,8 +14,9 @@ Phase 0 is merged into `main` and pushed to `github.com/kinged007/jigz`.
 Phases 1 and 2 are complete in code, tests, and docs. Neither has a
 release or release notes; releases are deferred until the user asks. The
 rename to Jigz is done, including the repo directory `.sortie/` to
-`.jigz/`. CI runs the acceptance test. Phase 3 (Questions) is implemented
-on the local branch `feat/questions`; its plan is `plans/jigz/questions.md`.
+`.jigz/`. CI runs the acceptance test. Phase 3 (Questions) is merged into `main`; its plan is
+`plans/jigz/questions.md`. Phase 4 plan: `plans/jigz/connected-mode.md`,
+approved by delegation.
 
 Read, in order:
 
@@ -130,6 +131,7 @@ squash, with CI green (check, acceptance, four builds):
 - #16: the CI `acceptance` job.
 - #17, #19, #21: plans. `needs-human` for blocking questions, engine
   findings, and `plans/jigz/questions.md` as the Phase 3 plan.
+- #22: Phase 3 (blocking questions, answers, Questions page).
 - #18: the default agent runtime `claude-code` with `claude-haiku-5-5`,
   and removal of the `pi` to `claude-code` fallback.
 
@@ -148,9 +150,8 @@ removes every other configured state label, including the trigger and
 outranks the trigger. A run that exits 0 is `succeeded`. Poll dispatch
 does not pass comments to the prompt.
 
-Phase 3 (Questions) is implemented on the local branch `feat/questions`:
-14 commits on top of `main`, not pushed, no PR. The work packages (WP)
-are in `plans/jigz/questions.md` section 3. Done and committed on the branch:
+Phase 3 (Questions) is merged into `main` (PR #22, commit `d940a08`). The
+work packages (WP) are in `plans/jigz/questions.md` section 3:
 
 | WP | Change |
 | -- | ------ |
@@ -164,7 +165,7 @@ are in `plans/jigz/questions.md` section 3. Done and committed on the branch:
 | WP8 | README (labels and the Questions section), `features.md` Phase 3 items, and this file. |
 
 The worktrees `/home/coder/sortie-loop-wt/wp1`, `wp2`, `wp3` and `wp6`
-(branches `wp/questions-1` and so on) can be removed after the PR.
+(branches `wp/questions-1` and so on) can be removed.
 
 Phase 1 (working hours, account pool,
 `agent-exec`, runtime failover, dashboard pages) is in `internal/machine`,
@@ -221,7 +222,7 @@ Outside this repository:
 
 - CI on `main` is green after the merges of #13 to #21: check, acceptance,
   and the four cross-builds.
-- `make verify` passed on `feat/questions` with no token set: gofmt,
+- `make verify` passed on the Phase 3 branch with no token set: gofmt,
   `go vet` (also with `-tags acceptance`), build, `go test ./...`, and both
   acceptance tests (about 3 minutes in total). The acceptance tests
   download each engine (about 25 MB) on first run per machine and fail if
@@ -240,12 +241,11 @@ Outside this repository:
 
 ## 6. Outstanding work
 
-1. The final review pass over the Phase 3 diff on `feat/questions`
-   (review2 in `plans/jigz/questions.md` section 3, WP8).
-2. One PR for Phase 3 with the focused commits (the user asks for pushes
-   and PRs). Then remove the worktrees under `/home/coder/sortie-loop-wt/`.
-3. Phase 4 is not started.
-4. Phase 1 and Phase 2 releases and release notes: deferred; only when
+1. Phase 4 (Connected mode) is not started. Work packages WP0 to WP10
+   are in `plans/jigz/connected-mode.md` section 3. WP0 (protocol and
+   schemas) and WP8 (prompts) can start first.
+2. Remove the worktrees under `/home/coder/sortie-loop-wt/`.
+3. Phase 1 and Phase 2 releases and release notes: deferred; only when
    the user asks.
 
 Issue #20 (trust only comments from authorized authors) is open: the
@@ -385,6 +385,4 @@ the binary from before the rename.
 
 ## 9. Next action
 
-1. The final review pass over the Phase 3 diff on `feat/questions`
-   (`plans/jigz/questions.md` section 3, WP8).
-2. One PR for Phase 3.
+1. Phase 4, WP0 and WP8 of `plans/jigz/connected-mode.md`.
