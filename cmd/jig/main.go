@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -260,10 +261,11 @@ func run() (code int) {
 	// JIG_ONLY selects a subset of the installed loops, for a
 	// supervisor driving several repos. Unset starts every loop, so a
 	// plain Jigz run is unchanged.
-	loops, err := selectLoops(discoverWorkflows(abs), os.Getenv("JIG_ONLY"))
+	srcLoops, err := filesSource(abs, cfg.Repo, os.Getenv("JIG_ONLY")).Loops(context.Background())
 	if err != nil {
 		fatal(err)
 	}
+	loops := loopDefs(srcLoops)
 	if len(loops) == 0 {
 		fatal(fmt.Errorf("no WORKFLOW.*.md files in %s", filepath.Join(abs, ".jigz", "workflows")))
 	}
