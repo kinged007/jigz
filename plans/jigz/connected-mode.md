@@ -232,15 +232,14 @@ or 403 drains every loop, stops the fallback search, logs one line
 naming `jig join`, and retries every 10 min (decision 10). A 400
 naming the supported protocol range is logged and retried every 10 min.
 
-WebSocket client: `go.mod` has no WebSocket library and none is added
-(decision 11). `internal/wsclient` implements the part of RFC 6455 the
-daemon needs with the standard library only: client handshake over an
-`net/http` upgrade (TLS through the transport), text frames, ping and
-pong, close handshake, fragmentation, client-side masking, a read size
-limit, and `context` cancellation. It also has a server-side `Accept`
-(upgrade through `http.Hijacker`) that its tests and the fake hub use.
-`github.com/coder/websocket` is a candidate replacement and needs user
-approval.
+WebSocket client: `github.com/coder/websocket` (decision 11). The
+command channel dials with the client's HTTP settings and redirects
+refused, sends `Authorization` and the `Jig-*` headers on the upgrade,
+sets a 1 MiB read limit, pings every 30 s and closes the socket when a
+pong does not arrive within 90 s. Reads and writes take a `context`. A
+refused upgrade is classed like any other response: 401 and 403 match
+`ErrRevoked`, 5xx and network errors are retryable, every other status
+is permanent. The fake hub accepts the socket with `websocket.Accept`.
 
 ### 2.6 Default branch
 
@@ -300,7 +299,7 @@ encodes to the same JSON (decision 5).
 
 `internal/fakehub` follows `internal/fakegithub`: an in-memory
 `http.Handler` with exactly the protocol routes and the socket (served
-with `internal/wsclient`'s `Accept`). It
+with `websocket.Accept` from `github.com/coder/websocket`). It
 decodes bodies into `internal/hubproto` types with
 `DisallowUnknownFields`, rejects a wrong bearer, missing headers and
 unknown routes, and lists rejections in `Unexpected()`. Test API:
@@ -349,7 +348,7 @@ cross-build.
 | -- | ---- | ----------- | ---------- |
 | 0 | complex | `plans/system/hub-protocol.md`, `schemas/hub-protocol/v0/*` | none |
 | 1 | feature | `internal/hubproto/*` | 0 |
-| 2 | feature | `internal/wsclient/*` | 1 |
+| 2 | feature | `go.mod`, `go.sum` | 1 |
 | 3 | tests | `internal/fakehub/*`, `internal/fakegithub/query.go`, `internal/fakegithub/query_test.go` | 1, 2 |
 | 4 | feature | `internal/hubclient/*` | 1, 2, 3 |
 | 5 | complex | `internal/source/*`, `cmd/jig/embed.go` | 1 |
@@ -373,12 +372,10 @@ both streams approve.
 **WP1, WP3.** Per 2.8, with unit tests per route and rejection; in
 `internal/fakegithub`, several `repo:` terms are an OR, as on GitHub.
 
-**WP2. WebSocket client.** Per 2.5. Unit tests against an in-process
-server (`Accept`) and a conformance-style set: client frames masked,
-fragmented messages reassembled, ping and pong between fragments,
-oversized frame rejected by the read limit, close handshake in both
-directions, context cancellation. **Review pass (review2) on WP1 to
-WP3.**
+**WP2. WebSocket client.** Per 2.5: add `github.com/coder/websocket`.
+The `internal/hubclient` unit tests cover the read limit, the pong
+timeout, refused upgrades, redirects and context cancellation.
+**Review pass (review2) on WP1 to WP3.**
 
 **WP4. Hub client.** Per 2.5. Tests against the fake hub: 304, ETag
 change, 401, back-off bounds with an injected clock, no secret in errors.
@@ -475,7 +472,7 @@ the protocol and the code.
 8. **Id and version on requests.** Headers `Jig-Daemon-Id` and `Jig-Version`.
 9. **Run links.** Optional; the branch only.
 10. **Revoked credential.** As in 2.5.
-11. **WebSocket.** `internal/wsclient`, standard library only; `github.com/coder/websocket` needs user approval.
+11. **WebSocket.** `github.com/coder/websocket` for the command channel and the fake hub.
 12. **launchd label.** `io.github.kinged007.jigd`.
 13. **`jig leave`.** Added.
 14. **`quick.md`.** Deleted.

@@ -256,7 +256,6 @@ Outside this repository:
 4. Phase 5 (previews) and Phase 6 (agent session host, `task.run`) are not
    started.
 5. Decisions waiting for the user:
-   - Approve `github.com/coder/websocket` or keep `internal/wsclient`.
    - Issue #20 (author trust in the prompts).
    - Whether to raise `timeout-minutes` of the CI `acceptance` job if it
      approaches 15 minutes. It ran 8m4s on the Phase 4 PR.
