@@ -213,10 +213,14 @@ type Access struct {
 	TrustedProxy bool `yaml:"trusted_proxy"`
 }
 
-// GitHub is the optional enrichment of run history from the GitHub REST
-// API. It is off unless Enrich is set.
+// GitHub is the github block: the optional enrichment of run history from
+// the GitHub REST API, off unless Enrich is set, and the question scanner,
+// on unless Questions is false.
 type GitHub struct {
 	Enrich bool `yaml:"enrich"`
+	// Questions switches the question scanner, its resume and the
+	// Questions page; nil means true. Read it with QuestionsOn.
+	Questions *bool `yaml:"questions"`
 	// Interval is a Go duration, DefaultGitHubInterval when empty.
 	Interval string `yaml:"interval"`
 	// APIURL is DefaultGitHubAPI when empty.
@@ -231,6 +235,9 @@ type GitHub struct {
 	// cached pull request. It has no effect unless Enrich is set.
 	Details bool `yaml:"details"`
 }
+
+// QuestionsOn reports whether the question scanner runs for the project.
+func (g GitHub) QuestionsOn() bool { return g.Questions == nil || *g.Questions }
 
 // DetailsOn reports whether the extra pull request detail is read.
 func (g GitHub) DetailsOn() bool { return g.Enrich && g.Details }

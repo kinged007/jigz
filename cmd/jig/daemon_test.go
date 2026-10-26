@@ -409,7 +409,7 @@ func TestDaemonPauseIsKeptAcrossARestart(t *testing.T) {
 	r.wake(testProject)
 }
 
-func fallbackSearches(gh *fakegithub.Server) []string {
+func searches(gh *fakegithub.Server) []string {
 	var out []string
 	for _, req := range gh.Requests() {
 		if req.Path == "/search/issues" {
@@ -418,6 +418,12 @@ func fallbackSearches(gh *fakegithub.Server) []string {
 		}
 	}
 	return out
+}
+
+// fallbackSearches are the searches of the fallback loop, not those of the
+// question scanner.
+func fallbackSearches(gh *fakegithub.Server) []string {
+	return slices.DeleteFunc(searches(gh), func(q string) bool { return strings.Contains(q, "label:needs-human") })
 }
 
 func TestDaemonFallbackSearchWakesMatchingLoops(t *testing.T) {

@@ -14,7 +14,6 @@ type QuestionItem struct {
 	URL          string
 	Labels       []string
 	Assignees    []string
-	FirstLabels  []string
 	IssueETag    string
 	CommentsETag string
 	ScannedAt    string
@@ -72,14 +71,14 @@ func boolInt(b bool) int {
 	return 0
 }
 
-const questionItemColumns = `project, number, is_pr, title, url, labels, assignees, first_labels, issue_etag, comments_etag, scanned_at, problems`
+const questionItemColumns = `project, number, is_pr, title, url, labels, assignees, issue_etag, comments_etag, scanned_at, problems`
 
 func scanQuestionItem(row interface{ Scan(...any) error }) (QuestionItem, error) {
 	var it QuestionItem
 	var isPR int
-	var labels, assignees, first, problems string
+	var labels, assignees, problems string
 	err := row.Scan(&it.Project, &it.Number, &isPR, &it.Title, &it.URL,
-		&labels, &assignees, &first, &it.IssueETag, &it.CommentsETag, &it.ScannedAt, &problems)
+		&labels, &assignees, &it.IssueETag, &it.CommentsETag, &it.ScannedAt, &problems)
 	if err != nil {
 		return QuestionItem{}, err
 	}
@@ -87,7 +86,7 @@ func scanQuestionItem(row interface{ Scan(...any) error }) (QuestionItem, error)
 	for _, d := range []struct {
 		raw string
 		dst any
-	}{{labels, &it.Labels}, {assignees, &it.Assignees}, {first, &it.FirstLabels}, {problems, &it.Problems}} {
+	}{{labels, &it.Labels}, {assignees, &it.Assignees}, {problems, &it.Problems}} {
 		if err := readJSONList(d.raw, d.dst); err != nil {
 			return QuestionItem{}, err
 		}
@@ -96,29 +95,22 @@ func scanQuestionItem(row interface{ Scan(...any) error }) (QuestionItem, error)
 }
 
 // ReplaceQuestions replaces one item's row and its questions in a single
-// transaction. Question Project and Number come from item. first_labels is
-// set by the first pass that finds a question or a problem on the item, such
-// as a malformed block, and kept by later passes.
+// transaction. Question Project and Number come from item.
 func (s *Store) ReplaceQuestions(item QuestionItem, qs []Question) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	first := ""
-	if len(qs) > 0 || len(item.Problems) > 0 {
-		first = jsonList(item.Labels)
-	}
 	if _, err := tx.Exec(`INSERT INTO question_items (`+questionItemColumns+`)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT (project, number) DO UPDATE SET
 		is_pr=excluded.is_pr, title=excluded.title, url=excluded.url, labels=excluded.labels,
 		assignees=excluded.assignees,
-		first_labels=CASE WHEN question_items.first_labels = '' THEN excluded.first_labels ELSE question_items.first_labels END,
 		issue_etag=excluded.issue_etag, comments_etag=excluded.comments_etag,
 		scanned_at=excluded.scanned_at, problems=excluded.problems`,
 		item.Project, item.Number, boolInt(item.IsPR), item.Title, item.URL,
-		jsonList(item.Labels), jsonList(item.Assignees), first,
+		jsonList(item.Labels), jsonList(item.Assignees),
 		item.IssueETag, item.CommentsETag, item.ScannedAt, jsonList(item.Problems)); err != nil {
 		return err
 	}
@@ -166,6 +158,8 @@ type QuestionFilter struct {
 	// Blocking is "true" or "false".
 	Blocking string
 	Project  string
+	// Number is the item number; 0 matches every item.
+	Number int
 	// State is "open" or "answered".
 	State string
 }
@@ -188,6 +182,9 @@ func (f QuestionFilter) where() (string, []any) {
 	}
 	if f.Project != "" {
 		add("project = ?", f.Project)
+	}
+	if f.Number != 0 {
+		add("number = ?", f.Number)
 	}
 	switch f.State {
 	case "open":

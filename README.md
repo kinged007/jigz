@@ -679,15 +679,16 @@ schedule and the status document keep running. `stop` ends the run.
 `restart --when-idle` wakes the loops, and a restart without
 `--when-idle` replaces the process as usual.
 
-### GitHub enrichment and questions
+### GitHub settings
 
 `github:` in `.jigz/config.yaml` lets the dashboard read GitHub with the
-repo's token: pull requests for run history, and agent questions on the
-Questions page. It is off by default:
+repo's token: pull requests for run history (enrichment), and agent
+questions on the Questions page:
 
 ```yaml
 github:
-  enrich: false             # default; true turns on enrichment and questions
+  enrich: false             # default; true turns on run-history enrichment
+  questions: true           # default; false turns off the question scan, the resume and the Questions page for this project
   interval: 10m             # enrichment pass interval, at least 1m
   api_url: https://api.github.com   # default; set it for GitHub Enterprise Server
   details: false            # also read commits, changed files and check runs
@@ -695,17 +696,14 @@ github:
   questions_window: 168h    # how far back a scan looks for stored runs
 ```
 
-The dashboard reads the block on each pass, so an edit applies without a
-restart. The token is resolved as for the loops: `JIG_TOKEN`, then
-`token:`, then `GITHUB_TOKEN` and `GH_TOKEN`. An unknown key or an invalid
-value in the block stops `jig` from starting. A `--unite` page uses the
-block of the first project, by slug, that sets `enrich: true`.
+`enrich` and `questions` are independent. The dashboard reads the block on
+each pass, so an edit applies without a restart. The token is resolved as
+for the loops: `JIG_TOKEN`, then `token:`, then `GITHUB_TOKEN` and
+`GH_TOKEN`. An unknown key or an invalid value in the block stops `jig`
+from starting. A `--unite` page uses the block of the first project, by
+slug, that sets `enrich: true`; `questions` is read per project.
 
 ### Questions
-
-The dashboard lists open agent questions on the Questions page. The page
-needs `github.enrich`; without it the page shows only "Set github.enrich
-to see questions".
 
 An agent asks in an issue or PR comment, in an HTML comment block around
 the question text:
@@ -725,21 +723,65 @@ blocking question. A blocking question parks the item with `needs-human`;
 a non-blocking question does not stop the work. Markers inside fenced
 code blocks are ignored.
 
-To answer, use the form on the question on the Questions page: type the
-answer and Submit, or press "Use suggested answer" to fill the form with
-the agent's suggestion. The page posts the answer as an `agent-answer`
-comment with the same `id`, and when every blocking question on the item
-has an answer it adds the `resume` trigger and removes `agent:done` and
-`needs-human`, so the loop dispatches the item again on its next poll. An
-item with a malformed question block stays parked: its card has a
-"Remove labels" button that removes `needs-human` and `agent:done` and
-adds a trigger; the page offers a trigger to choose when it cannot
-determine one.
+The Questions page lists the questions of every project with
+`github.questions` on. The dashboard is read-only: the page has links to
+the item and the question comment on GitHub, filters (audience, blocking,
+project, open or answered), and for each open question a copyable answer
+template. It writes nothing to GitHub. If a project has no token, the page
+shows "no GitHub token" for it.
 
-The dashboard has no authentication and binds to `127.0.0.1` by default,
-and anyone who can reach it can post answers as the token account.
-Opening it to other hosts is the user's decision; use a private network
-or a reverse proxy with authentication.
+A person answers in one of three ways:
+
+| Path | What the person posts | How the item resumes |
+|---|---|---|
+| Hub | The answer-block template, posted by the hub with the user's own GitHub token | The scanner (below) flips the labels automatically |
+| GitHub, plain text | Free text in a comment | The person flips the labels by hand: remove `needs-human` and add the trigger label. The agent reads the comment on its next run |
+| GitHub, answer block | A comment with an `agent-answer` block that carries the question id (template below) | The scanner flips the labels automatically |
+
+The answer block is:
+
+```
+<!-- agent-answer id="q-1" -->
+No; split the indexer into its own issue.
+<!-- /agent-answer -->
+```
+
+Plain text cannot be matched to a question id, so it never resumes an
+item automatically. An answer added by editing an older comment keeps that
+comment's creation time and does not count as new; post a new comment.
+
+#### Resume rule
+
+The question scanner runs in the dashboard (every registered project with
+`github.questions` on and a token) and in `jig daemon` (the projects of its
+loops). It resumes an item when all of these hold:
+
+- The item carries `needs-human`.
+- It has at least one blocking question, every blocking question has an
+  answer block from an authorized author, and no question block is
+  malformed or disagrees with another on `resume`.
+- At least one of those answers was posted after the latest time
+  `needs-human` was added to the item. Times have one-second precision, so
+  an answer posted in the same second does not count.
+
+The scanner then adds the `resume` trigger, removes `agent:done`, and
+removes `needs-human`, so the loop dispatches the item again on its next
+poll. It changes only those labels and posts no comment. An item with a
+problem (malformed block, answer to an unknown id, differing `resume`
+values, a failed label call) stays parked and the page lists the problem
+with a link to the comment; fix it on GitHub. The scanner does not run
+under `jig --no-dashboard` or with `questions: false`; change the labels by
+hand then.
+
+Authorized authors are the token account, the repository owner, authors
+whose association with the repository is `OWNER`, `MEMBER` or
+`COLLABORATOR`, and the item's assignees. An answer from anyone else does
+not count; the page shows it as "ignored: <author>". Prompts tell agents
+to consider only comments from the same authors.
+
+The scanner reads up to 100 parked items per project per pass, which is
+the size of one GitHub search page. Further parked items are not scanned
+until others leave the list.
 
 ### Spend controls
 
@@ -786,6 +828,16 @@ each period.
 Env overrides: `JIG_REPO`, `JIG_TOKEN`,
 `JIG_MILESTONE` (plus `GH_MILESTONE` as a legacy alias),
 `JIG_ASSIGNEE` (overrides `assignee:`).
+
+### Other environment variables
+
+| Variable | Effect |
+|---|---|
+| `JIG_WORKSPACES` | Directory that holds the agent checkouts. `jig` sets it for each loop (`.jigz/workspaces` by default) and the shipped workflows use it as `workspace.root: $JIG_WORKSPACES/<loop>`. Set it by hand only when validating a workflow file with the engine directly. |
+| `JIG_BIN` | Path of the `jig` binary that the supervisor starts for each loop. Without it, `jig` uses a `jig` binary next to the running one, then `jig` on `PATH`. |
+| `JIG_REGISTRY_DIR` | Directory for the project registry and status files. Unset, they are kept in the shared user cache directory, so several `jig` processes on one machine see each other. `jig daemon` sets it for its loop children so their files stay apart from the shared ones. |
+| `JIG_MODEL` | Model name the agent adapter receives. `jig` sets it from the `model` agent setting of a repository in `jigz.yaml`; a workflow file refers to it as `model: $JIG_MODEL`. |
+| `JIG_MODEL_<WORKFLOW>` | Model for one workflow when `jigz.yaml` overrides `model` for that workflow, for example `JIG_MODEL_BUILD` for `WORKFLOW.build.md` and `JIG_MODEL_REVIEW` for `WORKFLOW.review.md`. `jig` sets these; `-` in a workflow name becomes `_`. |
 
 ### Working hours and agent accounts
 
@@ -990,7 +1042,9 @@ the hash of every applied file.
 ### No local dashboard
 
 Connected mode has no local dashboard and no Questions page. Answers to
-a parked item are written on GitHub.
+a parked item are written on GitHub. `jig daemon` runs the question
+scanner over the projects of its loops and resumes answered items that
+carry its runner label.
 
 ## Ad hoc: auto-merge on clean review
 

@@ -190,7 +190,7 @@ func TestPromptQuestionSection(t *testing.T) {
 			continue
 		}
 		for _, s := range []string{"<!-- agent-question", `resume="agent:`, "--add-label needs-human", "--comments",
-			"Do not wrap the block in a code fence"} {
+			"Do not wrap the block in a code fence", "author_association"} {
 			if !strings.Contains(section, s) {
 				t.Errorf("%s: questions section lacks %q", name, s)
 			}

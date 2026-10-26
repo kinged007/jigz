@@ -51,6 +51,7 @@ type Item struct {
 
 	version        int
 	commentVersion int
+	eventVersion   int
 }
 
 // LabelEvent is one label write the server accepted.
@@ -60,6 +61,7 @@ type LabelEvent struct {
 	Label  string
 	Added  bool
 	At     time.Time
+	Actor  string
 }
 
 // Request is one request the server received.
@@ -85,6 +87,8 @@ type Server struct {
 	requests []Request
 	events   []LabelEvent
 	nextComm int64
+	clock    func() time.Time
+	lastTime time.Time
 
 	// umu guards unexpected on its own, because reject runs inside
 	// handlers that hold mu.
@@ -108,6 +112,7 @@ func New(user, token string) *Server {
 	s.mux.HandleFunc("PATCH "+r+"/issues/{n}", s.patchItem)
 	s.mux.HandleFunc("GET "+r+"/issues/{n}/comments", s.listComments)
 	s.mux.HandleFunc("POST "+r+"/issues/{n}/comments", s.addComment)
+	s.mux.HandleFunc("GET "+r+"/issues/{n}/events", s.listEvents)
 	s.mux.HandleFunc("GET "+r+"/issues/{n}/labels", s.listItemLabels)
 	s.mux.HandleFunc("POST "+r+"/issues/{n}/labels", s.addLabels)
 	s.mux.HandleFunc("DELETE "+r+"/issues/{n}/labels/{name}", s.removeLabel)
@@ -143,7 +148,7 @@ func (s *Server) Add(it Item) int {
 	if it.State == "" {
 		it.State = "open"
 	}
-	now := time.Now().UTC()
+	now := s.now()
 	it.Created, it.Updated = now, now
 	it.Labels = slices.Clone(it.Labels)
 	for _, l := range it.Labels {
@@ -165,12 +170,80 @@ func (s *Server) AddComment(slug string, n int, c Comment) int64 {
 	s.nextComm++
 	c.ID = s.nextComm
 	if c.Created.IsZero() {
-		c.Created = time.Now().UTC()
+		c.Created = s.now()
 	}
 	it.Comments = append(it.Comments, c)
 	it.commentVersion++
 	it.touch()
 	return c.ID
+}
+
+// SetClock replaces the time source for every timestamp the server
+// records. The server still makes timestamps strictly increase: a reading
+// that is not after the previous one is moved one nanosecond past it.
+func (s *Server) SetClock(now func() time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clock = now
+}
+
+// now returns the next timestamp. The caller holds s.mu.
+func (s *Server) now() time.Time {
+	t := time.Now()
+	if s.clock != nil {
+		t = s.clock()
+	}
+	t = t.UTC()
+	if !t.After(s.lastTime) {
+		t = s.lastTime.Add(time.Nanosecond)
+	}
+	s.lastTime = t
+	return t
+}
+
+// record stores a label event stamped with the server clock. The caller
+// holds s.mu.
+func (s *Server) record(it *Item, slug, label string, added bool, actor string) {
+	s.events = append(s.events, LabelEvent{slug, it.Number, label, added, s.now(), actor})
+	it.eventVersion++
+}
+
+// AddLabelAsPerson adds a label as a person would in the GitHub UI: the
+// label is created in the repository if missing, a labeled event by actor
+// is recorded at the next clock time, and nothing is recorded when the
+// item already has the label.
+func (s *Server) AddLabelAsPerson(slug string, n int, label, actor string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	it := s.item(slug, n)
+	if it == nil {
+		panic(fmt.Sprintf("fakegithub: no item %s#%d", slug, n))
+	}
+	s.repo(slug).ensureLabel(label)
+	if containsFold(it.Labels, label) {
+		return
+	}
+	it.Labels = append(it.Labels, label)
+	s.record(it, slug, label, true, actor)
+	it.touch()
+}
+
+// RemoveLabelAsPerson removes a label as a person would and records an
+// unlabeled event by actor. It does nothing when the item lacks the label.
+func (s *Server) RemoveLabelAsPerson(slug string, n int, label, actor string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	it := s.item(slug, n)
+	if it == nil {
+		panic(fmt.Sprintf("fakegithub: no item %s#%d", slug, n))
+	}
+	i := slices.IndexFunc(it.Labels, func(l string) bool { return strings.EqualFold(l, label) })
+	if i < 0 {
+		return
+	}
+	s.record(it, slug, it.Labels[i], false, actor)
+	it.Labels = slices.Delete(it.Labels, i, i+1)
+	it.touch()
 }
 
 // SetAssignees replaces the assignees of a seeded issue or pull request.
@@ -201,7 +274,7 @@ func (s *Server) EngineHandoff(slug string, n int, remove ...string) {
 	rp.ensureLabel("agent:done")
 	if !containsFold(it.Labels, "agent:done") {
 		it.Labels = append(it.Labels, "agent:done")
-		s.events = append(s.events, LabelEvent{slug, it.Number, "agent:done", true, time.Now()})
+		s.record(it, slug, "agent:done", true, s.user)
 	}
 	for _, l := range remove {
 		if strings.EqualFold(l, "agent:done") {
@@ -211,7 +284,7 @@ func (s *Server) EngineHandoff(slug string, n int, remove ...string) {
 		if i < 0 {
 			continue
 		}
-		s.events = append(s.events, LabelEvent{slug, it.Number, it.Labels[i], false, time.Now()})
+		s.record(it, slug, it.Labels[i], false, s.user)
 		it.Labels = slices.Delete(it.Labels, i, i+1)
 	}
 	it.touch()
@@ -641,6 +714,44 @@ func (s *Server) listComments(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, slug, it := s.target(w, r)
+	if it == nil {
+		return
+	}
+	if !s.checkParams(w, r, "per_page", "page") {
+		return
+	}
+	q := r.URL.Query()
+	tag := fmt.Sprintf(`"%x"`, sha1.Sum([]byte(fmt.Sprint("events", it.Number, it.eventVersion, q.Get("page"), q.Get("per_page")))))
+	if r.Header.Get("If-None-Match") == tag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("ETag", tag)
+	var all []LabelEvent
+	for _, e := range s.events {
+		if strings.EqualFold(e.Repo, slug) && e.Number == it.Number {
+			all = append(all, e)
+		}
+	}
+	out := []map[string]any{}
+	for _, e := range page(w, r, all) {
+		kind := "unlabeled"
+		if e.Added {
+			kind = "labeled"
+		}
+		out = append(out, map[string]any{
+			"event": kind, "actor": map[string]string{"login": e.Actor},
+			"label":      map[string]string{"name": e.Label},
+			"created_at": e.At.Format(time.RFC3339),
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func commentJSON(it *Item, c Comment) map[string]any {
 	kind := "issues"
 	if it.PR {
@@ -679,7 +790,7 @@ func (s *Server) addComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.nextComm++
-	c := Comment{ID: s.nextComm, Author: s.user, Association: "OWNER", Body: body.Body, Created: time.Now().UTC()}
+	c := Comment{ID: s.nextComm, Author: s.user, Association: "OWNER", Body: body.Body, Created: s.now()}
 	it.Comments = append(it.Comments, c)
 	it.commentVersion++
 	it.touch()
@@ -720,7 +831,7 @@ func (s *Server) addLabels(w http.ResponseWriter, r *http.Request) {
 		rp.ensureLabel(l)
 		if !containsFold(it.Labels, l) {
 			it.Labels = append(it.Labels, l)
-			s.events = append(s.events, LabelEvent{slug, it.Number, l, true, time.Now()})
+			s.record(it, slug, l, true, s.user)
 		}
 	}
 	it.touch()
@@ -740,7 +851,7 @@ func (s *Server) removeLabel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Label does not exist")
 		return
 	}
-	s.events = append(s.events, LabelEvent{slug, it.Number, it.Labels[i], false, time.Now()})
+	s.record(it, slug, it.Labels[i], false, s.user)
 	it.Labels = slices.Delete(it.Labels, i, i+1)
 	it.touch()
 	writeJSON(w, http.StatusOK, labelObjects(it.Labels))

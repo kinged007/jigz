@@ -17,6 +17,10 @@ state_dir: ""
 # own token (token_env) is used for its own calls. Applied on reload.
 github:
   enrich: false
+  # Scan the project's issues and pull requests for agent questions and
+  # resume a parked item once its blocking questions are answered. Needs a
+  # token; independent of enrich. Default true.
+  questions: true
   # Also read the commits, changed files and check runs of each cached pull
   # request, shown in the Delivery card of a run. Up to two more requests
   # per pull request. Only used when enrich is true. Default false.

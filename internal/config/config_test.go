@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -381,17 +382,17 @@ func TestMigrateRepoDirMovesLegacyDirectory(t *testing.T) {
 }
 
 func TestGitHubBlock(t *testing.T) {
-	cfg, err := loadWithConfig(t, "github:\n  enrich: true\n  api_url: http://127.0.0.1:9/\n  interval: 5m\n  details: true\n  questions_interval: 3m\n  questions_window: 24h\n", nil)
+	cfg, err := loadWithConfig(t, "github:\n  enrich: true\n  questions: false\n  api_url: http://127.0.0.1:9/\n  interval: 5m\n  details: true\n  questions_interval: 3m\n  questions_window: 24h\n", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	g := cfg.GitHub
-	if !g.Enrich || !g.DetailsOn() || g.BaseURL() != "http://127.0.0.1:9" || g.PassInterval() != 5*time.Minute ||
+	if !g.Enrich || g.QuestionsOn() || !g.DetailsOn() || g.BaseURL() != "http://127.0.0.1:9" || g.PassInterval() != 5*time.Minute ||
 		g.QuestionPassInterval() != 3*time.Minute || g.QuestionWindow() != 24*time.Hour {
 		t.Errorf("unexpected github block: %+v", g)
 	}
 	dir := filepath.Dir(filepath.Dir(cfg.Workspaces))
-	if lg, err := LoadGitHub(dir); err != nil || lg != g {
+	if lg, err := LoadGitHub(dir); err != nil || !reflect.DeepEqual(lg, g) {
 		t.Errorf("LoadGitHub = %+v, %v; want %+v", lg, err, g)
 	}
 }
@@ -402,9 +403,32 @@ func TestGitHubBlockDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	g := cfg.GitHub
-	if g.Enrich || g.BaseURL() != "https://api.github.com" || g.PassInterval() != 10*time.Minute ||
+	if g.Enrich || !g.QuestionsOn() || g.BaseURL() != "https://api.github.com" || g.PassInterval() != 10*time.Minute ||
 		g.QuestionPassInterval() != 2*time.Minute || g.QuestionWindow() != 168*time.Hour {
 		t.Errorf("unexpected default github block: %+v", g)
+	}
+}
+
+func TestGitHubQuestionsKey(t *testing.T) {
+	for _, tc := range []struct {
+		yaml string
+		want bool
+	}{
+		{"github:\n  enrich: false\n", true},
+		{"github:\n  questions: true\n", true},
+		{"github:\n  questions: false\n", false},
+	} {
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, ".jigz"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".jigz", "config.yaml"), []byte(tc.yaml), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		g, err := LoadGitHub(dir)
+		if err != nil || g.QuestionsOn() != tc.want {
+			t.Errorf("%q: QuestionsOn = %v, %v; want %v", tc.yaml, g.QuestionsOn(), err, tc.want)
+		}
 	}
 }
 

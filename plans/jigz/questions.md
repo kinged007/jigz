@@ -132,8 +132,9 @@ or `COLLABORATOR`, and the item's assignees. The author is the GitHub
 account that posted the comment; the `by` attribute is not checked. Other
 answers do not answer a question; the page shows each as "ignored:
 <author>". The filter is in one function (`authorized`) so it can become
-configurable. A stricter mode and the same filter for what prompts read
-are tracked in kinged007/jigz#20.
+configurable. The prompts apply the same set of authors to the comments
+agents read (2.8). A stricter, configurable mode is tracked in
+kinged007/jigz#20.
 
 ### 2.3 Storage
 
@@ -260,7 +261,8 @@ The prompts `plan.md`, `review.md`, `build.md`, `review-fix.md` and
 `docs.md` in `cmd/jig/workflows/prompts/` state the block format and
 rules 1, 3 and 5, escalate with a blocking block and `needs-human` only,
 and read all comments with `gh issue view` or `gh pr view --comments`
-before acting. They need no change for this design.
+before acting. They consider only comments from authorized authors (2.2),
+using `gh api ... --jq` with a filter on `author_association`.
 
 Engine facts, read at the `kinged007/sortie` v1.28.1 and
 `sortie-ai/sortie` v1.29.0 tags: exit code 0 is recorded `succeeded`
@@ -280,12 +282,11 @@ comments, so `.issue.comments` is empty on a first run.
 - Authorization is the GitHub identity of the comment author plus the
   author filter (2.2). A person can answer only as their own GitHub
   account, on GitHub or through the hub. kinged007/jigz#20 covers a
-  stricter filter and the same filter for what agents read.
+  stricter, configurable filter.
 - The scanner's writes are label changes only (2.4), made with the token
   the machine already uses for its loops.
 - On a public repository anyone can post an `agent-answer`. The scanner
-  ignores unauthorized answers; agents read every answer until #20 is
-  done.
+  and the prompts ignore unauthorized answers.
 
 ## 3. Work packages
 

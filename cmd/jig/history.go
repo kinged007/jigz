@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/kinged007/jigz/internal/collector"
@@ -37,7 +38,7 @@ func (a *app) startHistory() (stop func()) {
 		Host:     machine.New(a.stateDir).Read,
 	}
 	a.enricher = &collector.Enricher{Store: st, Settings: a.githubSettings, Targets: a.githubTargets}
-	a.questions = newQuestionsState(&collector.Scanner{Store: st, Settings: a.githubSettings, Targets: a.githubTargets})
+	a.questions = a.newScanner(st)
 	go func() {
 		defer close(done)
 		c.Run(ctx)
@@ -50,7 +51,7 @@ func (a *app) startHistory() (stop func()) {
 	questionsDone := make(chan struct{})
 	go func() {
 		defer close(questionsDone)
-		a.questions.scanner.Run(ctx)
+		a.questions.Run(ctx)
 	}()
 	return func() {
 		cancel()
@@ -64,6 +65,17 @@ func (a *app) startHistory() (stop func()) {
 			}
 		}
 		st.Close()
+	}
+}
+
+// newScanner returns the question scanner. A resume is recorded in the
+// audit log.
+func (a *app) newScanner(st *store.Store) *collector.Scanner {
+	return &collector.Scanner{
+		Store: st, Settings: a.questionsSettings, Targets: a.githubTargets, Questions: a.projectQuestionsOn,
+		OnResume: func(project string, number int, trigger string) {
+			a.auditAs("scanner", "resume", project, "#"+strconv.Itoa(number), "added "+trigger+", removed "+collector.AgentDone+" and "+collector.NeedsHuman)
+		},
 	}
 }
 
@@ -98,16 +110,26 @@ func (a *app) workflowKind(project, workflow string) string {
 
 // githubSettings is the github block of the projects' .jigz/config.yaml,
 // read on each call so an edit applies without a restart. A --unite page
-// spans several projects but runs one enricher and one scanner: the first
-// project by slug that turns enrich on supplies the whole block, else the
-// first project that has a readable block. a.github applies only when no
-// project config can be read.
+// spans several projects but runs one enricher: the first project by slug
+// that turns enrich on supplies the whole block, else the first project
+// that has a readable block. a.github applies only when no project config
+// can be read.
 func (a *app) githubSettings() fleetconfig.GitHub {
+	return a.settingsBy(func(g fleetconfig.GitHub) bool { return g.Enrich })
+}
+
+// questionsSettings is githubSettings for the scanner, which selects the
+// first project that turns github.questions on.
+func (a *app) questionsSettings() fleetconfig.GitHub {
+	return a.settingsBy(fleetconfig.GitHub.QuestionsOn)
+}
+
+func (a *app) settingsBy(on func(fleetconfig.GitHub) bool) fleetconfig.GitHub {
 	var dirs []string
 	for _, r := range a.projects() {
 		dirs = append(dirs, r.Dir)
 	}
-	if g, ok := githubFrom(dirs); ok {
+	if g, ok := pickGitHub(dirs, on); ok {
 		return g
 	}
 	a.mu.Lock()
@@ -115,16 +137,20 @@ func (a *app) githubSettings() fleetconfig.GitHub {
 	return a.github
 }
 
-// githubFrom picks the github block of the first dir that enables it, else
-// of the first dir with a readable config.
+// githubFrom picks the github block of the first dir that enables
+// enrichment, else of the first dir with a readable config.
 func githubFrom(dirs []string) (fleetconfig.GitHub, bool) {
+	return pickGitHub(dirs, func(g fleetconfig.GitHub) bool { return g.Enrich })
+}
+
+func pickGitHub(dirs []string, on func(fleetconfig.GitHub) bool) (fleetconfig.GitHub, bool) {
 	var first *fleetconfig.GitHub
 	for _, dir := range dirs {
 		g, err := config.LoadGitHub(dir)
 		if err != nil {
 			continue
 		}
-		if g.Enrich {
+		if on(g) {
 			return g, true
 		}
 		if first == nil {

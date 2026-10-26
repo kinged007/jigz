@@ -2,10 +2,10 @@ package collector
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -34,6 +34,8 @@ type qRig struct {
 	// pageOneUnchanged answers 304 to a comments request with an ETag, as
 	// GitHub does when only a later page changed.
 	pageOneUnchanged bool
+	// resumes records the OnResume calls as "project#number trigger".
+	resumes []string
 }
 
 func newQRig(t *testing.T) *qRig {
@@ -67,16 +69,27 @@ func newQRig(t *testing.T) *qRig {
 	}))
 	t.Cleanup(srv.Close)
 	r.cfg = config.GitHub{Enrich: true, APIURL: srv.URL}
-	r.Scanner = &Scanner{
-		Store: st, Settings: func() config.GitHub { return r.cfg }, Now: func() time.Time { return r.now },
-		Targets: func() []Target { return []Target{{Project: qRepo, Token: "tok"}} },
-	}
+	r.Scanner = r.newScanner(st)
 	t.Cleanup(func() {
 		if u := r.fake.Unexpected(); len(u) > 0 {
 			t.Errorf("unexpected requests: %v", u)
 		}
 	})
 	return r
+}
+
+// newScanner returns a scanner over the rig's fake and settings that
+// records its resumes in r.resumes.
+func (r *qRig) newScanner(st *store.Store) *Scanner {
+	return &Scanner{
+		Store: st, Settings: func() config.GitHub { return r.cfg }, Now: func() time.Time { return r.now },
+		Targets: func() []Target { return []Target{{Project: qRepo, Token: "tok"}} },
+		OnResume: func(project string, n int, trigger string) {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			r.resumes = append(r.resumes, fmt.Sprintf("%s#%d %s", project, n, trigger))
+		},
+	}
 }
 
 func (r *qRig) target() Target { return Target{Project: qRepo, Token: "tok"} }
@@ -137,18 +150,48 @@ func noPut(t *testing.T, fake *fakegithub.Server) {
 	}
 }
 
-func TestScanOffMakesNoRequests(t *testing.T) {
+func TestScanQuestionsOffMakesNoRequests(t *testing.T) {
 	r := newQRig(t)
 	n := r.add("needs-human", "agent:done")
 	r.comment(n, "bot", "OWNER", qblock("q-1", true, "agent:plan"))
-	r.cfg.Enrich = false
+	r.comment(n, "bot", "OWNER", ablock("q-1", "a"))
+	r.Questions = func(project string) bool { return project != qRepo }
 	r.Pass(context.Background())
 	r.Once(context.Background())
 	if got := r.fake.Requests(); len(got) != 0 {
 		t.Errorf("requests = %v, want none", got)
 	}
 	if !r.Status(qRepo).At.IsZero() {
-		t.Error("a pass ran with enrich off")
+		t.Error("a pass ran with questions off")
+	}
+}
+
+func TestScanRunsWithEnrichOff(t *testing.T) {
+	r := newQRig(t)
+	n := r.parked(qblock("q-1", true, "agent:plan"), ablock("q-1", "a"))
+	r.cfg.Enrich = false
+	r.Once(context.Background())
+	if st := r.Status(qRepo); !st.OK {
+		t.Fatalf("status = %+v", st)
+	}
+	if got := r.labels(t, n); !slices.Equal(got, []string{"agent:plan"}) {
+		t.Errorf("labels = %v, want the item resumed", got)
+	}
+}
+
+func TestScanWithoutTokenReportsIt(t *testing.T) {
+	r := newQRig(t)
+	n := r.parked(qblock("q-1", true, "agent:plan"), ablock("q-1", "a"))
+	r.Targets = func() []Target { return []Target{{Project: qRepo, TokenEnv: "MY_TOKEN"}} }
+	r.Pass(context.Background())
+	if got := r.fake.Requests(); len(got) != 0 {
+		t.Errorf("requests = %v, want none", got)
+	}
+	if st := r.Status(qRepo); st.OK || st.Err != "no GitHub token" {
+		t.Errorf("status = %+v, want no GitHub token", st)
+	}
+	if got := r.labels(t, n); !slices.Equal(got, []string{"needs-human", "agent:done"}) {
+		t.Errorf("labels = %v", got)
 	}
 }
 
@@ -277,13 +320,31 @@ func (r *qRig) parked(bodies ...string) int {
 	return n
 }
 
-func (r *qRig) resume(t *testing.T, n int) Resumed {
+// recent stores a run of item n so step 2 makes it a candidate.
+func (r *qRig) recent(t *testing.T, n int) {
 	t.Helper()
-	res, err := r.Resume(context.Background(), r.target(), n)
+	if err := r.st.AddRuns([]store.Run{ghRun(int64(n), qRepo, "issues", store.KindIssue, fmt.Sprint(n), r.now.Format(time.RFC3339))}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (r *qRig) problemKinds(t *testing.T, n int) []string {
+	t.Helper()
+	it, err := r.st.QuestionItem(qRepo, n)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return res
+	var out []string
+	for _, p := range Problems(it) {
+		out = append(out, p.Kind)
+	}
+	return out
+}
+
+func (r *qRig) resumeCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.resumes)
 }
 
 var resumeWrites = []string{
@@ -292,13 +353,76 @@ var resumeWrites = []string{
 	"DELETE /repos/acme/app/issues/1/labels/needs-human",
 }
 
-func TestRule2AllAnsweredResumes(t *testing.T) {
-	r := newQRig(t)
-	n := r.parked(qblock("q-1", true, "agent:plan"), qblock("q-2", true, "agent:plan"), ablock("q-1", "a"), ablock("q-2", "b"))
-	res := r.resume(t, n)
-	if !res.Removed || res.Added != "agent:plan" {
-		t.Errorf("result = %+v", res)
+func TestResumeRule2(t *testing.T) {
+	const unterminated = "<!-- agent-question id=\"q-3\" audience=\"product\" blocking=\"true\" resume=\"agent:plan\" -->\n**Question:** open"
+	cases := []struct {
+		name   string
+		labels []string
+		bodies []string
+		// person is an answer to q-1 from eve, who is not authorized.
+		person bool
+		resume bool
+	}{
+		{name: "all answered", bodies: []string{qblock("q-1", true, "agent:plan"), qblock("q-2", true, "agent:plan"), ablock("q-1", "a"), ablock("q-2", "b")}, resume: true},
+		{name: "no blocks", bodies: []string{"please review"}},
+		{name: "non-blocking only", bodies: []string{qblock("q-1", false, ""), ablock("q-1", "a")}},
+		{name: "one of two answered", bodies: []string{qblock("q-1", true, "agent:plan"), qblock("q-2", true, "agent:plan"), ablock("q-1", "a")}},
+		{name: "malformed block", bodies: []string{qblock("q-1", true, "agent:plan"), ablock("q-1", "a"), noResume}},
+		{name: "unterminated block", bodies: []string{qblock("q-1", true, "agent:plan"), ablock("q-1", "a"), unterminated}},
+		{name: "differing resume", bodies: []string{qblock("q-1", true, "agent:plan"), qblock("q-2", true, "agent:build"), ablock("q-1", "a"), ablock("q-2", "b")}},
+		{name: "answer before ask", bodies: []string{ablock("q-1", "early"), qblock("q-1", true, "agent:plan")}},
+		{name: "only an unauthorized answer", bodies: []string{qblock("q-1", true, "agent:plan")}, person: true},
+		{name: "no needs-human", labels: []string{"agent:done"}, bodies: []string{qblock("q-1", true, "agent:plan"), ablock("q-1", "a")}},
+		{name: "labels already removed", labels: []string{"agent:plan"}, bodies: []string{qblock("q-1", true, "agent:plan"), ablock("q-1", "a")}},
 	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := newQRig(t)
+			labels := c.labels
+			if labels == nil {
+				labels = []string{"needs-human", "agent:done"}
+			}
+			n := r.add(labels...)
+			for _, b := range c.bodies {
+				r.comment(n, "bot", "OWNER", b)
+			}
+			if c.person {
+				r.comment(n, "eve", "NONE", ablock("q-1", "a"))
+			}
+			r.recent(t, n)
+			r.Pass(context.Background())
+			if st := r.Status(qRepo); !st.OK {
+				t.Fatalf("status = %+v", st)
+			}
+			if _, err := r.st.QuestionItem(qRepo, n); err != nil {
+				t.Fatalf("item not scanned: %v", err)
+			}
+			if !c.resume {
+				if got := r.labelWrites(n); len(got) != 0 {
+					t.Errorf("label writes = %v, want none", got)
+				}
+				if got := r.labels(t, n); !slices.Equal(got, labels) {
+					t.Errorf("labels = %v, want %v", got, labels)
+				}
+				if r.resumeCount() != 0 {
+					t.Errorf("OnResume called: %v", r.resumes)
+				}
+				return
+			}
+			if got := r.labelWrites(n); !slices.Equal(got, resumeWrites) {
+				t.Errorf("label writes = %v, want %v", got, resumeWrites)
+			}
+			if got := r.labels(t, n); !slices.Equal(got, []string{"agent:plan"}) {
+				t.Errorf("labels = %v", got)
+			}
+		})
+	}
+}
+
+func TestResumeWritesOnlyLabels(t *testing.T) {
+	r := newQRig(t)
+	n := r.parked(qblock("q-1", true, "agent:plan"), ablock("q-1", "a"))
+	r.Pass(context.Background())
 	if got := r.labelWrites(n); !slices.Equal(got, resumeWrites) {
 		t.Errorf("label writes = %v, want %v", got, resumeWrites)
 	}
@@ -310,179 +434,240 @@ func TestRule2AllAnsweredResumes(t *testing.T) {
 			t.Error("in-progress was added")
 		}
 	}
+	for _, q := range r.fake.Requests() {
+		if q.Method == http.MethodPost && strings.HasSuffix(q.Path, "/comments") {
+			t.Errorf("comment posted: %s", q.Path)
+		}
+	}
 	noPut(t, r.fake)
-	it, _ := r.st.QuestionItem(qRepo, n)
-	if Malformed(Problems(it)) || len(it.Problems) != 0 {
-		t.Errorf("problems after resume = %v", it.Problems)
+	if !slices.Equal(r.resumes, []string{"acme/app#1 agent:plan"}) {
+		t.Errorf("OnResume calls = %v", r.resumes)
+	}
+	it, err := r.st.QuestionItem(qRepo, n)
+	if err != nil || len(it.Problems) != 0 || !slices.Equal(it.Labels, []string{"agent:plan"}) {
+		t.Errorf("stored item = %+v, %v", it, err)
+	}
+
+	r.now = r.now.Add(5 * time.Minute)
+	r.Pass(context.Background())
+	if len(r.labelWrites(n)) != len(resumeWrites) || r.resumeCount() != 1 {
+		t.Errorf("a second pass wrote again: %v, resumes %v", r.labelWrites(n), r.resumes)
 	}
 }
 
-func TestRule2KeepsLabels(t *testing.T) {
-	cases := map[string][]string{
-		"no blocks":           {"please review"},
-		"non-blocking only":   {qblock("q-1", false, ""), ablock("q-1", "a")},
-		"one of two answered": {qblock("q-1", true, "agent:plan"), qblock("q-2", true, "agent:plan"), ablock("q-1", "a")},
-		"malformed block":     {qblock("q-1", true, "agent:plan"), ablock("q-1", "a"), "<!-- agent-question id=\"q-2\" audience=\"product\" blocking=\"true\" -->\n**Question:** No resume?\n<!-- /agent-question -->"},
-		"unterminated block":  {qblock("q-1", true, "agent:plan"), ablock("q-1", "a"), "<!-- agent-question id=\"q-3\" audience=\"product\" blocking=\"true\" resume=\"agent:plan\" -->\n**Question:** open"},
-		"differing resume":    {qblock("q-1", true, "agent:plan"), qblock("q-2", true, "agent:build"), ablock("q-1", "a"), ablock("q-2", "b")},
-		"answer before ask":   {ablock("q-1", "early"), qblock("q-1", true, "agent:plan")},
-		"unauthorized answer": {qblock("q-1", true, "agent:plan")},
-	}
-	for name, bodies := range cases {
-		t.Run(name, func(t *testing.T) {
-			r := newQRig(t)
-			n := r.parked(bodies...)
-			if name == "unauthorized answer" {
-				r.comment(n, "eve", "NONE", ablock("q-1", "a"))
-			}
-			res := r.resume(t, n)
-			if res.Removed {
-				t.Errorf("labels removed: %+v", res)
-			}
-			if got := r.labelWrites(n); len(got) != 0 {
-				t.Errorf("label writes = %v", got)
-			}
-			if got := r.labels(t, n); !slices.Equal(got, []string{"needs-human", "agent:done"}) {
-				t.Errorf("labels = %v", got)
-			}
-		})
-	}
-}
-
-func TestRule2LabelsAlreadyRemoved(t *testing.T) {
+func TestResumeKeepsATriggerAPersonAdded(t *testing.T) {
 	r := newQRig(t)
-	n := r.add("in-progress")
+	n := r.parked(qblock("q-1", true, "agent:plan"), ablock("q-1", "a"))
+	r.fake.AddLabelAsPerson(qRepo, n, "agent:build", "alice")
+	r.Pass(context.Background())
+	if got := r.labelWrites(n); !slices.Equal(got, resumeWrites[1:]) {
+		t.Errorf("label writes = %v, want only the deletes", got)
+	}
+	if got := r.labels(t, n); !slices.Equal(got, []string{"agent:build"}) {
+		t.Errorf("labels = %v", got)
+	}
+	if !slices.Equal(r.resumes, []string{"acme/app#1 agent:build"}) {
+		t.Errorf("OnResume calls = %v", r.resumes)
+	}
+}
+
+func TestResumeTreats404AsSuccess(t *testing.T) {
+	r := newQRig(t)
+	n := r.add("needs-human")
 	r.comment(n, "bot", "OWNER", qblock("q-1", true, "agent:plan"))
 	r.comment(n, "bot", "OWNER", ablock("q-1", "a"))
-	res := r.resume(t, n)
-	if !res.Removed || res.Added != "agent:plan" {
-		t.Errorf("result = %+v", res)
-	}
+	r.Pass(context.Background())
 	var statuses []int
 	for _, q := range r.fake.LabelRequests(qRepo, n) {
 		statuses = append(statuses, q.Status)
 	}
-	if !slices.Equal(statuses, []int{200, 404, 404}) {
-		t.Errorf("label statuses = %v, want the add and two 404 deletes", statuses)
-	}
-	if got := r.labels(t, n); !slices.Equal(got, []string{"in-progress", "agent:plan"}) {
-		t.Errorf("labels = %v", got)
-	}
-}
-
-func TestRule2KeepsATriggerAPersonAdded(t *testing.T) {
-	r := newQRig(t)
-	n := r.parked(qblock("q-1", true, "agent:plan"), ablock("q-1", "a"))
-	if _, err := r.gh().Post(context.Background(), qRepo, "tok", "/repos/acme/app/issues/1/labels", []byte(`{"labels":["agent:build"]}`)); err != nil {
-		t.Fatal(err)
-	}
-	res := r.resume(t, n)
-	if !res.Removed || res.Added != "" {
-		t.Errorf("result = %+v", res)
-	}
-	if got := r.labelWrites(n); !slices.Equal(got, append([]string{"POST /repos/acme/app/issues/1/labels"}, resumeWrites[1:]...)) {
-		t.Errorf("label writes = %v", got)
-	}
-	if got := r.labels(t, n); !slices.Equal(got, []string{"agent:build"}) {
-		t.Errorf("labels = %v", got)
-	}
-}
-
-func TestAnswerPostsAsTokenAccount(t *testing.T) {
-	r := newQRig(t)
-	n := r.parked(qblock("q-1", true, "agent:plan"))
-	if err := r.Answer(context.Background(), r.target(), n, "q-1", "  Use the blue one.  "); err != nil {
-		t.Fatal(err)
-	}
-	it, _ := r.fake.Get(qRepo, n)
-	last := it.Comments[len(it.Comments)-1].Body
-	want := "<!-- agent-answer id=\"q-1\" by=\"bot\" -->\nUse the blue one.\n<!-- /agent-answer -->"
-	if last != want {
-		t.Errorf("comment = %q, want %q", last, want)
-	}
-	sc, err := r.ScanItem(context.Background(), r.target(), n)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if q := sc.Question("q-1"); q == nil || q.Current() == nil || q.Current().By != "bot" || !sc.Status.CanResume() {
-		t.Errorf("scan = %+v", sc)
-	}
-}
-
-func TestAnswerBodyRefusesBreakingText(t *testing.T) {
-	for _, text := range []string{"", "  ", "x <!-- y", "<!-- /agent-answer -->", "```\nunclosed fence"} {
-		if _, err := AnswerBody("q-1", "bot", text); !errors.Is(err, ErrAnswerText) {
-			t.Errorf("%q: err = %v, want ErrAnswerText", text, err)
-		}
-	}
-	if _, err := AnswerBody("q-1", "bot", "```\ncode\n```\nfine"); err != nil {
-		t.Errorf("closed fence refused: %v", err)
-	}
-}
-
-const noResume = "<!-- agent-question id=\"q-9\" audience=\"product\" blocking=\"true\" -->\n**Question:** Old block?\n<!-- /agent-question -->"
-
-func TestRemoveLabelsNeedsMalformedBlock(t *testing.T) {
-	r := newQRig(t)
-	n := r.parked(qblock("q-1", true, "agent:plan"))
-	if _, err := r.RemoveLabels(context.Background(), r.target(), n, "agent:plan"); !errors.Is(err, ErrNotMalformed) {
-		t.Errorf("err = %v, want ErrNotMalformed", err)
-	}
-	if got := r.labelWrites(n); len(got) != 0 {
-		t.Errorf("label writes = %v", got)
-	}
-}
-
-func TestRemoveLabelsUsesValidResume(t *testing.T) {
-	r := newQRig(t)
-	n := r.parked(qblock("q-1", true, "agent:plan"), noResume)
-	res, err := r.RemoveLabels(context.Background(), r.target(), n, "agent:build")
-	if err != nil || res.Added != "agent:plan" {
-		t.Fatalf("result = %+v, %v", res, err)
+	if !slices.Equal(statuses, []int{200, 404, 200}) {
+		t.Errorf("label statuses = %v, want the add, a 404 for agent:done and the needs-human delete", statuses)
 	}
 	if got := r.labels(t, n); !slices.Equal(got, []string{"agent:plan"}) {
 		t.Errorf("labels = %v", got)
 	}
+	if got := r.problemKinds(t, n); len(got) != 0 || r.resumeCount() != 1 {
+		t.Errorf("problems = %v, resumes = %v", got, r.resumes)
+	}
 }
 
-func TestRemoveLabelsFallsBackToFirstLabels(t *testing.T) {
+func TestResumeEventsCheck(t *testing.T) {
 	r := newQRig(t)
-	n := r.add("agent:build", "in-progress")
-	r.comment(n, "bot", "OWNER", qblock("q-1", false, ""))
-	if err := r.st.AddRuns([]store.Run{ghRun(1, qRepo, "issues", store.KindIssue, fmt.Sprint(n), r.now.Format(time.RFC3339))}); err != nil {
+	clock := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	r.fake.SetClock(func() time.Time { return clock })
+	n := r.add("agent:done")
+	r.comment(n, "bot", "OWNER", qblock("q-1", true, "agent:plan"))
+	clock = clock.Add(time.Second)
+	r.comment(n, "alice", "COLLABORATOR", ablock("q-1", "old answer"))
+	clock = clock.Add(2 * time.Second)
+	r.fake.AddLabelAsPerson(qRepo, n, "needs-human", "bot")
+
+	r.Pass(context.Background())
+	if got := r.labelWrites(n); len(got) != 0 {
+		t.Fatalf("label writes = %v, want none for an answer older than needs-human", got)
+	}
+	if got := r.problemKinds(t, n); !slices.Equal(got, []string{ParkedAgain}) {
+		t.Errorf("problems = %v, want parked again", got)
+	}
+
+	before := len(r.fake.Requests())
+	r.Pass(context.Background())
+	for _, q := range r.fake.Requests()[before:] {
+		if strings.HasSuffix(q.Path, "/events") || (strings.HasPrefix(q.Path, "/repos/") && q.Status != http.StatusNotModified) {
+			t.Errorf("unchanged parked item read again: %s %d", q.Path, q.Status)
+		}
+	}
+	if got := r.problemKinds(t, n); !slices.Equal(got, []string{ParkedAgain}) {
+		t.Errorf("problems after an unchanged pass = %v", got)
+	}
+
+	clock = clock.Add(5 * time.Second)
+	r.comment(n, "alice", "COLLABORATOR", ablock("q-1", "new answer"))
+	r.Pass(context.Background())
+	if got := r.labelWrites(n); !slices.Equal(got, resumeWrites) {
+		t.Errorf("label writes = %v, want %v for an answer newer than needs-human", got, resumeWrites)
+	}
+	if got := r.problemKinds(t, n); len(got) != 0 {
+		t.Errorf("problems after resume = %v", got)
+	}
+}
+
+func TestResumeEventsSameSecondIsNotNewer(t *testing.T) {
+	r := newQRig(t)
+	clock := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	r.fake.SetClock(func() time.Time { return clock })
+	n := r.add("agent:done")
+	r.comment(n, "bot", "OWNER", qblock("q-1", true, "agent:plan"))
+	clock = clock.Add(time.Second)
+	r.fake.AddLabelAsPerson(qRepo, n, "needs-human", "bot")
+	clock = clock.Add(500 * time.Millisecond)
+	r.comment(n, "alice", "COLLABORATOR", ablock("q-1", "a"))
+	r.Pass(context.Background())
+	if got := r.labelWrites(n); len(got) != 0 {
+		t.Errorf("label writes = %v, want none for an answer in the second needs-human was added", got)
+	}
+}
+
+func TestResumeFailureIsRetried(t *testing.T) {
+	cases := map[string]struct {
+		fail string
+		want []string
+	}{
+		"events read":        {"GET /issues/1/events", []string{"needs-human", "agent:done"}},
+		"trigger add":        {"POST /issues/1/labels", []string{"needs-human", "agent:done"}},
+		"agent:done delete":  {"DELETE /labels/agent%3Adone", []string{"needs-human", "agent:done", "agent:plan"}},
+		"needs-human delete": {"DELETE /labels/needs-human", []string{"needs-human", "agent:plan"}},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			r := newQRig(t)
+			n := r.parked(qblock("q-1", true, "agent:plan"), ablock("q-1", "a"))
+			r.fail[c.fail] = 1
+			r.Pass(context.Background())
+			if got := r.labels(t, n); !slices.Equal(got, c.want) {
+				t.Errorf("labels = %v, want %v", got, c.want)
+			}
+			it, err := r.st.QuestionItem(qRepo, n)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ps := Problems(it); len(ps) != 1 || ps[0].Kind != ResumeFailed || !strings.HasPrefix(ps[0].Message, "resume failed: ") {
+				t.Errorf("problems = %+v, want resume failed", ps)
+			}
+			if r.resumeCount() != 0 {
+				t.Errorf("OnResume called after a failure: %v", r.resumes)
+			}
+			r.Pass(context.Background())
+			if got := r.labels(t, n); !slices.Equal(got, []string{"agent:plan"}) {
+				t.Errorf("labels after retry = %v", got)
+			}
+			if got := r.problemKinds(t, n); len(got) != 0 {
+				t.Errorf("problems after retry = %v", got)
+			}
+			if !slices.Equal(r.resumes, []string{"acme/app#1 agent:plan"}) {
+				t.Errorf("OnResume calls = %v", r.resumes)
+			}
+			noPut(t, r.fake)
+		})
+	}
+}
+
+func TestTwoScannersEndWithTheSameLabels(t *testing.T) {
+	r := newQRig(t)
+	n := r.parked(qblock("q-1", true, "agent:plan"), ablock("q-1", "a"))
+	st, err := store.Open(t.TempDir())
+	if err != nil {
 		t.Fatal(err)
 	}
-	r.Pass(context.Background())
-	r.fake.EngineHandoff(qRepo, n, "agent:build", "in-progress")
-	r.comment(n, "bot", "OWNER", noResume)
-	res, err := r.RemoveLabels(context.Background(), r.target(), n, "agent:plan")
-	if err != nil || res.Added != "agent:build" {
-		t.Fatalf("result = %+v, %v", res, err)
+	t.Cleanup(func() { st.Close() })
+	other := r.newScanner(st)
+
+	// The other scanner reads the item before this one resumes it, and
+	// writes on that stale read afterwards.
+	ctx := context.Background()
+	it, _, err := other.issue(ctx, r.target(), n, false)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := r.labels(t, n); !slices.Equal(got, []string{"agent:build"}) {
+	stale, err := other.scan(ctx, r.target(), "bot", it, true)
+	if err != nil || !stale.ready() {
+		t.Fatalf("stale scan = %+v, %v", stale, err)
+	}
+	r.Pass(ctx)
+	if _, err := other.relabel(ctx, r.target(), stale); err != nil {
+		t.Errorf("second writer failed: %v", err)
+	}
+	other.Pass(ctx)
+	if got := r.labels(t, n); !slices.Equal(got, []string{"agent:plan"}) {
 		t.Errorf("labels = %v", got)
 	}
+
+	m := r.parked(qblock("q-1", true, "agent:plan"), ablock("q-1", "a"))
+	var wg sync.WaitGroup
+	for _, s := range []*Scanner{r.Scanner, other} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.Pass(ctx)
+		}()
+	}
+	wg.Wait()
+	if got := r.labels(t, m); !slices.Equal(got, []string{"agent:plan"}) {
+		t.Errorf("labels after concurrent passes = %v", got)
+	}
+	noPut(t, r.fake)
 }
 
-func TestRemoveLabelsAsksForATrigger(t *testing.T) {
+func TestSearchQualifierAndSearchOnly(t *testing.T) {
 	r := newQRig(t)
-	n := r.parked(noResume)
-	if _, err := r.RemoveLabels(context.Background(), r.target(), n, ""); !errors.Is(err, ErrNeedTrigger) {
-		t.Fatalf("err = %v, want ErrNeedTrigger", err)
+	r.Qualifier = "label:runner:m1"
+	r.SearchOnly = true
+	mine := r.parked(qblock("q-1", true, "agent:plan"), ablock("q-1", "a"))
+	r.fake.AddLabelAsPerson(qRepo, mine, "runner:m1", "bot")
+	other := r.parked(qblock("q-1", true, "agent:plan"), ablock("q-1", "a"))
+	running := r.add("agent:build")
+	r.comment(running, "bot", "OWNER", qblock("q-2", false, ""))
+	r.recent(t, running)
+	r.Pass(context.Background())
+	var queries []string
+	for _, q := range r.fake.Requests() {
+		if q.Path == "/search/issues" {
+			v, _ := url.ParseQuery(q.Query)
+			queries = append(queries, v.Get("q"))
+		}
+		if strings.Contains(q.Path, fmt.Sprintf("/issues/%d", running)) {
+			t.Errorf("an item outside the search was read: %s", q.Path)
+		}
 	}
-	if got := r.labelWrites(n); len(got) != 0 {
-		t.Errorf("label writes = %v", got)
+	if !slices.Equal(queries, []string{"repo:acme/app state:open label:needs-human label:runner:m1"}) {
+		t.Errorf("search queries = %v", queries)
 	}
-	choices, err := r.Triggers(context.Background(), r.target())
-	if err != nil || !slices.Equal(choices, []string{"agent:plan", "agent:build"}) {
-		t.Fatalf("triggers = %v, %v", choices, err)
+	if got := r.labels(t, mine); !slices.Equal(got, []string{"runner:m1", "agent:plan"}) {
+		t.Errorf("labels of the routed item = %v", got)
 	}
-	res, err := r.RemoveLabels(context.Background(), r.target(), n, "agent:build")
-	if err != nil || res.Added != "agent:build" {
-		t.Fatalf("result = %+v, %v", res, err)
-	}
-	if got := r.labels(t, n); !slices.Equal(got, []string{"agent:build"}) {
-		t.Errorf("labels = %v", got)
+	if got := r.labelWrites(other); len(got) != 0 {
+		t.Errorf("an item without the runner label was written: %v", got)
 	}
 }
 
@@ -507,44 +692,7 @@ func TestProblemsRoundTrip(t *testing.T) {
 	}
 }
 
-func TestRule2FailureMidwayIsReported(t *testing.T) {
-	cases := map[string]struct {
-		fail string
-		want []string
-	}{
-		"trigger add":        {"POST /issues/1/labels", []string{"needs-human", "agent:done"}},
-		"agent:done delete":  {"DELETE /labels/agent%3Adone", []string{"needs-human", "agent:done", "agent:plan"}},
-		"needs-human delete": {"DELETE /labels/needs-human", []string{"needs-human", "agent:plan"}},
-	}
-	for name, c := range cases {
-		t.Run(name, func(t *testing.T) {
-			r := newQRig(t)
-			n := r.parked(qblock("q-1", true, "agent:plan"), ablock("q-1", "a"))
-			r.fail[c.fail] = 1
-			res, err := r.Resume(context.Background(), r.target(), n)
-			if err == nil || res.Removed {
-				t.Fatalf("result = %+v, %v; want an error", res, err)
-			}
-			if got := r.labels(t, n); !slices.Equal(got, c.want) {
-				t.Errorf("labels = %v, want %v", got, c.want)
-			}
-			it, err := r.st.QuestionItem(qRepo, n)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if ps := Problems(it); len(ps) != 1 || ps[0].Kind != LabelsNotRemoved {
-				t.Errorf("problems = %+v, want labels not removed", ps)
-			}
-			res = r.resume(t, n)
-			if !res.Removed {
-				t.Errorf("retry = %+v", res)
-			}
-			if got := r.labels(t, n); !slices.Equal(got, []string{"agent:plan"}) {
-				t.Errorf("labels after retry = %v", got)
-			}
-		})
-	}
-}
+const noResume = "<!-- agent-question id=\"q-9\" audience=\"product\" blocking=\"true\" -->\n**Question:** Old block?\n<!-- /agent-question -->"
 
 func TestScanReadsEveryCommentPage(t *testing.T) {
 	r := newQRig(t)
@@ -561,20 +709,5 @@ func TestScanReadsEveryCommentPage(t *testing.T) {
 	r.Pass(context.Background())
 	if qs := r.stored(t, store.QuestionFilter{}); len(qs) != 1 || qs[0].Answer != "late" {
 		t.Errorf("answer on the second page missed: %+v", qs)
-	}
-}
-
-func TestRemoveLabelsUsesFirstLabelsOfMalformedOnlyItem(t *testing.T) {
-	r := newQRig(t)
-	n := r.add("agent:build", "needs-human")
-	r.comment(n, "bot", "OWNER", noResume)
-	r.Pass(context.Background())
-	r.fake.EngineHandoff(qRepo, n, "agent:build")
-	res, err := r.RemoveLabels(context.Background(), r.target(), n, "")
-	if err != nil || res.Added != "agent:build" {
-		t.Fatalf("result = %+v, %v", res, err)
-	}
-	if got := r.labels(t, n); !slices.Equal(got, []string{"agent:build"}) {
-		t.Errorf("labels = %v", got)
 	}
 }

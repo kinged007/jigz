@@ -94,6 +94,7 @@ type daemon struct {
 	sup    *supervise.Supervisor
 	store  *store.Store
 	coll   *collector.Collector
+	scan   *collector.Scanner
 	redact func(string) string
 
 	fetchMu sync.Mutex
@@ -331,6 +332,7 @@ func newDaemon(opt daemonOptions) (*daemon, error) {
 		Discover: d.discover,
 		Interval: runsEvery,
 	}
+	d.scan = d.newScanner()
 	return d, nil
 }
 
@@ -373,7 +375,7 @@ func (d *daemon) run(ctx context.Context) int {
 	cancel()
 
 	var wg sync.WaitGroup
-	for _, f := range []func(context.Context){d.commandLoop, d.heartbeatLoop, d.runsLoop, d.fallbackLoop, d.reconcileLoop, d.coll.Run} {
+	for _, f := range []func(context.Context){d.commandLoop, d.heartbeatLoop, d.runsLoop, d.fallbackLoop, d.reconcileLoop, d.coll.Run, d.questionsLoop} {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -1521,12 +1523,20 @@ func (it searchItem) project() string {
 
 // fits reports whether a loop with meta m would pick the item up.
 func (m loopMeta) fits(it searchItem) bool {
-	if (len(it.PullRequest) > 0) != (m.kind == hubproto.KindPR) {
+	names := make([]string, len(it.Labels))
+	for i, l := range it.Labels {
+		names[i] = l.Name
+	}
+	return m.fitsLabels(len(it.PullRequest) > 0, names)
+}
+
+func (m loopMeta) fitsLabels(isPR bool, labels []string) bool {
+	if isPR != (m.kind == hubproto.KindPR) {
 		return false
 	}
 	has := map[string]bool{}
-	for _, l := range it.Labels {
-		has[l.Name] = true
+	for _, l := range labels {
+		has[l] = true
 	}
 	for _, l := range m.exclude {
 		if has[l] {
@@ -1548,6 +1558,26 @@ func (d *daemon) github(base string) *github.Client {
 		d.gh[base] = c
 	}
 	return c
+}
+
+// apiBase returns the tracker endpoint when it passes the hub URL check,
+// else the default GitHub API. The tracker token is sent to it.
+func (d *daemon) apiBase(endpoint string) string {
+	if endpoint == "" {
+		return defaultGitHubAPI
+	}
+	_, err := checkHubURL(endpoint)
+	if err == nil {
+		return endpoint
+	}
+	d.mu.Lock()
+	warned := d.endpointWarned
+	d.endpointWarned = true
+	d.mu.Unlock()
+	if !warned {
+		d.log.Printf("fallback search: tracker endpoint refused, using %s: %v", defaultGitHubAPI, err)
+	}
+	return defaultGitHubAPI
 }
 
 // fallbackSearch asks the provider for open items with the runner label
@@ -1574,23 +1604,7 @@ func (d *daemon) fallbackSearch(ctx context.Context) {
 	if len(byProject) == 0 {
 		return
 	}
-	if base != "" {
-		// The endpoint comes from the hub, and the tracker token is sent
-		// to it, so it gets the same check as the hub URL.
-		if _, err := checkHubURL(base); err != nil {
-			d.mu.Lock()
-			warned := d.endpointWarned
-			d.endpointWarned = true
-			d.mu.Unlock()
-			if !warned {
-				d.log.Printf("fallback search: tracker endpoint refused, using %s: %v", defaultGitHubAPI, err)
-			}
-			base = ""
-		}
-	}
-	if base == "" {
-		base = defaultGitHubAPI
-	}
+	base = d.apiBase(base)
 	var projects []string
 	for _, c := range d.sup.Snapshot() {
 		if _, ok := metas[c.Key]; ok && !slices.Contains(projects, c.Loop.Project) {

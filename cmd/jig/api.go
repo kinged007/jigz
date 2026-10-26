@@ -354,7 +354,7 @@ type apiQuestionItem struct {
 // the page: audience, blocking, project and state (default open).
 func (a *app) apiQuestions(w http.ResponseWriter, r *http.Request) {
 	f := questionFilter(r.URL.Query())
-	rows, items, err := a.questionsData(f, false)
+	rows, items, err := a.questionsData(f)
 	if err != nil {
 		apiError(w, http.StatusInternalServerError, err.Error())
 		return
