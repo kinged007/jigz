@@ -20,7 +20,7 @@ entry is the supported way for the dashboard to find it. The document remains
 after a failed run, with state `exited`. Proposed key fields (names are not final):
   - `version`, `engine_version`, `schema_versions_tested`, `pid`,
   `started_at`, `repo`
-  - `workflows[]`: `name`, `port`, `pid`, `state`, `restart_count`,
+  - `workflows[]`: `name`, `pid`, `state`, `restart_count`,
   `last_exit_code`, `config_hash`
   - `sleep`: `enabled`, `awake`, `sleeping_since`, `next_wake`, `idle_since` (when enabled)
   - `budget` per workflow: `period`, `used`, `cap`, `unmeasured_runs`,

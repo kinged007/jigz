@@ -22,8 +22,7 @@ demand, reports status and runs, and takes commands over one WebSocket.
    tracker token, the agent CLIs and their logins. The hub gets them as
    status, never as credentials.
 3. Every loop's query filter contains `label:runner:<name>`.
-4. The daemon opens every connection and listens on no port other than
-   the internal engine loop ports on 127.0.0.1.
+4. The daemon opens every connection and listens on no port.
 5. No local dashboard in connected mode (2.7).
 6. Commands implemented: `start`, `stop`, `drain`, `restart_when_idle`,
    `pause`, `resume`, `wake`, `reload_config`. `session.open`,
@@ -476,7 +475,7 @@ the protocol and the code.
 12. **launchd label.** `io.github.kinged007.jigd`.
 13. **`jig leave`.** Added.
 14. **`quick.md`.** Deleted.
-15. **Standalone beside the daemon.** Allowed; shared state is `machine.yaml`, `pool.json` and the port lock.
+15. **Standalone beside the daemon.** Allowed; shared state is `machine.yaml` and `pool.json`.
 16. **Trust in hub-served files.** Accepted, documented, applied file hashes reported.
 17. **Budgets and cleanup.** Not in hub config in Phase 4.
 18. **Runner label on agent PRs.** The hub labels agent PRs on sync.

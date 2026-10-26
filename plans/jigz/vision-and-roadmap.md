@@ -55,8 +55,8 @@ supervision of one sortie process per workflow, idle sleep and wake,
 budgets, cleanup, validate, status document, dashboard (operations, runs,
 usage, workflows, projects, agents, settings, alerts), form editing with
 backups, history store, JSON API, and unite for
-repositories on one machine (registry in `~/.cache/jigz/`, ports
-from 7678, dashboard on 7677).
+repositories on one machine (registry in `~/.cache/jigz/`,
+dashboard on 7677).
 
 The dashboard has authentication and an access warning. Phase 0 removes
 them (principle 7).
