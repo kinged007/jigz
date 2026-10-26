@@ -19,7 +19,6 @@ type cmdline struct {
 	setupJSON   bool
 	repo        string
 	dir         string
-	noServer    bool
 	noDashboard bool
 	unite       bool
 	dashPort    int
@@ -88,8 +87,6 @@ func parseArgs(argv []string) (cmdline, error) {
 				return c, err
 			}
 			c.repo = v
-		case "--no-server":
-			c.noServer = true
 		case "--no-dashboard":
 			c.noDashboard = true
 		case "--unite":
@@ -189,7 +186,6 @@ Options for the run and for start
                                   dashboard has no authentication.
   --dashboard-port=N              dashboard port
   --no-dashboard                  do not serve the dashboard
-  --no-server                     disable the per-loop debug ports
   --unite                         join or start the shared dashboard
 
 Other
@@ -301,7 +297,7 @@ func run() (code int) {
 	if dir == "" {
 		dir = "."
 	}
-	noServer, noDashboard, dashPort, unite, hostFlag := c.noServer, c.noDashboard, c.dashPort, c.unite, c.host
+	noDashboard, dashPort, unite, hostFlag := c.noDashboard, c.dashPort, c.unite, c.host
 	abs, err := absRoot(dir)
 	if err != nil {
 		fatal(err)
@@ -345,50 +341,25 @@ func run() (code int) {
 	for _, l := range loops {
 		fmt.Printf("loop %-10s %s filter %q\n", l.name, l.file, cfg.FilterFor(l.name))
 	}
-	var lock *portLock
-	if !noServer {
-		// Serialize the port claim and child startup across Jigz
-		// processes: two runs started together else probe before either
-		// has bound, pick the same ports, and the later child loses the
-		// bind (sortie exits when its HTTP server cannot bind).
-		lock, err = lockStarts()
-		if err != nil {
-			fatal(fmt.Errorf("port lock: %w", err))
+	// An explicit --dashboard-port=N always starts a dashboard on N (fatal
+	// if busy). Otherwise a --unite run joins the live unite dashboard
+	// when one answers, instead of starting a second one.
+	if unite && dashPort == 0 && !noDashboard {
+		if live := findUniteDashboard(); live > 0 {
+			dashPort = -live
 		}
 	}
-	// ponytail: one shared HTTP port per loop would collide; probe
-	// upward from 7678 for a free port per loop (--no-server passes
-	// --port 0 to disable loop servers entirely).
-	loopPorts := make([]int, len(loops))
-	if noServer {
-		for i := range loopPorts {
-			loopPorts[i] = 0
-		}
-	} else {
-		var dash int
-		// An explicit --dashboard-port=N always starts a dashboard on N
-		// (fatal if busy). Otherwise a --unite run joins the live unite
-		// dashboard when one answers, instead of starting a second one.
-		if unite && dashPort == 0 && !noDashboard {
-			if live := findUniteDashboard(); live > 0 {
-				dashPort = -live
-			}
-		}
-		loopPorts, dash, err = claimPorts(len(loops), dashPort, noDashboard)
-		if err != nil {
-			fatal(err)
-		}
-		if dashPort >= 0 {
-			dashPort = dash
-		}
+	dashPort, err = claimDashboard(dashPort, noDashboard)
+	if err != nil {
+		fatal(err)
 	}
 	names := make([]string, len(loops))
 	for i, l := range loops {
 		names[i] = l.name
 	}
-	sup := newSupervisor(abs, bin, loops, loopPorts)
+	sup := newSupervisor(abs, bin, loops)
 	switch {
-	case noServer || noDashboard:
+	case noDashboard:
 	case dashPort > 0:
 		sup.dash = dashInfo{URL: dashboardURL(hostFlag, dashPort), Serve: true}
 	case dashPort < 0:
@@ -405,9 +376,6 @@ func run() (code int) {
 		sup.shutdown()
 		sup.closeStatus()
 		dropRegistry(abs)
-		if lock != nil {
-			lock.release()
-		}
 	}()
 	if err := sup.startAll(names); err != nil {
 		fatal(err)
@@ -415,11 +383,6 @@ func run() (code int) {
 	sup.republish()
 	if cfg.Cleanup.Enabled {
 		sup.startCleanup(cfg)
-	}
-	// Startup done: every child bound its port, so the next run's probe
-	// sees them; free the port-claim lock for the rest of the lifetime.
-	if lock != nil {
-		lock.release()
 	}
 	// dashPort is negative when this run joins a live unite dashboard:
 	// its loops register above, and the existing page picks them up.

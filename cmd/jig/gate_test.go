@@ -111,7 +111,7 @@ func newGateRig(t *testing.T, machineYAML string) *gateRig {
 	sup, root := startedSup(t, "echo \"${SORTIE_AGENT_KIND-unset}|${SORTIE_AGENT_COMMAND-unset}\" > agentenv\nwhile true; do sleep 1; done\n")
 	r := &gateRig{sup: sup, root: root, now: gateOpenAt, envFile: filepath.Join(root, "agentenv")}
 	sup.clock = func() time.Time { return r.now }
-	sup.sessions = func(int) (bool, bool) { return r.active, true }
+	sup.sessions = func(string) (bool, bool) { return r.active, true }
 	r.setMachine(t, machineYAML)
 	return r
 }
@@ -339,18 +339,6 @@ func TestMachineFileReloadsWhenItChanges(t *testing.T) {
 	r.settle(t)
 	if !r.sup.empty() {
 		t.Error("a new machine file was not picked up")
-	}
-}
-
-func TestLoopSessionsIgnoresRetries(t *testing.T) {
-	if active, known := loopSessions(fakeLoop(t, retrying(1), 200)); !known || active {
-		t.Errorf("retry: active=%v known=%v", active, known)
-	}
-	if active, known := loopSessions(fakeLoop(t, running(1), 200)); !known || !active {
-		t.Errorf("running: active=%v known=%v", active, known)
-	}
-	if active, known := loopSessions(fakeLoop(t, `{}`, 503)); known || active {
-		t.Errorf("error: active=%v known=%v", active, known)
 	}
 }
 

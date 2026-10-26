@@ -129,8 +129,8 @@ func statusSummary(doc statusDoc, liveness string) string {
 		if w.LastExitCode != nil {
 			exit = fmt.Sprint(*w.LastExitCode)
 		}
-		fmt.Fprintf(&b, "  %s: %s, port %d, pid %d, restarts %d, last exit %s\n",
-			w.Name, w.State, w.Port, w.PID, w.RestartCount, exit)
+		fmt.Fprintf(&b, "  %s: %s, pid %d, restarts %d, last exit %s\n",
+			w.Name, w.State, w.PID, w.RestartCount, exit)
 		if line := budgetSummary(w.Budget); line != "" {
 			b.WriteString("    " + line + "\n")
 		}

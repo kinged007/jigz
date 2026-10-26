@@ -30,7 +30,6 @@ var page = template.Must(template.New("page").Funcs(funcs).ParseFS(templateFS, "
 var funcs = template.FuncMap{
 	"commas":   commas,
 	"liveHref": liveHref,
-	"usd":      usd,
 	"since":    since,
 	"at":       at,
 	"pct":      pct,
@@ -144,25 +143,6 @@ func commas(v any) string {
 	return b.String()
 }
 
-// usd renders a cost estimate. The engine reports nil when a workflow
-// configures no token_rates, and an em dash says "not priced" rather than
-// "$0.00", which would read as free.
-func usd(c *float64) string {
-	if c == nil {
-		return "—"
-	}
-	switch {
-	case *c >= 100:
-		return fmt.Sprintf("$%.0f", *c)
-	case *c >= 1:
-		return fmt.Sprintf("$%.2f", *c)
-	case *c > 0:
-		return fmt.Sprintf("$%.3f", *c)
-	default:
-		return "$0.00"
-	}
-}
-
 // at renders a timestamp in the machine's own time zone. The page
 // reports durations on their own, so the one absolute time an operator
 // needs is the moment a loop picked an issue up.
@@ -204,7 +184,6 @@ func since(started string) string {
 type activeRun struct {
 	Repo       string
 	Loop       string
-	Port       int
 	Identifier string
 	State      string
 	Turns      int
@@ -220,23 +199,14 @@ type activeRun struct {
 	// when the loop's history has nothing for the issue, which is the
 	// first attempt still in flight.
 	PickedUp string
-	// Cost is this run's share of its loop's active cost estimate. The
-	// engine reports cost per loop, not per run, so a loop running
-	// several agents splits it by token share. With one agent on the loop
-	// the share is the whole figure.
-	Cost *float64
 }
 
 // active collects every running agent in the fleet. agents maps
 // repo/loop to the agent adapter it runs with, which the config knows and
-// the engine's state API does not report.
+// the engine does not report.
 func active(f rollup.Fleet, agents map[string]string) []activeRun {
 	var out []activeRun
 	for _, l := range f.Loops {
-		var loopTokens int64
-		for _, r := range l.Running {
-			loopTokens += r.Tokens
-		}
 		for _, r := range l.Running {
 			pickedUp := r.PickUp
 			if pickedUp == "" {
@@ -246,7 +216,6 @@ func active(f rollup.Fleet, agents map[string]string) []activeRun {
 				Repo:       l.Repo,
 				Loop:       l.Loop,
 				Agent:      agents[l.Repo+"/"+l.Loop],
-				Port:       l.Port,
 				Identifier: r.Identifier,
 				State:      r.State,
 				Turns:      r.Turns,
@@ -254,18 +223,6 @@ func active(f rollup.Fleet, agents map[string]string) []activeRun {
 				Model:      r.Model,
 				StartedAt:  r.StartedAt,
 				PickedUp:   pickedUp,
-			}
-			if l.Cost != nil {
-				share := *l.Cost
-				// A loop whose agents report no tokens cannot be split
-				// meaningfully, so the estimate is left off the rows
-				// rather than attributed to whichever one sorts first.
-				if loopTokens > 0 {
-					share *= float64(r.Tokens) / float64(loopTokens)
-				} else {
-					share = 0
-				}
-				run.Cost = &share
 			}
 			out = append(out, run)
 		}

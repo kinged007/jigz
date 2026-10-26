@@ -43,7 +43,7 @@ tr.lp td:first-child { padding-left: 1.6rem; }
 <div class="alerts">{{range .Ops.Alerts}}<div class="alert {{.Sev}}">{{template "icon-alert"}}<span class="k">{{.Kind}}</span><span class="m">{{.Msg}}</span>{{if .Href}}<a href="{{.Href}}">Open</a>{{end}}</div>
 {{end}}</div>{{else}}<p class="sub" style="margin-bottom:.75rem">No alerts</p>{{end}}
 <div class="tiles">
-  <div class="tile" title="Loops that answered on their own port, of all loops"><b>{{.Fleet.Live}}/{{len .Fleet.Loops}}</b><span>loops active</span></div>
+  <div class="tile" title="Loops with a running process, of all loops"><b>{{.Fleet.Live}}/{{len .Fleet.Loops}}</b><span>loops active</span></div>
   <div class="tile"><b>{{.Fleet.Running}}</b><span>runs running</span></div>
   <div class="tile"><b>{{.Ops.Retrying}}</b><span>runs retrying</span></div>
   <div class="tile" title="Measured tokens of runs started in the last 7 days"><b>{{if .Ops.Metrics}}{{commas .Ops.Week}}{{else}}&mdash;{{end}}</b><span>tokens this week</span></div>
@@ -103,7 +103,7 @@ tr.lp td:first-child { padding-left: 1.6rem; }
   <td class="num">{{len .L.Running}} / {{.L.Retrying}}</td>
   <td class="num">{{commas .Figures.Period}}</td>
   <td class="num">{{commas .Figures.Today}}</td>
-  <td class="num" title="Cost of the agents running now, as the engine estimates it">{{usd .L.Cost}}</td>
+  <td class="num" title="The engine does not record cost yet">&mdash;</td>
   <td>{{template "share" .Figures.Share}}</td>
   {{if $.Ops.AnyCleanup}}<td></td>{{end}}
 </tr>
@@ -127,7 +127,7 @@ tr.lp td:first-child { padding-left: 1.6rem; }
   <th class="num" title="Agent turns taken so far">turns</th>
   <th class="num" title="Tokens this run has used, as the engine has measured them so far">tokens</th>
   <th title="The agent adapter from the config, and the model the engine reports for it">agent and model</th>
-  <th class="num" title="This run's share of its loop's cost, split by token share">cost</th>
+  <th class="num" title="The engine does not record cost yet">cost</th>
   <th title="When the loop first picked this issue up on its current pass, counting every retry since">picked up</th>
   <th class="num" title="How long since that pickup">running for</th>
 </tr></thead>
@@ -141,7 +141,7 @@ tr.lp td:first-child { padding-left: 1.6rem; }
   <td class="num">{{.Turns}}</td>
   <td class="num">{{commas .Tokens}}</td>
   <td>{{if .Model}}{{if .Agent}}{{agent .Agent}} &middot; {{end}}{{.Model}}{{else if .Agent}}{{agent .Agent}}{{else}}<span class="empty">default</span>{{end}}</td>
-  <td class="num">{{usd .Cost}}</td>
+  <td class="num">&mdash;</td>
   <td class="sub">{{at .PickedUp}}</td>
   <td class="num">{{since .PickedUp}}</td>
 </tr>

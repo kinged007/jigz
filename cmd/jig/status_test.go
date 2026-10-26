@@ -19,7 +19,6 @@ func startedSup(t *testing.T, script string) (*supervisor, string) {
 	mustWrite(t, filepath.Join(root, ".jigz", "workflows", "WORKFLOW.plan.md"),
 		"---\ntracker:\n  kind: github-pr\n---\nbody\n")
 	sup := newTestSup(t, root, "plan")
-	sup.ports["plan"] = 0
 	sup.bin = writeScript(t, root, "sortie", script)
 	if err := sup.startOne("plan"); err != nil {
 		t.Fatal(err)

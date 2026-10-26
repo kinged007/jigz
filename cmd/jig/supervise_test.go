@@ -3,13 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"net"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -30,99 +26,7 @@ func newTestSup(t *testing.T, root string, names ...string) *supervisor {
 	for _, n := range names {
 		defs = append(defs, loopDef{name: n, file: "WORKFLOW." + n + ".md"})
 	}
-	return newSupervisor(root, "sortie", defs, make([]int, len(defs)))
-}
-
-// fakeLoop answers the state API with a fixed payload.
-func fakeLoop(t *testing.T, body string, status int) int {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(status)
-		_, _ = w.Write([]byte(body))
-	}))
-	t.Cleanup(srv.Close)
-	return portOf(t, srv.URL)
-}
-
-// portOf pulls the port out of a test server URL.
-func portOf(t *testing.T, rawURL string) int {
-	t.Helper()
-	_, port, err := net.SplitHostPort(strings.TrimPrefix(rawURL, "http://"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	n, err := strconv.Atoi(port)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return n
-}
-
-// running builds a state payload with n sessions in flight.
-func running(n int) string {
-	var b []byte
-	b = append(b, `{"counts":{"running":`...)
-	b = append(b, strconv.Itoa(n)...)
-	b = append(b, `,"retrying":0},"running":[`...)
-	for i := 0; i < n; i++ {
-		if i > 0 {
-			b = append(b, ',')
-		}
-		b = append(b, `{"display_identifier":"a/b#1"}`...)
-	}
-	return string(append(b, `]}`...))
-}
-
-// retrying builds a state payload with a pending retry and nothing running.
-func retrying(n int) string {
-	return `{"counts":{"running":0,"retrying":` + strconv.Itoa(n) + `},"running":[]}`
-}
-
-func TestALoopWithNothingInFlightIsIdle(t *testing.T) {
-	idle, known := loopQuiet(fakeLoop(t, running(0), 200))
-	if !known || !idle {
-		t.Errorf("an empty loop reported idle=%v known=%v, want both true", idle, known)
-	}
-}
-
-func TestALoopWithASessionIsNotIdle(t *testing.T) {
-	if idle, known := loopQuiet(fakeLoop(t, running(2), 200)); !known || idle {
-		t.Errorf("a loop with two sessions reported idle=%v known=%v, want idle=false", idle, known)
-	}
-}
-
-// A pending retry means the loop will start that run by itself. Calling
-// it idle would cancel work the loop was about to do on its own.
-func TestAPendingRetryIsNotIdle(t *testing.T) {
-	if idle, known := loopQuiet(fakeLoop(t, retrying(1), 200)); !known || idle {
-		t.Errorf("a loop with a pending retry reported idle=%v known=%v, want idle=false", idle, known)
-	}
-}
-
-func TestARetryingEntryIsNotIdle(t *testing.T) {
-	body := `{"counts":{"running":0,"retrying":0},"running":[],"retrying":[{"issue_id":"1"}]}`
-	if idle, known := loopQuiet(fakeLoop(t, body, 200)); !known || idle {
-		t.Errorf("a loop with a retrying entry reported idle=%v known=%v, want idle=false", idle, known)
-	}
-}
-
-// An engine that does not answer is unknown, not idle. Reading a
-// connection failure as quiet would stop a loop mid-run every time the
-// engine was briefly busy.
-func TestAnUnreachableLoopIsUnknownNotIdle(t *testing.T) {
-	// A port nothing listens on: the dial fails.
-	if idle, known := loopQuiet(1); known || idle {
-		t.Errorf("an unreachable loop reported idle=%v known=%v, want both false", idle, known)
-	}
-	if idle, known := loopQuiet(0); known || idle {
-		t.Errorf("a loop with no server reported idle=%v known=%v, want both false", idle, known)
-	}
-}
-
-func TestAnErrorResponseIsUnknownNotIdle(t *testing.T) {
-	if idle, known := loopQuiet(fakeLoop(t, `{}`, 503)); known || idle {
-		t.Errorf("a 503 reported idle=%v known=%v, want both false", idle, known)
-	}
+	return newSupervisor(root, "sortie", defs)
 }
 
 // A loop nobody asked to stop has died on its own, and the run goes down
@@ -165,19 +69,10 @@ func TestALoopThatWasAskedToStopDoesNotEndTheRun(t *testing.T) {
 // Draining stops each loop on its own, so a loop that is quiet is signalled
 // while a busy sibling is left alone.
 func TestDrainStopsQuietLoopsAndLeavesBusyOnes(t *testing.T) {
-	quiet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(running(0)))
-	}))
-	defer quiet.Close()
-	busy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(running(1)))
-	}))
-	defer busy.Close()
-
 	root := t.TempDir()
 	sup := newTestSup(t, root, "plan", "build")
 	signalled := map[string]bool{}
-	add := func(name string, port int) {
+	add := func(name string, live *liveTracker) {
 		cmd := exec.Command("/bin/sh", "-c", "exec sleep 30")
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
@@ -185,13 +80,13 @@ func TestDrainStopsQuietLoopsAndLeavesBusyOnes(t *testing.T) {
 		t.Cleanup(func() { _ = cmd.Process.Kill(); _, _ = cmd.Process.Wait() })
 		sup.procs[name] = &loopProc{
 			def: loopDef{name: name, file: "WORKFLOW." + name + ".md"},
-			cmd: cmd, port: port, stopping: true, drain: true,
+			cmd: cmd, live: live, stopping: true, drain: true,
 			since: time.Now().Add(-time.Hour),
 		}
 		signalled[name] = false
 	}
-	add("plan", portOf(t, quiet.URL))
-	add("build", portOf(t, busy.URL))
+	add("plan", fedTracker(tickIdle))
+	add("build", fedTracker(dispatched7, tickBusy))
 
 	if _, done := sup.drainStep(); done {
 		t.Fatal("the run ended while loops were still draining")
@@ -209,14 +104,10 @@ func TestDrainStopsQuietLoopsAndLeavesBusyOnes(t *testing.T) {
 func TestAFreshlyStartedLoopIsNotJudgedIdle(t *testing.T) {
 	root := t.TempDir()
 	sup := newTestSup(t, root, "plan")
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(running(0)))
-	}))
-	defer srv.Close()
 	sup.procs["plan"] = &loopProc{
 		def:  loopDef{name: "plan", file: "WORKFLOW.plan.md"},
 		cmd:  exec.Command("/bin/sh", "-c", "exec sleep 30"),
-		port: portOf(t, srv.URL), stopping: true, drain: true, since: time.Now(),
+		live: fedTracker(tickIdle), stopping: true, drain: true, since: time.Now(),
 	}
 	if _, done := sup.drainStep(); done {
 		t.Error("a loop that had just started ended the run")
@@ -336,11 +227,10 @@ func mustWrite(t *testing.T, path, body string) {
 	}
 }
 
-// The registry is what points a supervisor at a loop's port and its
-// dashboard. A loop that is replaced leaves a window where it is
-// published as nothing at all, so the start has to publish it again: if
-// it does not, the entry stays empty until some unrelated event, and the
-// loop's dashboard link is dead in the meantime.
+// The registry is what points a dashboard at a loop's database. A loop
+// that is replaced leaves a window where it is published as nothing at
+// all, so the start has to publish it again: if it does not, the entry
+// stays empty until some unrelated event.
 func TestStartingALoopPublishesIt(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
@@ -348,9 +238,7 @@ func TestStartingALoopPublishesIt(t *testing.T) {
 	mustWrite(t, filepath.Join(root, ".jigz", "workflows", "WORKFLOW.plan.md"), "body\n")
 
 	sup := newTestSup(t, root, "plan")
-	// Port 0 disables the loop's own server, so the child starts without
-	// binding anything and the test needs no engine.
-	sup.ports["plan"] = 0
+	// The stub stands in for the engine.
 	sup.bin = writeScript(t, root, "sortie", "while true; do sleep 1; done\n")
 
 	if err := sup.startOne("plan"); err != nil {

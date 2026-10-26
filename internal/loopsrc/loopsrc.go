@@ -30,9 +30,8 @@ type Source interface {
 	Fleet() rollup.Fleet
 }
 
-// Legacy reads the shared Jigz registry and each loop's
-// /api/v1/state, which is all a Jigz without a status document
-// offers.
+// Legacy reads the shared Jigz registry and each loop's database, which
+// is all a Jigz without a status document offers.
 type Legacy struct {
 	Reader rollup.Reader
 }

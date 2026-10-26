@@ -46,7 +46,6 @@ type workflowStatus struct {
 	Name         string        `json:"name"`
 	WorkflowFile string        `json:"workflow_file"`
 	LoopType     string        `json:"loop_type"`
-	Port         int           `json:"port"`
 	PID          int           `json:"pid"`
 	State        string        `json:"state"`
 	StartedAt    time.Time     `json:"started_at"`
@@ -56,6 +55,10 @@ type workflowStatus struct {
 	LogPath      string        `json:"log_path"`
 	Budget       *budgetStatus `json:"budget,omitempty"`
 	Hold         string        `json:"hold,omitempty"`
+	// Sessions are the agent sessions running now. SessionsKnown is false
+	// while the supervisor cannot account for every session of the engine.
+	Sessions      []rollup.Session `json:"sessions"`
+	SessionsKnown bool             `json:"sessions_known"`
 }
 
 // statusPath returns the status file for a repo root. The name is a

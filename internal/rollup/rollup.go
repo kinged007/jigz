@@ -3,17 +3,15 @@
 //
 // It reads the registry that Jigz writes rather than being told
 // what is running, so a repository started outside Jigz still shows
-// up. A loop whose engine answers is read entirely through the engine's
-// HTTP API: /api/v1/state for live figures and /api/v1/stats for all-time
-// run counts. A loop whose engine does not answer is read from its SQLite
-// database, so totals survive restarts.
+// up. Every loop is read from its SQLite database: all-time totals, the
+// retries and holds the engine persists, and the tokens of a running session
+// once its first turn has ended. A session that has not ended a turn is
+// not in the database; the supervisor that owns the loop reports it.
 package rollup
 
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -31,10 +29,6 @@ import (
 // matches the rule Jigz applies when reading its own registry.
 const staleAfter = 5 * time.Minute
 
-// probeTimeout is short: a loop that is restarting yields no live state
-// rather than holding up the page.
-const probeTimeout = 3 * time.Second
-
 // Run is one item an agent is working on right now.
 type Run struct {
 	Identifier string `json:"identifier"`
@@ -49,14 +43,14 @@ type Run struct {
 	// restarts while the work has been going for an hour. Empty when the
 	// loop has no history for the issue, which is the first attempt
 	// still in flight.
-	PickUp string `json:"picked_up,omitempty"`
+	PickUp  string `json:"picked_up,omitempty"`
+	issueID string
 }
 
 // Loop is one running loop: live state plus all-time totals.
 type Loop struct {
 	Repo      string `json:"repo"`
 	Loop      string `json:"loop"`
-	Port      int    `json:"port"`
 	DBPath    string `json:"db_path"`
 	Live      bool   `json:"live"`
 	Running   []Run  `json:"running,omitempty"`
@@ -69,22 +63,16 @@ type Loop struct {
 	Issues int `json:"issues"`
 	// Unmeasured is the number of runs whose adapter reported no
 	// tokens, so Tokens undercounts by an unknown amount.
-	Unmeasured int   `json:"unmeasured"`
-	Tokens     int64 `json:"tokens"`
-	Input      int64 `json:"input"`
-	Output     int64 `json:"output"`
-	// Cost is the engine's own estimate of what the agents currently
-	// running on this loop have cost, in USD. Nil when the workflow file
-	// configures no token_rates, in which case the engine omits the
-	// figure rather than guessing one.
-	Cost    *float64 `json:"cost,omitempty"`
-	DBError string   `json:"db_error,omitempty"`
+	Unmeasured int    `json:"unmeasured"`
+	Tokens     int64  `json:"tokens"`
+	Input      int64  `json:"input"`
+	Output     int64  `json:"output"`
+	DBError    string `json:"db_error,omitempty"`
 	// Schema is set when the database is at an unsupported version or
 	// lacks a column; the figures that depend on it are left empty.
 	Schema *SchemaNotice `json:"schema_notice,omitempty"`
-	// Parked and BudgetHeld are the issues the engine's state API lists
-	// as parked and as stopped by a budget. They are set only while the
-	// engine answers.
+	// Parked and BudgetHeld are the issues the engine keeps out of
+	// dispatch because they are parked and because a budget stopped them.
 	Parked     []Held `json:"-"`
 	BudgetHeld []Held `json:"-"`
 }
@@ -123,11 +111,9 @@ type endpoint struct {
 	Repo     string `json:"repo"`
 	RepoName string `json:"repo_name"`
 	Loop     string `json:"loop"`
-	Port     int    `json:"port"`
 	DBPath   string `json:"db_path"`
-	// Probe says whether a live process owns the port. A repository whose
-	// run exited keeps its entry so the page can offer start again, and
-	// probing its dead ports would cost the page a timeout per loop.
+	// Probe says whether a live process runs the loop. A repository whose
+	// run exited keeps its entry so the page can offer start again.
 	Probe bool `json:"-"`
 }
 
@@ -151,23 +137,15 @@ func RegistryPath() (string, error) {
 }
 
 // Reader collects the fleet. The zero value reads the shared registry;
-// a test can point RegistryPath and Client elsewhere.
+// a test can point RegistryPath elsewhere.
 type Reader struct {
 	RegistryPath string
-	Client       *http.Client
 	// Repos, when set, keeps only loops belonging to these
 	// repositories. Empty means everything in the registry.
 	Repos []string
 	// Exclude drops loops of these repositories, which another source
 	// reports.
 	Exclude []string
-}
-
-func (r Reader) client() *http.Client {
-	if r.Client != nil {
-		return r.Client
-	}
-	return &http.Client{Timeout: probeTimeout}
 }
 
 func (r Reader) path() string {
@@ -181,9 +159,8 @@ func (r Reader) path() string {
 	return p
 }
 
-// Collect reads the registry, then every live loop in it. A loop that
-// is not answering is reported as not live rather than failing the
-// page: a restarting loop is normal, not an error.
+// Collect reads the registry, then the database of every loop in it. A
+// loop without a live process is reported as not live.
 func (r Reader) Collect() Fleet {
 	eps := r.endpoints()
 	loops := make([]Loop, len(eps))
@@ -270,9 +247,6 @@ func (r Reader) endpoints() []endpoint {
 			continue
 		}
 		for _, ep := range e.Loops {
-			if ep.Port <= 0 {
-				continue
-			}
 			ep.Probe = e.PID != 0
 			if ep.RepoName == "" {
 				ep.RepoName = e.RepoName
@@ -283,173 +257,40 @@ func (r Reader) endpoints() []endpoint {
 	return out
 }
 
-// one collects one loop's live state and all-time totals.
+// one collects one loop's live state and all-time totals. The registry
+// does not say which sessions run, so only the database speaks for them.
 func (r Reader) one(ep endpoint) Loop {
-	l := Loop{Repo: ep.RepoName, Loop: ep.Loop, Port: ep.Port, DBPath: ep.DBPath}
-	// The state read comes first: the pickup times are keyed by the
-	// identifiers it reports. A port nobody stands behind is not probed.
-	if ep.Probe {
-		l.readState(r.client())
-	}
-	l.readTotals(r.client())
+	return r.Loop(ep.RepoName, ep.Loop, ep.DBPath, ep.Probe, nil, false)
+}
+
+// Session is an agent session the process that owns a loop has seen
+// start and not yet end.
+type Session struct {
+	IssueID string `json:"issue_id"`
+	// Identifier is the issue as displayed, owner/repo#7.
+	Identifier string    `json:"identifier"`
+	Attempt    int       `json:"attempt"`
+	StartedAt  time.Time `json:"started_at"`
+	Turns      int       `json:"turns"`
+}
+
+// Loop builds one loop's figures from its database. live says a process
+// runs the loop. sessions are the sessions its supervisor reports, and
+// known says the supervisor can account for all of them; without that,
+// the running list is what the database holds.
+func (Reader) Loop(repo, loop, dbPath string, live bool, sessions []Session, known bool) Loop {
+	l := Loop{Repo: repo, Loop: loop, DBPath: dbPath, Live: live}
+	l.readDB(live, sessions, known)
 	return l
 }
 
-// Loop builds one loop's figures for a loop known from elsewhere than
-// the registry. The engine's API is read only when probe is set; without
-// an answer the database totals are read.
-func (r Reader) Loop(repo, loop string, port int, dbPath string, probe bool) Loop {
-	l := Loop{Repo: repo, Loop: loop, Port: port, DBPath: dbPath}
-	if probe && port > 0 {
-		l.readState(r.client())
-	}
-	l.readTotals(r.client())
-	return l
-}
-
-// readTotals fills the all-time figures from the engine's stats API when the
-// state read found the engine live, and from the database otherwise or when
-// the stats read fails.
-func (l *Loop) readTotals(c *http.Client) {
-	if l.Live && l.readStats(c) {
-		return
-	}
-	l.readDB()
-}
-
-// statePayload mirrors the subset of the loop's state API the dashboard
-// consumes.
-type statePayload struct {
-	Counts struct {
-		Running  int `json:"running"`
-		Retrying int `json:"retrying"`
-	} `json:"counts"`
-	// ActiveEstimatedCostUSD is the engine's cost estimate for the
-	// running sessions, present only when the workflow configures
-	// token_rates.
-	ActiveEstimatedCostUSD *float64 `json:"active_estimated_cost_usd"`
-	AgentTotals            struct {
-		InputTokens  int64 `json:"input_tokens"`
-		OutputTokens int64 `json:"output_tokens"`
-		TotalTokens  int64 `json:"total_tokens"`
-	} `json:"agent_totals"`
-	Parked []struct {
-		IssueID string `json:"issue_id"`
-		Reason  string `json:"reason"`
-	} `json:"parked"`
-	BudgetExhausted []struct {
-		IssueID string `json:"issue_id"`
-		Reason  string `json:"reason"`
-	} `json:"budget_exhausted"`
-	Running []struct {
-		DisplayIdentifier string `json:"display_identifier"`
-		IssueIdentifier   string `json:"issue_identifier"`
-		State             string `json:"state"`
-		TurnCount         int    `json:"turn_count"`
-		ModelName         string `json:"model_name"`
-		StartedAt         string `json:"started_at"`
-		// DispatchedAt is the start of the first run of the issue's
-		// current pass.
-		DispatchedAt *string `json:"dispatched_at"`
-		Tokens       struct {
-			TotalTokens *int64 `json:"total_tokens"`
-		} `json:"tokens"`
-	} `json:"running"`
-}
-
-// GetJSON reads one path of an engine's HTTP API on loopback and decodes
-// the JSON answer into out.
-func GetJSON(c *http.Client, port int, path string, out any) error {
-	resp, err := c.Get(fmt.Sprintf("http://127.0.0.1:%d%s", port, path))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%s: %s", path, resp.Status)
-	}
-	return json.NewDecoder(resp.Body).Decode(out)
-}
-
-func (l *Loop) readState(c *http.Client) {
-	var p statePayload
-	if err := GetJSON(c, l.Port, "/api/v1/state", &p); err != nil {
-		return
-	}
-	l.Live = true
-	l.Retrying = p.Counts.Retrying
-	l.Cost = p.ActiveEstimatedCostUSD
-	l.Input, l.Output, l.Tokens = p.AgentTotals.InputTokens, p.AgentTotals.OutputTokens, p.AgentTotals.TotalTokens
-	for _, e := range p.Parked {
-		l.Parked = append(l.Parked, Held{e.IssueID, e.Reason})
-	}
-	for _, e := range p.BudgetExhausted {
-		l.BudgetHeld = append(l.BudgetHeld, Held{e.IssueID, e.Reason})
-	}
-	for _, run := range p.Running {
-		id := run.DisplayIdentifier
-		if id == "" {
-			id = run.IssueIdentifier
-		}
-		var toks int64
-		if run.Tokens.TotalTokens != nil {
-			toks = *run.Tokens.TotalTokens
-		}
-		r := Run{
-			Identifier: id,
-			State:      run.State,
-			Turns:      run.TurnCount,
-			Tokens:     toks,
-			Model:      run.ModelName,
-			StartedAt:  run.StartedAt,
-		}
-		if run.DispatchedAt != nil {
-			r.PickUp = *run.DispatchedAt
-		}
-		l.Running = append(l.Running, r)
-	}
-}
-
-// statsPayload mirrors the subset of GET /api/v1/stats the dashboard
-// consumes. The report covers every run of the engine's database.
-type statsPayload struct {
-	Summary struct {
-		Runs                 int `json:"runs"`
-		Issues               int `json:"issues"`
-		TokensUnmeasuredRuns int `json:"tokens_unmeasured_runs"`
-	} `json:"summary"`
-	ByStatus []struct {
-		Name string `json:"name"`
-		Runs int    `json:"runs"`
-	} `json:"by_status"`
-}
-
-// readStats fills the run counts from the engine's stats API and reports
-// whether it could. Succeeded and Failed count the runs with exactly that
-// status, as the database read does: the engine's own failed total also
-// holds other statuses.
-func (l *Loop) readStats(c *http.Client) bool {
-	var p statsPayload
-	if err := GetJSON(c, l.Port, "/api/v1/stats", &p); err != nil {
-		return false
-	}
-	l.Runs, l.Issues, l.Unmeasured = p.Summary.Runs, p.Summary.Issues, p.Summary.TokensUnmeasuredRuns
-	l.Succeeded, l.Failed = 0, 0
-	for _, g := range p.ByStatus {
-		switch g.Name {
-		case "succeeded":
-			l.Succeeded = g.Runs
-		case "failed":
-			l.Failed = g.Runs
-		}
-	}
-	return true
-}
-
-// readDB fills the all-time figures. A missing or fresh database leaves
-// zeros rather than an error: a loop that has not run yet is not
+// readDB fills the live and all-time figures. A missing or fresh database
+// leaves zeros rather than an error: a loop that has not run yet is not
 // broken.
-func (l *Loop) readDB() {
+func (l *Loop) readDB(live bool, sessions []Session, known bool) {
+	if live {
+		l.Running = runsOf(sessions)
+	}
 	if l.DBPath == "" {
 		return
 	}
@@ -465,6 +306,10 @@ func (l *Loop) readDB() {
 	defer db.Close()
 	schema := InspectSchema(db)
 	l.Schema = schema.Notice
+	l.readHeld(db, schema)
+	if live {
+		l.readSessions(db, schema, known)
+	}
 	if schema.Has("aggregate_metrics") {
 		err = db.QueryRow(`SELECT input_tokens, output_tokens, total_tokens FROM aggregate_metrics WHERE key='agent_totals'`).
 			Scan(&l.Input, &l.Output, &l.Tokens)
@@ -509,13 +354,136 @@ func (l *Loop) readDB() {
 	}
 }
 
+func runsOf(sessions []Session) []Run {
+	var out []Run
+	for _, s := range sessions {
+		out = append(out, Run{
+			Identifier: s.Identifier, State: "running", Turns: s.Turns, issueID: s.IssueID,
+			StartedAt: s.StartedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	return out
+}
+
+// readHeld fills the retry count and the issues held out of dispatch.
+func (l *Loop) readHeld(db *sql.DB, schema Schema) {
+	if schema.Has("retry_entries") {
+		_ = db.QueryRow(`SELECT COUNT(*) FROM retry_entries`).Scan(&l.Retrying)
+	}
+	for i, table := range []string{"budget_hold_notices", "parked_issues"} {
+		if !schema.Has(table) {
+			continue
+		}
+		rows, err := db.Query("SELECT issue_id, reason FROM " + table + " ORDER BY issue_id")
+		if err != nil {
+			continue
+		}
+		for rows.Next() {
+			var h Held
+			var reason sql.NullString
+			if rows.Scan(&h.ID, &reason) == nil {
+				h.Reason = reason.String
+				if i == 0 {
+					l.BudgetHeld = append(l.BudgetHeld, h)
+				} else {
+					l.Parked = append(l.Parked, h)
+				}
+			}
+		}
+		rows.Close()
+	}
+}
+
+// readSessions adds what the database knows about running sessions: the
+// engine records a session's tokens and model after its first turn and
+// marks the row with the dispatch it belongs to until the run ends. When
+// the supervisor cannot account for every session, rows that are in
+// flight in the database are listed too.
+func (l *Loop) readSessions(db *sql.DB, schema Schema, known bool) {
+	if !schema.Has("session_metadata") || !columns(db, "session_metadata")["dispatch_id"] {
+		return
+	}
+	rows, err := db.Query(`SELECT issue_id, total_tokens, model_name, updated_at FROM session_metadata WHERE dispatch_id <> ''`)
+	if err != nil {
+		return
+	}
+	type flight struct {
+		tokens         int64
+		model, updated string
+	}
+	inFlight := map[string]flight{}
+	var order []string
+	for rows.Next() {
+		var id string
+		var f flight
+		if rows.Scan(&id, &f.tokens, &f.model, &f.updated) == nil {
+			inFlight[id] = f
+			order = append(order, id)
+		}
+	}
+	rows.Close()
+	listed := map[string]bool{}
+	for i, r := range l.Running {
+		listed[r.issueID] = true
+		if f, ok := inFlight[r.issueID]; ok {
+			l.Running[i].Tokens, l.Running[i].Model = f.tokens, f.model
+		}
+	}
+	if known {
+		return
+	}
+	for _, id := range order {
+		if listed[id] {
+			continue
+		}
+		f := inFlight[id]
+		l.Running = append(l.Running, Run{
+			Identifier: l.displayOf(db, id), State: "running", Tokens: f.tokens, Model: f.model, issueID: id,
+		})
+	}
+}
+
+// displayOf is the displayed identifier of an issue as the run history
+// spells it, and the issue id when the history has none.
+func (l *Loop) displayOf(db *sql.DB, issueID string) string {
+	var d sql.NullString
+	err := db.QueryRow(`SELECT display_identifier FROM run_history WHERE issue_id = ? AND display_identifier <> '' ORDER BY id DESC LIMIT 1`, issueID).Scan(&d)
+	if err != nil || d.String == "" {
+		return issueID
+	}
+	return d.String
+}
+
+// CountRetrying is the number of retries a workflow database holds. The
+// engine persists them, so they resume after a restart. A database that
+// does not exist yet holds none.
+func CountRetrying(dbPath string) (int, error) {
+	if _, err := os.Stat(dbPath); err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	db, err := OpenReadOnly(dbPath)
+	if err != nil {
+		return 0, err
+	}
+	defer db.Close()
+	if !tableExists(db, "retry_entries") {
+		return 0, nil
+	}
+	var n int
+	err = db.QueryRow(`SELECT COUNT(*) FROM retry_entries`).Scan(&n)
+	return n, err
+}
+
 // pickedUp is when the loop first started work on an issue on its
 // current pass: the earliest attempt since the last one that succeeded.
 // The cutoff matters because an issue can be picked up more than once,
 // and a run that finished yesterday is not the run going on now.
 //
-// The identifier is matched either way round because the state API
-// reports the display form (owner/repo#7) while older history rows hold
+// The identifier is matched either way round because running sessions
+// carry the display form (owner/repo#7) while older history rows hold
 // only the bare number.
 func pickedUp(db *sql.DB, identifier string) string {
 	var at sql.NullString

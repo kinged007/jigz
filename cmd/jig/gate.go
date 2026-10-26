@@ -397,7 +397,7 @@ func (s *supervisor) gateLoopsLocked() []gateLoop {
 }
 
 // noSession reports whether the loop is settled and has no session
-// running. A loop whose engine does not answer is not.
+// running. A loop whose sessions cannot be accounted for is not.
 func (s *supervisor) noSession(name string) bool {
 	s.mu.Lock()
 	p := s.procs[name]
@@ -405,9 +405,8 @@ func (s *supervisor) noSession(name string) bool {
 		s.mu.Unlock()
 		return false
 	}
-	port := p.port
 	s.mu.Unlock()
-	active, known := s.sessions(port)
+	active, known := s.sessions(name)
 	return known && !active
 }
 

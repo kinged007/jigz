@@ -67,7 +67,6 @@ type WorkflowInfo struct {
 	Name         string    `json:"name"`
 	WorkflowFile string    `json:"workflow_file"`
 	LoopType     string    `json:"loop_type"`
-	Port         int       `json:"port"`
 	PID          int       `json:"pid"`
 	State        string    `json:"state"`
 	StartedAt    time.Time `json:"started_at"`
@@ -80,6 +79,12 @@ type WorkflowInfo struct {
 	Budget *BudgetInfo `json:"budget,omitempty"`
 	// Hold is why the machine gate keeps this workflow down.
 	Hold string `json:"hold,omitempty"`
+	// Sessions are the agent sessions the supervisor has seen start and
+	// not end. SessionsKnown is false while the supervisor cannot account
+	// for every session the engine runs; a reader then treats the loop as
+	// busy.
+	Sessions      []rollup.Session `json:"sessions"`
+	SessionsKnown bool             `json:"sessions_known"`
 }
 
 // GateInfo is the machine gate of a status document, absent when the
@@ -178,8 +183,7 @@ type statusDocJSON struct {
 // none or one Jigz cannot read. It also drives the wake and cleanup
 // commands.
 type StatusDoc struct {
-	// Reader supplies the legacy reading and the database and state
-	// probes.
+	// Reader supplies the legacy reading and the database reads.
 	Reader rollup.Reader
 	// Roots returns each project's absolute repository root by project
 	// name. The root string must equal the one Jigz was started
@@ -332,8 +336,7 @@ func (d StatusDoc) Capabilities() Capabilities {
 
 // Fleet reports each project with a readable status document from that
 // document, and every other loop from the registry. Only a live,
-// awake supervisor's running workflows are probed; a sleeping, stale or
-// exited one is never contacted.
+// awake supervisor's running workflows count as live.
 func (d StatusDoc) Fleet() rollup.Fleet {
 	roots := d.roots()
 	names := make([]string, 0, len(roots))
@@ -356,8 +359,8 @@ func (d StatusDoc) Fleet() rollup.Fleet {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				probe := st.Liveness == Live && !st.Sleeping && w.State == "running" && w.Port > 0 && pidAlive(w.PID)
-				l := d.Reader.Loop(p, w.Name, w.Port, dbPath(roots[p], w.WorkflowFile), probe)
+				live := st.Liveness == Live && !st.Sleeping && w.State == "running" && pidAlive(w.PID)
+				l := d.Reader.Loop(p, w.Name, dbPath(roots[p], w.WorkflowFile), live, w.Sessions, w.SessionsKnown)
 				mu.Lock()
 				loops = append(loops, l)
 				mu.Unlock()

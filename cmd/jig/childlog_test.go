@@ -106,7 +106,6 @@ func TestChildStartsWhenLogCannotBeOpened(t *testing.T) {
 	mustWrite(t, filepath.Join(root2, ".jigz", "workflows", "WORKFLOW.plan.md"), "body\n")
 	mustWrite(t, filepath.Join(root2, ".jigz", "logs"), "not a directory")
 	s2 := newTestSup(t, root2, "plan")
-	s2.ports["plan"] = 0
 	s2.bin = writeScript(t, root2, "sortie", "while true; do sleep 1; done\n")
 	if err := s2.startOne("plan"); err != nil {
 		t.Fatalf("child failed to start without a log file: %v", err)
@@ -140,7 +139,6 @@ func TestChildOutputReachesLogAndTerminal(t *testing.T) {
 	mustWrite(t, filepath.Join(root, ".jigz", "config.yaml"), "repo: owner/name\n")
 	mustWrite(t, filepath.Join(root, ".jigz", "workflows", "WORKFLOW.plan.md"), "body\n")
 	sup := newTestSup(t, root, "plan")
-	sup.ports["plan"] = 0
 	sup.bin = writeScript(t, root, "sortie", "echo to-out\necho to-err >&2\n")
 	if err := sup.startOne("plan"); err != nil {
 		t.Fatal(err)

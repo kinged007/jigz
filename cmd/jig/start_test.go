@@ -47,7 +47,7 @@ func appendLog(t *testing.T, path, text string) {
 }
 
 func TestStartArgv(t *testing.T) {
-	c, err := parseArgs([]string{"start", "--no-dashboard", "--host", "0.0.0.0", "--dashboard-port=9000", "--unite", "--no-server", "./x"})
+	c, err := parseArgs([]string{"start", "--no-dashboard", "--host", "0.0.0.0", "--dashboard-port=9000", "--unite", "./x"})
 	if err != nil || c.remote != "start" {
 		t.Fatalf("parse: %+v %v", c, err)
 	}
@@ -56,7 +56,7 @@ func TestStartArgv(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := startArgv(inner, "/abs/x")
-	want := []string{"--no-server", "--no-dashboard", "--unite", "--dashboard-port=9000", "--host=0.0.0.0", "/abs/x"}
+	want := []string{"--no-dashboard", "--unite", "--dashboard-port=9000", "--host=0.0.0.0", "/abs/x"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("argv = %v, want %v", got, want)
 	}

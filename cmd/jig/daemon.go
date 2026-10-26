@@ -866,21 +866,37 @@ func childSleeping(root string) bool {
 }
 
 // childQuiet reports whether every engine loop of the child of root has
-// no work in flight.
+// no work in flight. A loop whose sessions the child cannot account for is
+// unknown, not idle.
 func childQuiet(root string) (idle, known bool) {
 	doc, err := readStatusDoc(root)
 	if err != nil {
 		return false, false
 	}
 	for _, w := range doc.Workflows {
-		if w.Port == 0 || w.PID == 0 {
+		if !engineUp(w) {
 			continue
 		}
-		if idle, known := loopQuiet(w.Port); !idle || !known {
-			return idle, known
+		if !w.SessionsKnown {
+			return false, false
+		}
+		if len(w.Sessions) > 0 {
+			return false, true
+		}
+		retrying, err := rollup.CountRetrying(dbPathFor(root, w.WorkflowFile))
+		if err != nil {
+			return false, false
+		}
+		if retrying > 0 {
+			return false, true
 		}
 	}
 	return true, true
+}
+
+// engineUp reports whether the engine of a workflow is running.
+func engineUp(w workflowStatus) bool {
+	return w.PID != 0 && (w.State == "running" || w.State == "stopping")
 }
 
 // wake starts the loop's child, or wakes it when it sleeps.
@@ -1218,12 +1234,12 @@ func (d *daemon) childStatus(root string, l *hubproto.Loop) {
 		if b := w.Budget; b != nil && b.Cap > 0 {
 			l.Budget = &hubproto.Budget{Period: b.Period, MaxTokens: b.Cap, UsedTokens: max(b.TokensUsed, 0)}
 		}
-		if l.State != hubproto.LoopRunning || w.Port == 0 || w.PID == 0 {
+		if l.State != hubproto.LoopRunning || !engineUp(w) {
 			continue
 		}
-		if p, ok := fetchLoopState(w.Port); ok {
-			l.Running += len(p.Running)
-			l.Retrying += max(len(p.Retrying), p.Counts.Retrying)
+		l.Running += len(w.Sessions)
+		if n, err := rollup.CountRetrying(dbPathFor(root, w.WorkflowFile)); err == nil {
+			l.Retrying += n
 		}
 	}
 }
@@ -1358,17 +1374,6 @@ func finishedEvent(r store.Run) (hubproto.RunEvent, bool) {
 	return ev, ev.Validate() == nil
 }
 
-// engineRunning is the part of an engine's /api/v1/state the started
-// events need.
-type engineRunning struct {
-	Running []struct {
-		IssueIdentifier   string `json:"issue_identifier"`
-		DisplayIdentifier string `json:"display_identifier"`
-		Attempt           *int   `json:"attempt"`
-		StartedAt         string `json:"started_at"`
-	} `json:"running"`
-}
-
 // startedEvents lists one started event per (loop, item, attempt) running
 // now that the hub has not accepted yet.
 func (d *daemon) startedEvents() []hubproto.RunEvent {
@@ -1395,27 +1400,16 @@ func (d *daemon) startedEvents() []hubproto.RunEvent {
 		}
 		kind := readLoopMeta(c.Loop).kind
 		for _, w := range doc.Workflows {
-			if w.Port == 0 || w.PID == 0 {
+			if !engineUp(w) {
 				continue
 			}
-			var st engineRunning
-			if rollup.GetJSON(&http.Client{Timeout: 3 * time.Second}, w.Port, "/api/v1/state", &st) != nil {
-				continue
-			}
-			for _, r := range st.Running {
-				id := r.DisplayIdentifier
-				if id == "" {
-					id = r.IssueIdentifier
-				}
-				n, err := strconv.Atoi(issueNumber(id, ""))
-				started, ok := parseRunTime(r.StartedAt)
-				if err != nil || n < 1 || !ok {
+			for _, r := range w.Sessions {
+				n, err := strconv.Atoi(issueNumber(r.Identifier, r.IssueID))
+				started := r.StartedAt
+				if err != nil || n < 1 || started.IsZero() {
 					continue
 				}
-				attempt := 1
-				if r.Attempt != nil && *r.Attempt > 0 {
-					attempt = *r.Attempt
-				}
+				attempt := max(r.Attempt, 1)
 				evID := fmt.Sprintf("start:%s:%s:%d:%d:%d", c.Loop.Project, c.Loop.Workflow, n, attempt, started.Unix())
 				live[evID] = true
 				d.mu.Lock()

@@ -111,7 +111,7 @@ func cleanupFilePath(root, suffix string) (string, error) {
 	return strings.TrimSuffix(path, ".json") + suffix, nil
 }
 
-func lockCleanup(root string) (*portLock, error) {
+func lockCleanup(root string) (*fileLock, error) {
 	path, err := cleanupLockPath(root)
 	if err != nil {
 		return nil, err
@@ -130,7 +130,7 @@ func lockCleanup(root string) (*portLock, error) {
 		}
 		return nil, err
 	}
-	return &portLock{f: f}, nil
+	return &fileLock{f: f}, nil
 }
 
 // runCleanup runs the configured command once through the shell, in its
