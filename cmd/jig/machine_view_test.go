@@ -98,7 +98,7 @@ func TestOperationsRowShowsHold(t *testing.T) {
 	}
 	reg := registry{Entries: map[string]registryEntry{root: {
 		RepoName: "owner/repo", UpdatedAt: time.Now(), PID: os.Getpid(),
-		Loops: []loopEndpoint{{Repo: root, RepoName: "owner/repo", Loop: "build", Port: 1}},
+		Loops: []loopEndpoint{{Repo: root, RepoName: "owner/repo", Loop: "build"}},
 	}}}
 	raw, _ := json.Marshal(reg)
 	mustWrite(t, filepath.Join(dir, "registry.json"), string(raw))

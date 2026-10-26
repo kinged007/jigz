@@ -81,9 +81,6 @@ func spawnDetached(argv []string, logPath string) (int, <-chan error, error) {
 // startArgv is the bare-form command line for the background run.
 func startArgv(c cmdline, root string) []string {
 	var argv []string
-	if c.noServer {
-		argv = append(argv, "--no-server")
-	}
 	if c.noDashboard {
 		argv = append(argv, "--no-dashboard")
 	}

@@ -3,17 +3,14 @@ package loopsrc
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -60,10 +57,10 @@ func doc(schema int, state string, pid int, sleep, workflows string) string {
 
 const awake = `{"enabled":true,"awake":true,"sleeping_since":null,"next_wake":null}`
 
-func wf(name string, port, pid int, state, hash string, restarts int, log string) string {
-	return fmt.Sprintf(`{"name":%q,"workflow_file":"WORKFLOW.%s.md","loop_type":"issues","port":%d,"pid":%d,"state":%q,
+func wf(name string, pid int, state, hash string, restarts int, log string) string {
+	return fmt.Sprintf(`{"name":%q,"workflow_file":"WORKFLOW.%s.md","loop_type":"issues","pid":%d,"state":%q,
 "started_at":"2026-01-01T00:00:00Z","restart_count":%d,"last_exit_code":null,"config_hash":%q,"log_path":%q}`,
-		name, name, port, pid, state, restarts, hash, log)
+		name, name, pid, state, restarts, hash, log)
 }
 
 func deadPID(t *testing.T) int {
@@ -100,7 +97,7 @@ func TestStatusLivenessClasses(t *testing.T) {
 		{"exited", "exited", os.Getpid(), Exited},
 	}
 	for _, c := range cases {
-		e.write(".json", doc(1, c.state, c.pid, awake, wf("build", 1, c.pid, "running", "h1", 0, "")))
+		e.write(".json", doc(1, c.state, c.pid, awake, wf("build", c.pid, "running", "h1", 0, "")))
 		st, err := e.src.Status("o/p")
 		if err != nil || st.Liveness != c.want {
 			t.Errorf("%s: liveness %q err %v, want %q", c.name, st.Liveness, err, c.want)
@@ -146,43 +143,53 @@ func TestStatusSleepingAndCleanupSibling(t *testing.T) {
 	}
 }
 
-func TestFleetProbesOnlyAwakeRunningWorkflowsAndFallsBack(t *testing.T) {
-	var hits atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/state" {
-			http.NotFound(w, r)
-			return
-		}
-		hits.Add(1)
-		fmt.Fprint(w, `{"counts":{"running":1,"retrying":2},"running":[{"issue_identifier":"7","state":"running"}]}`)
-	}))
-	defer srv.Close()
-	port, _ := strconv.Atoi(srv.URL[strings.LastIndex(srv.URL, ":")+1:])
-
+func TestFleetReadsAwakeRunningWorkflowsFromTheirDatabases(t *testing.T) {
 	e := newEnv(t)
-	e.write(".json", doc(1, "running", os.Getpid(), awake, wf("build", port, os.Getpid(), "running", "h", 0, "")))
+	dir := filepath.Join(e.root, ".jigz", "workflows")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(dir, ".sortie.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT)`,
+		`INSERT INTO schema_migrations VALUES (18, '')`,
+		`CREATE TABLE retry_entries (issue_id TEXT PRIMARY KEY, identifier TEXT, attempt INTEGER, due_at_ms INTEGER, error TEXT)`,
+		`INSERT INTO retry_entries VALUES ('1', '1', 1, 0, 'x'), ('2', '2', 1, 0, 'y')`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+
+	running := strings.Replace(wf("build", os.Getpid(), "running", "h", 0, ""), `"log_path"`,
+		`"sessions":[{"issue_id":"7","identifier":"o/p#7","attempt":1,"started_at":"2026-01-01T00:00:00Z","turns":0}],"sessions_known":true,"log_path"`, 1)
+	e.write(".json", doc(1, "running", os.Getpid(), awake, running))
 	f := e.src.Fleet()
-	if len(f.Loops) != 1 || !f.Loops[0].Live || f.Loops[0].Retrying != 2 || f.Loops[0].Repo != "o/p" || hits.Load() != 1 {
-		t.Fatalf("awake: loops %+v hits %d", f.Loops, hits.Load())
+	if len(f.Loops) != 1 || !f.Loops[0].Live || f.Loops[0].Retrying != 2 || f.Loops[0].Repo != "o/p" ||
+		len(f.Loops[0].Running) != 1 || f.Loops[0].Running[0].Identifier != "o/p#7" {
+		t.Fatalf("awake: loops %+v", f.Loops)
 	}
 
 	sleeping := `{"enabled":true,"awake":false,"sleeping_since":"2026-01-01T00:00:00Z","next_wake":null}`
-	e.write(".json", doc(1, "running", os.Getpid(), sleeping, wf("build", port, os.Getpid(), "sleeping", "h", 0, "")))
-	hits.Store(0)
+	e.write(".json", doc(1, "running", os.Getpid(), sleeping, wf("build", os.Getpid(), "sleeping", "h", 0, "")))
 	f = e.src.Fleet()
-	if len(f.Loops) != 1 || f.Loops[0].Live || hits.Load() != 0 {
-		t.Errorf("sleeping: loops %+v hits %d", f.Loops, hits.Load())
+	if len(f.Loops) != 1 || f.Loops[0].Live || len(f.Loops[0].Running) != 0 {
+		t.Errorf("sleeping: loops %+v", f.Loops)
 	}
 
 	dead := deadPID(t)
-	e.write(".json", doc(1, "running", dead, awake, wf("build", port, dead, "running", "h", 0, "")))
+	e.write(".json", doc(1, "running", dead, awake, wf("build", dead, "running", "h", 0, "")))
 	f = e.src.Fleet()
-	if len(f.Loops) != 1 || f.Loops[0].Live || hits.Load() != 0 {
-		t.Errorf("stale: loops %+v hits %d", f.Loops, hits.Load())
+	if len(f.Loops) != 1 || f.Loops[0].Live {
+		t.Errorf("stale: loops %+v", f.Loops)
 	}
 
-	e.write(".json", doc(2, "running", os.Getpid(), awake, wf("build", port, os.Getpid(), "running", "h", 0, "")))
-	if f = e.src.Fleet(); len(f.Loops) != 0 || hits.Load() != 0 {
+	e.write(".json", doc(2, "running", os.Getpid(), awake, wf("build", os.Getpid(), "running", "h", 0, "")))
+	if f = e.src.Fleet(); len(f.Loops) != 0 {
 		t.Errorf("unsupported schema must fall back to the (empty) registry: %+v", f.Loops)
 	}
 }
@@ -275,7 +282,7 @@ func logEnv(t *testing.T) (*env, string) {
 func TestLogTail(t *testing.T) {
 	e, logs := logEnv(t)
 	good := filepath.Join(logs, "build.log")
-	e.write(".json", doc(1, "running", os.Getpid(), awake, wf("build", 1, os.Getpid(), "running", "h", 0, good)))
+	e.write(".json", doc(1, "running", os.Getpid(), awake, wf("build", os.Getpid(), "running", "h", 0, good)))
 
 	if _, err := e.src.LogTail("o/p", "build", 5); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("missing log: %v", err)
@@ -323,7 +330,7 @@ func TestLogTailRejectsEscapes(t *testing.T) {
 		"symlink":   link,
 		"logs root": logs,
 	} {
-		e.write(".json", doc(1, "running", os.Getpid(), awake, wf("build", 1, os.Getpid(), "running", "h", 0, path)))
+		e.write(".json", doc(1, "running", os.Getpid(), awake, wf("build", os.Getpid(), "running", "h", 0, path)))
 		if got, err := e.src.LogTail("o/p", "build", 5); err == nil {
 			t.Errorf("%s accepted: %v", name, got)
 		}
@@ -334,7 +341,7 @@ func TestWaitRecycled(t *testing.T) {
 	e := newEnv(t)
 	pid := os.Getpid()
 	write := func(hash string, restarts int) {
-		e.write(".json", doc(1, "running", pid, awake, wf("build", 1, pid, "running", hash, restarts, "")))
+		e.write(".json", doc(1, "running", pid, awake, wf("build", pid, "running", hash, restarts, "")))
 	}
 	write("old", 0)
 	before, err := e.src.Status("o/p")

@@ -92,7 +92,7 @@ func TestPageRendersRegisteredRepo(t *testing.T) {
 			RepoName:  "owner/repo",
 			UpdatedAt: time.Now(),
 			PID:       os.Getpid(),
-			Loops:     []loopEndpoint{{Repo: root, RepoName: "owner/repo", Loop: "build", Port: 1}},
+			Loops:     []loopEndpoint{{Repo: root, RepoName: "owner/repo", Loop: "build"}},
 		},
 	}}
 	dir := filepath.Join(cache, "jigz")
@@ -118,7 +118,7 @@ func TestPageRendersRegisteredRepo(t *testing.T) {
 		StartedAt:     time.Now().UTC(),
 		UpdatedAt:     time.Now().UTC(),
 		State:         "running",
-		Workflows:     []workflowStatus{{Name: "build", Port: 1, PID: os.Getpid(), State: "running"}},
+		Workflows:     []workflowStatus{{Name: "build", PID: os.Getpid(), State: "running"}},
 	}
 	raw, _ = json.Marshal(doc)
 	if err := os.WriteFile(path, raw, 0o644); err != nil {
@@ -204,7 +204,7 @@ func TestLoopRowShowsBudget(t *testing.T) {
 		}},
 	}}
 	p.Repo.State = supervise.StateRunning
-	row := loopRow(&rollup.Loop{Loop: "build", Port: 7678, Live: true}, p)
+	row := loopRow(&rollup.Loop{Loop: "build", Live: true}, p)
 	if row.Budget != "1,234 / 10,000 tokens" {
 		t.Errorf("budget = %q", row.Budget)
 	}
@@ -216,15 +216,15 @@ func TestLoopRowShowsBudget(t *testing.T) {
 	}
 }
 
-// A loop started with no server has no state API, so its status document
-// is the only word on it: it is running, not "not answering".
-func TestLoopRowWithoutServerUsesStatusDoc(t *testing.T) {
+// A loop whose rollup row is not live still shows the state its status
+// document gives.
+func TestLoopRowUsesStatusDocWhenNotLive(t *testing.T) {
 	p := &opsProject{Status: &loopsrc.StatusInfo{
 		Liveness:  loopsrc.Live,
 		Workflows: []loopsrc.WorkflowInfo{{Name: "build", State: "running"}},
 	}}
 	p.Repo.State = supervise.StateRunning
-	row := loopRow(&rollup.Loop{Loop: "build", Port: 0}, p)
+	row := loopRow(&rollup.Loop{Loop: "build"}, p)
 	if row.State != "running" {
 		t.Errorf("state = %q, want running", row.State)
 	}

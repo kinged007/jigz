@@ -50,7 +50,7 @@ func TestParseArgsRunFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.setup || c.noServer || !c.unite || !c.noDashboard {
+	if c.setup || !c.unite || !c.noDashboard {
 		t.Errorf("flags wrong: %+v", c)
 	}
 	if c.dashPort != 9999 {
@@ -121,9 +121,28 @@ func TestUsageListsEveryFlag(t *testing.T) {
 	usage()
 	usageWriter = nil
 	out := b.String()
-	for _, f := range []string{"--repo", "--unite", "--dashboard-port", "--no-dashboard", "--no-server", "--version", "--dump-version"} {
+	for _, f := range []string{"--repo", "--unite", "--dashboard-port", "--no-dashboard", "--version", "--dump-version"} {
 		if !strings.Contains(out, f) {
 			t.Errorf("usage does not mention %s", f)
 		}
+	}
+}
+
+func TestNoServerIsAnUnknownFlag(t *testing.T) {
+	for _, args := range [][]string{{"--no-server", "/tmp/repo"}, {"start", "--no-server", "/tmp/repo"}} {
+		c, err := parseArgs(args)
+		if err == nil && c.remote == "start" {
+			_, err = parseArgs(c.remoteArgs)
+		}
+		if err == nil {
+			t.Errorf("parseArgs(%v) accepted --no-server", args)
+		}
+	}
+	var b strings.Builder
+	usageWriter = func(s string) { b.WriteString(s) }
+	usage()
+	usageWriter = nil
+	if strings.Contains(b.String(), "no-server") {
+		t.Error("usage mentions --no-server")
 	}
 }

@@ -1,17 +1,15 @@
 // Package collector copies what Jigz needs from the loops into
 // history.db on a timer: finished runs, state changes, and samples.
 //
-// A loop whose engine answers is read through the engine's HTTP API. Any
-// other loop is read from its workflow database, which is only read, never
-// written. A database that is missing, locked, or at an unsupported schema
-// is skipped for that pass and tried again on the next one.
+// Every loop is read from its workflow database, which is only read,
+// never written. A database that is missing, locked, or at an unsupported
+// schema is skipped for that pass and tried again on the next one.
 package collector
 
 import (
 	"context"
 	"database/sql"
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -47,14 +45,11 @@ type Collector struct {
 	Host     func() machine.Metrics
 	Interval time.Duration
 	Now      func() time.Time
-	// Client reads the engine APIs. Nil uses a client with a short timeout.
-	Client *http.Client
 
-	// seen is the last state of each watched list per loop, keyed by loop,
-	// source and list, mapping issue id to detail. A loop with no entry
-	// yet is only recorded, so a restart of Jigz does not report every
-	// parked issue as new, and a switch between the API and the database
-	// does not report the differences between their wordings.
+	// seen is the last state of each watched list per loop, keyed by loop
+	// and list, mapping issue id to detail. A loop with no entry yet is
+	// only recorded, so a restart of Jigz does not report every parked
+	// issue as new.
 	seen map[string]map[string]string
 	// filled marks loops whose stored runs were checked for a missing
 	// workflow file in this process.
@@ -151,9 +146,6 @@ func (c *Collector) readLoop(l rollup.Loop, ts string) {
 				log.Printf("collector: %s/%s: workflow kind: %v", l.Repo, l.Loop, err)
 			}
 		}
-	}
-	if l.Live && l.Port > 0 && c.readAPI(l, ts) {
-		return
 	}
 	if l.DBPath == "" {
 		return

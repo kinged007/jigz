@@ -191,6 +191,28 @@ func TestAcceptance(t *testing.T) {
 		t.Logf("scenario a: %s, labels %v", time.Since(t0).Round(time.Millisecond), log)
 	})
 
+	t.Run("a2_engine_runs_without_a_server", func(t *testing.T) {
+		if runtime.GOOS != "linux" {
+			t.Skip("listening sockets are read from /proc")
+		}
+		found := 0
+		for _, p := range descendants(cmd.Process.Pid) {
+			if f := strings.Fields(p.args); len(f) == 0 || f[0] != engineBin {
+				continue
+			}
+			found++
+			if !strings.Contains(p.args, " --port 0 ") {
+				t.Errorf("engine pid %d command line %q lacks --port 0", p.pid, p.args)
+			}
+			if l, err := listeningSockets(p.pid); err != nil || len(l) != 0 {
+				t.Errorf("engine pid %d listening sockets %v, %v; want none", p.pid, l, err)
+			}
+		}
+		if found == 0 {
+			t.Error("no engine process below the Jigz run")
+		}
+	})
+
 	t.Run("b_excluded_issues_are_never_dispatched", func(t *testing.T) {
 		t0 := time.Now()
 		seen := countSearches(gh)
@@ -220,7 +242,7 @@ func TestAcceptance(t *testing.T) {
 		t.Logf("scenario b: %s", time.Since(t0).Round(time.Millisecond))
 	})
 
-	t.Run("c_dashboard_reads_the_run_through_the_engine_api", func(t *testing.T) {
+	t.Run("c_dashboard_reads_the_run_from_the_database", func(t *testing.T) {
 		t0 := time.Now()
 		var schema int
 		db, err := sql.Open("sqlite", "file:"+filepath.Join(repoDir, ".jigz", "workflows", "jigz-issues.db")+"?mode=ro")
@@ -248,8 +270,8 @@ func TestAcceptance(t *testing.T) {
 				TotalTokens               int64  `json:"total_tokens"`
 			}
 		}
-		// The collector copies runs on a 60 second timer. The engine is
-		// running, so it reads them from the engine's HTTP API.
+		// The collector copies runs from the workflow database on a 60
+		// second timer.
 		waitFor("the dashboard to list the run", 120*time.Second, func() bool {
 			runs.Runs = nil
 			return getJSON(dash+"/api/v1/runs?project="+slug, &runs) == nil && len(runs.Runs) > 0
@@ -261,14 +283,6 @@ func TestAcceptance(t *testing.T) {
 		if r.Project != slug || r.Workflow != "issues" || r.Status != "succeeded" || r.AgentAdapter != "mock" ||
 			r.DisplayIdentifier != fmt.Sprintf("%s#%d", slug, planned) || r.TurnsCompleted != 1 || r.TotalTokens != 150 {
 			t.Errorf("unexpected run: %+v", r)
-		}
-
-		out, err := os.ReadFile(logPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(string(out), "collector: "+slug+"/issues: runs copied from the engine API: 1") {
-			t.Errorf("the dashboard did not copy the run from the engine API; Jigz output (tail):\n%s", logTail(logPath, 60))
 		}
 
 		for _, page := range []struct {
@@ -520,14 +534,26 @@ func TestAcceptance(t *testing.T) {
 			}
 		}
 		var qs apiQs
-		waitFor("the scanner to ignore the answer from mallory", 150*time.Second, func() bool {
+		hasParkedAgain := func() bool {
+			for _, it := range qs.Items {
+				if it.Project == slug && it.Number == c {
+					for _, p := range it.Problems {
+						if p.Kind == "parked_again" {
+							return true
+						}
+					}
+				}
+			}
+			return false
+		}
+		waitFor("the scanner to ignore the answer from mallory and flag #"+fmt.Sprint(c), 150*time.Second, func() bool {
 			qs = apiQs{}
 			if getJSON(dash+"/api/v1/questions", &qs) != nil {
 				return false
 			}
 			for _, q := range qs.Questions {
 				if q.Project == slug && q.Number == a && len(q.IgnoredAnswers) == 1 && q.IgnoredAnswers[0].Author == "mallory" {
-					return true
+					return hasParkedAgain()
 				}
 			}
 			return false
@@ -557,21 +583,12 @@ func TestAcceptance(t *testing.T) {
 		if onA != 1 || onC != 1 {
 			t.Errorf("%d questions listed for #%d and %d for #%d, want 1 each: %+v", onA, a, onC, c, qs.Questions)
 		}
-		parkedAgain := false
 		for _, it := range qs.Items {
-			if it.Project != slug {
-				continue
-			}
-			if it.Number == b {
+			if it.Project == slug && it.Number == b {
 				t.Errorf("problem item listed for #%d: %+v", b, qs.Items)
 			}
-			if it.Number == c {
-				for _, p := range it.Problems {
-					parkedAgain = parkedAgain || p.Kind == "parked_again"
-				}
-			}
 		}
-		if !parkedAgain {
+		if !hasParkedAgain() {
 			t.Errorf("no parked_again problem for #%d: %+v", c, qs.Items)
 		}
 		for _, n := range []int{b, c} {
@@ -882,7 +899,7 @@ func TestAcceptanceUpstreamEngine(t *testing.T) {
 		t.Logf("upstream scenario a: %s, engine %s", time.Since(t0).Round(time.Millisecond), spec)
 	})
 
-	t.Run("b_dashboard_reads_the_run_through_the_engine_api", func(t *testing.T) {
+	t.Run("b_dashboard_reads_the_run_from_the_database", func(t *testing.T) {
 		t0 := time.Now()
 		var runs struct {
 			Runs []struct {
@@ -899,9 +916,6 @@ func TestAcceptanceUpstreamEngine(t *testing.T) {
 		}
 		if r := runs.Runs[0]; r.Workflow != "issues" || r.Status != "succeeded" || r.AgentAdapter != "mock" {
 			t.Errorf("unexpected run: %+v", r)
-		}
-		if out, _ := os.ReadFile(logPath); !strings.Contains(string(out), "collector: "+slug+"/issues: runs copied from the engine API: 1") {
-			t.Errorf("the dashboard did not copy the run from the engine API; Jigz output (tail):\n%s", logTail(logPath, 60))
 		}
 		var fleet struct {
 			SchemaNotices []json.RawMessage `json:"schema_notices"`
@@ -1269,14 +1283,17 @@ func TestAcceptanceConnected(t *testing.T) {
 		if runtime.GOOS != "linux" {
 			t.Skip("listening sockets are read from /proc")
 		}
-		// The engine serves its state API, so a running engine shows that
-		// the check sees a listening socket.
 		eng := engines()
 		if len(eng) == 0 {
-			t.Fatal("no engine process for the listening socket control")
+			t.Fatal("no engine process to check")
 		}
-		if l, err := listeningSockets(eng[0].pid); err != nil || len(l) == 0 {
-			t.Errorf("engine pid %d listening sockets %v, %v; want at least one", eng[0].pid, l, err)
+		for _, e := range eng {
+			if l, err := listeningSockets(e.pid); err != nil || len(l) != 0 {
+				t.Errorf("engine pid %d listening sockets %v, %v; want none", e.pid, l, err)
+			}
+			if !strings.Contains(e.args, "--port 0 ") {
+				t.Errorf("engine pid %d command line %q lacks --port 0", e.pid, e.args)
+			}
 		}
 		l, err := listeningSockets(pid)
 		if err != nil {

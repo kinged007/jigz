@@ -66,8 +66,8 @@ section 6.
 
 ## 4. Unite
 
-- Several repositories on one machine in one dashboard (registry, port
-  claims, `--unite`) — exists
+- Several repositories on one machine in one dashboard (registry,
+  `--unite`) — exists
 
 ## 5. Workflows and prompts
 

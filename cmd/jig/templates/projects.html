@@ -8,7 +8,7 @@
 {{if .Projects}}
 <div class="tw"><table>
 <thead><tr>
-  <th>Project</th><th>State</th><th>Enabled</th><th>Workflows</th><th class="num" title="Loops that answered on their own port just now">Loops live</th>
+  <th>Project</th><th>State</th><th>Enabled</th><th>Workflows</th><th class="num" title="Loops with a running process now">Loops live</th>
   <th class="num">Agents</th><th class="num" title="Measured tokens of runs started in the last 14 days">Tokens (14d)</th><th class="num" title="Space the project directory occupies, measured every 10 minutes">Disk</th><th>Last validation</th>{{if .GitHub}}<th title="Last pass of the optional GitHub enrichment">GitHub enrichment</th>{{end}}
 </tr></thead>
 <tbody>
@@ -65,7 +65,7 @@
 </div>
 <div class="card"><h3>Loops</h3>
   {{if .Rows}}<div class="tw"><table><thead><tr><th>Loop</th><th>State</th><th class="num">Running</th><th class="num">Retrying</th><th class="num">Runs</th><th class="num">Failed</th><th class="num">Tokens</th><th>Last run</th><th>Last failure</th>{{if .Status}}<th class="num">Restarts</th><th class="num">Last exit</th>{{end}}{{if .ShowHash}}<th>Config</th>{{end}}</tr></thead><tbody>
-  {{range .Rows}}<tr><td>{{.L.Loop}}</td><td>{{if .L.Live}}<span class="chip s-running">live</span>{{else}}<span class="chip s-stopped">not answering</span>{{end}}</td><td class="num">{{len .L.Running}}</td><td class="num">{{.L.Retrying}}</td><td class="num">{{commas .L.Runs}}</td><td class="num">{{commas .L.Failed}}</td><td class="num">{{commas .L.Tokens}}</td>
+  {{range .Rows}}<tr><td>{{.L.Loop}}</td><td>{{if .L.Live}}<span class="chip s-running">live</span>{{else}}<span class="chip s-stopped">stopped</span>{{end}}</td><td class="num">{{len .L.Running}}</td><td class="num">{{.L.Retrying}}</td><td class="num">{{commas .L.Runs}}</td><td class="num">{{commas .L.Failed}}</td><td class="num">{{commas .L.Tokens}}</td>
     <td>{{if .LastRun}}{{.LastRun}}{{else}}<span class="muted">&mdash;</span>{{end}}</td><td>{{if .LastFailure}}{{.LastFailure}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
     {{if $.Status}}<td class="num">{{with .Process}}{{.RestartCount}}{{else}}&mdash;{{end}}</td><td class="num">{{with .Process}}{{if .LastExitCode}}{{.LastExitCode}}{{else}}&mdash;{{end}}{{else}}&mdash;{{end}}</td>{{end}}
     {{if $.ShowHash}}<td>{{with .Process}}{{if .ConfigHash}}<code title="{{.ConfigHash}}">{{printf "%.8s" .ConfigHash}}</code>{{end}}{{end}}</td>{{end}}</tr>{{end}}

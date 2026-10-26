@@ -99,20 +99,20 @@ func (s *supervisor) sleepStep() (int, bool) {
 		s.mu.Unlock()
 		return 0, false
 	}
-	var ports []int
-	for _, p := range s.procs {
+	var names []string
+	for n, p := range s.procs {
 		if p.stopping {
 			s.mu.Unlock()
 			return 0, false
 		}
-		ports = append(ports, p.port)
+		names = append(names, n)
 	}
 	s.lastPoll = now
 	s.mu.Unlock()
 
 	busy := false
-	for _, port := range ports {
-		if idle, known := s.quiet(port); !known || !idle {
+	for _, name := range names {
+		if idle, known := s.quiet(name); !known || !idle {
 			busy = true
 			break
 		}

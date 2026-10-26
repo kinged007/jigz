@@ -24,7 +24,7 @@ func newSleepRig(t *testing.T, enabled bool) *sleepRig {
 	sup, root := startedSup(t, "while true; do sleep 1; done\n")
 	r := &sleepRig{sup: sup, root: root, now: time.Now(), idle: true, known: true}
 	sup.clock = func() time.Time { return r.now }
-	sup.quiet = func(int) (bool, bool) { r.polls++; return r.idle, r.known }
+	sup.quiet = func(string) (bool, bool) { r.polls++; return r.idle, r.known }
 	sup.sleepCfg = config.Sleep{Enabled: enabled, IdleTimeout: 10 * time.Minute, WakeInterval: time.Hour}
 	sup.idleSince = r.now
 	return r

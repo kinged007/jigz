@@ -2,16 +2,15 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -20,6 +19,7 @@ import (
 	"github.com/kinged007/jigz/internal/config"
 	"github.com/kinged007/jigz/internal/engine"
 	"github.com/kinged007/jigz/internal/plan"
+	"github.com/kinged007/jigz/internal/rollup"
 )
 
 // Control signals. A loop is stopped by signalling the process that owns
@@ -62,9 +62,10 @@ const shutdownBudget = 30 * time.Second
 
 // loopProc is one loop child and the supervisor's intent for it.
 type loopProc struct {
-	def  loopDef
-	cmd  *exec.Cmd
-	port int
+	def loopDef
+	cmd *exec.Cmd
+	// live follows the sessions of the engine from its log.
+	live *liveTracker
 	// stopping marks a loop the supervisor asked to end, as opposed to
 	// one that died on its own. It is what keeps a deliberate stop from
 	// reading as a crash.
@@ -98,10 +99,6 @@ type supervisor struct {
 	root string
 	bin  string
 	defs map[string]loopDef
-	// ports is the port each loop last bound. A loop is restarted on the
-	// port it already published, so a rebound port stays visible to
-	// whoever reads the registry.
-	ports map[string]int
 
 	mu    sync.Mutex
 	procs map[string]*loopProc
@@ -132,7 +129,7 @@ type supervisor struct {
 	lastPoll  time.Time
 	wakeNow   bool
 	clock     func() time.Time
-	quiet     func(port int) (idle, known bool)
+	quiet     func(name string) (idle, known bool)
 	pollEvery time.Duration
 
 	budgets       map[string]config.Budget
@@ -148,31 +145,27 @@ type supervisor struct {
 	disabled map[string]string
 	// sessions reports whether a loop has a session running; retries do
 	// not count.
-	sessions func(port int) (active, known bool)
+	sessions func(name string) (active, known bool)
 }
 
-func newSupervisor(root, bin string, defs []loopDef, ports []int) *supervisor {
+func newSupervisor(root, bin string, defs []loopDef) *supervisor {
 	s := &supervisor{
 		root: root, bin: bin,
 		defs:      map[string]loopDef{},
-		ports:     map[string]int{},
 		procs:     map[string]*loopProc{},
 		gone:      map[string]*loopProc{},
 		startedAt: time.Now(),
 		events:    make(chan exitEvent, len(defs)+4),
-		clock:     time.Now, quiet: loopQuiet, pollEvery: sleepPollEvery,
+		clock:     time.Now, pollEvery: sleepPollEvery,
 		budgets: map[string]config.Budget{}, budgetStates: map[string]*budgetState{},
 		budgetUse: map[string]budgetUsage{}, budgetPolled: map[string]time.Time{},
 		budgetReadErr: map[string]string{},
-		sessions:      loopSessions,
 		disabled:      map[string]string{},
 	}
+	s.quiet, s.sessions = s.loopQuiet, s.loopSessions
 	s.initMachine()
-	for i, d := range defs {
+	for _, d := range defs {
 		s.defs[d.name] = d
-		if i < len(ports) {
-			s.ports[d.name] = ports[i]
-		}
 	}
 	return s
 }
@@ -219,8 +212,7 @@ func lastEnv(env []string, key string) string {
 	return val
 }
 
-// startOne launches one loop on the port it last used, so a loop that is
-// replaced keeps the address it already published.
+// startOne launches one loop.
 func (s *supervisor) startOne(name string) error {
 	def, ok := s.defs[name]
 	if !ok {
@@ -272,7 +264,8 @@ func (s *supervisor) startOne(name string) error {
 	} else {
 		logf, logw = lf, lf
 	}
-	cmd, port, err := startLoopChild(s.bin, envFile, s.root, def.file, env, s.ports[name], logw)
+	live := newLiveTracker(s.issueDisplay, func() { s.publishStatus("running") })
+	cmd, err := startLoopChild(s.bin, envFile, s.root, def.file, env, live, logw)
 	if err != nil {
 		if logf != nil {
 			_ = logf.Close()
@@ -280,9 +273,8 @@ func (s *supervisor) startOne(name string) error {
 		return fmt.Errorf("start %s loop: %w", name, err)
 	}
 	s.mu.Lock()
-	s.ports[name] = port
 	p := &loopProc{
-		def: def, cmd: cmd, port: port, since: time.Now(),
+		def: def, cmd: cmd, live: live, since: time.Now(),
 		configHash: configHash(workflow, envBody, lastEnv(env, "SORTIE_TRACKER_QUERY_FILTER")), loopType: loopTypeOf(workflow),
 		runtime: runtime,
 	}
@@ -302,9 +294,6 @@ func (s *supervisor) startOne(name string) error {
 		}
 		s.events <- exitEvent{loop: name, err: err}
 	}()
-	// Republished here rather than only at boot: a loop that is replaced
-	// leaves the registry advertising nothing for a moment, and the entry
-	// is what points a supervisor at its port and its dashboard.
 	s.republish()
 	return nil
 }
@@ -553,8 +542,8 @@ func (s *supervisor) drainStep() (int, bool) {
 	}
 	s.mu.Unlock()
 	for _, p := range due {
-		// The poll is HTTP, so it happens with the lock released.
-		idle, known := loopQuiet(p.port)
+		// The poll reads a database, so it happens with the lock released.
+		idle, known := s.quiet(p.def.name)
 		if !known || !idle {
 			continue
 		}
@@ -609,7 +598,7 @@ func (s *supervisor) endpoints() []loopEndpoint {
 	for _, p := range s.procs {
 		eps = append(eps, loopEndpoint{
 			Repo: s.root, RepoName: repoName(s.root), Loop: p.def.name,
-			Port: p.port, DBPath: dbPathFor(s.root, p.def.file),
+			DBPath:       dbPathFor(s.root, p.def.file),
 			WorkflowFile: filepath.Join(s.root, ".jigz", "workflows", p.def.file),
 			LoopType:     p.loopType,
 		})
@@ -619,8 +608,7 @@ func (s *supervisor) endpoints() []loopEndpoint {
 }
 
 // republish rewrites this repo's registry entry from the loops actually
-// running, so a rebound port or a stopped loop is visible to whatever
-// reads the registry.
+// running, so a stopped loop is visible to whatever reads the registry.
 func (s *supervisor) republish() {
 	if err := writeRegistry(s.root, s.endpoints(), s.startedAt, s.dash); err != nil {
 		fmt.Fprintln(os.Stderr, "jig: registry:", err)
@@ -684,13 +672,17 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 		if p.cmd != nil && p.cmd.Process != nil {
 			pid = p.cmd.Process.Pid
 		}
-		doc.Workflows = append(doc.Workflows, workflowStatus{
+		w := workflowStatus{
 			Name: p.def.name, WorkflowFile: p.def.file, LoopType: p.loopType,
-			Port: p.port, PID: pid, State: st, StartedAt: p.since.UTC(),
+			PID: pid, State: st, StartedAt: p.since.UTC(),
 			RestartCount: p.restarts, LastExitCode: p.exitCode, ConfigHash: p.configHash,
 			LogPath: childLogPath(s.root, p.def.name), Budget: bs,
 			Hold: gate.holdFor(bs),
-		})
+		}
+		if p.exitCode == nil {
+			w.Sessions, w.SessionsKnown = p.live.snapshot()
+		}
+		doc.Workflows = append(doc.Workflows, w)
 	}
 	for _, p := range s.procs {
 		add(p)
@@ -712,7 +704,7 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 			st, hold = "disabled", why
 		}
 		doc.Workflows = append(doc.Workflows, workflowStatus{
-			Name: name, WorkflowFile: def.file, LoopType: loopTypeOf(wf), Port: s.ports[name],
+			Name: name, WorkflowFile: def.file, LoopType: loopTypeOf(wf),
 			State: st, StartedAt: s.startedAt.UTC(), LogPath: childLogPath(s.root, name),
 			Budget: bs, Hold: hold,
 		})
@@ -748,50 +740,49 @@ func (s *supervisor) shutdown() {
 	}
 }
 
-// fetchLoopState reads a loop's state API, and reports false when the
-// engine did not answer with a usable payload.
-func fetchLoopState(port int) (statePayload, bool) {
-	var p statePayload
-	if port == 0 {
-		return p, false
+// issueDisplay is an issue as the dashboard shows it, owner/repo#7.
+func (s *supervisor) issueDisplay(issue string) string {
+	if _, err := strconv.Atoi(issue); err != nil {
+		return issue
 	}
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/v1/state", port))
-	if err != nil {
-		return p, false
+	return repoName(s.root) + "#" + issue
+}
+
+// loopSessions reports whether a loop has a session running, and whether
+// the supervisor can tell. Unlike loopQuiet it ignores pending retries: the
+// engine persists them, so they resume after a restart.
+func (s *supervisor) loopSessions(name string) (active, known bool) {
+	s.mu.Lock()
+	p := s.procs[name]
+	s.mu.Unlock()
+	if p == nil {
+		return false, false
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return p, false
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&p); err != nil {
-		return p, false
-	}
-	return p, true
+	sessions, known := p.live.snapshot()
+	return len(sessions) > 0, known
 }
 
 // loopQuiet reports whether a loop has no work in flight, and whether
-// the engine answered at all.
+// the supervisor can tell.
 //
 // A pending retry counts as work: the loop will start that run by itself,
-// so stopping now would only cancel it. An engine that does not answer
-// is unknown, not idle, and must never be read as a loop with nothing to
-// lose.
-func loopQuiet(port int) (idle, known bool) {
-	p, ok := fetchLoopState(port)
-	if !ok {
+// so stopping now would only cancel it. A loop whose sessions cannot be
+// accounted for is unknown, not idle, and must never be read as a loop
+// with nothing to lose.
+func (s *supervisor) loopQuiet(name string) (idle, known bool) {
+	active, known := s.loopSessions(name)
+	if !known {
 		return false, false
 	}
-	return len(p.Running) == 0 && len(p.Retrying) == 0 && p.Counts.Retrying == 0, true
-}
-
-// loopSessions reports whether a loop has a session running. Unlike
-// loopQuiet it ignores pending retries: the engine persists them, so
-// they resume after a restart.
-func loopSessions(port int) (active, known bool) {
-	p, ok := fetchLoopState(port)
-	if !ok {
+	if active {
+		return false, true
+	}
+	s.mu.Lock()
+	def := s.defs[name]
+	s.mu.Unlock()
+	retrying, err := rollup.CountRetrying(dbPathFor(s.root, def.file))
+	if err != nil {
 		return false, false
 	}
-	return len(p.Running) > 0, true
+	return retrying == 0, true
 }

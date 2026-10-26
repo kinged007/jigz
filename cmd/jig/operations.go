@@ -9,8 +9,6 @@ import (
 	"github.com/kinged007/jigz/internal/rollup"
 )
 
-const stateNotAnswering = "not answering"
-
 // opsLoop is one loop row under its project.
 type opsLoop struct {
 	L       *rollup.Loop
@@ -112,8 +110,7 @@ func pluralS(n int) string {
 }
 
 // loopRow decides what one loop shows as its state. A sleeping project's
-// loops are not contacted, so they are sleeping rather than not
-// answering.
+// loops are sleeping, not stopped.
 func loopRow(l *rollup.Loop, p *opsProject) opsLoop {
 	row := opsLoop{L: l, State: "stopped", Class: "stopped"}
 	w, hasDoc := loopsrc.WorkflowInfo{}, false
@@ -125,12 +122,8 @@ func loopRow(l *rollup.Loop, p *opsProject) opsLoop {
 		row.State, row.Class = "sleeping", "sleeping"
 	case l.Live:
 		row.State, row.Class = "running", "running"
-	case hasDoc && p.Status.Liveness != loopsrc.Stale && w.State != "" && (w.State != "running" || l.Port == 0):
-		// A running loop with no server has no state API to answer on, so
-		// the status document is the only word on it.
+	case hasDoc && p.Status.Liveness != loopsrc.Stale && w.State != "":
 		row.State, row.Class = workflowChip(w)
-	case p.IsRunning() && l.Port > 0:
-		row.State, row.Class = stateNotAnswering, "warn"
 	}
 	if p.Status != nil && p.Status.Gate != nil {
 		row.Runtime = p.Status.Gate.Runtime

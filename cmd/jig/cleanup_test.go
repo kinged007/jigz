@@ -144,7 +144,7 @@ func TestSupervisorRunsCleanupOnInterval(t *testing.T) {
 	runs := filepath.Join(cfg.Dir, "runs")
 	cfg.Cleanup.Command = "echo x >> " + runs
 	cfg.Cleanup.Interval = 150 * time.Millisecond
-	sup := newSupervisor(cfg.Dir, "sortie", nil, nil)
+	sup := newSupervisor(cfg.Dir, "sortie", nil)
 	start := time.Now()
 	sup.startCleanup(cfg)
 	time.Sleep(100 * time.Millisecond)
@@ -168,7 +168,7 @@ func TestShutdownKillsRunningCleanup(t *testing.T) {
 	pidFile := filepath.Join(cfg.Dir, "child.pid")
 	cfg.Cleanup.Command = "sleep 300 & echo $! > " + pidFile + "; wait"
 	cfg.Cleanup.Interval = 50 * time.Millisecond
-	sup := newSupervisor(cfg.Dir, "sortie", nil, nil)
+	sup := newSupervisor(cfg.Dir, "sortie", nil)
 	sup.startCleanup(cfg)
 	for end := time.Now().Add(5 * time.Second); time.Now().Before(end); time.Sleep(20 * time.Millisecond) {
 		if data, _ := os.ReadFile(pidFile); strings.TrimSpace(string(data)) != "" {
@@ -267,7 +267,7 @@ func TestCleanupCommandFailureAndNoCommand(t *testing.T) {
 func TestSupervisorRunWritesRecord(t *testing.T) {
 	cfg := cleanupCfg(t, "echo 'removed: /x'")
 	cfg.Cleanup.Interval = 50 * time.Millisecond
-	sup := newSupervisor(cfg.Dir, "sortie", nil, nil)
+	sup := newSupervisor(cfg.Dir, "sortie", nil)
 	sup.startCleanup(cfg)
 	defer sup.stopCleanup()
 	for end := time.Now().Add(5 * time.Second); time.Now().Before(end); time.Sleep(20 * time.Millisecond) {

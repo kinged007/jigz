@@ -250,7 +250,7 @@ func TestBudgetStatePersistsAndHoldsTheChildDown(t *testing.T) {
 		t.Fatalf("saved state %s (%v)", data, err)
 	}
 
-	next := newSupervisor(r.root, r.sup.bin, []loopDef{{name: "plan", file: "WORKFLOW.plan.md"}}, []int{0})
+	next := newSupervisor(r.root, r.sup.bin, []loopDef{{name: "plan", file: "WORKFLOW.plan.md"}})
 	next.clock = r.sup.clock
 	next.initBudget(map[string]config.Budget{"plan": r.sup.budgets["plan"]})
 	if err := next.startAll([]string{"plan"}); err != nil {
@@ -271,7 +271,7 @@ func TestBudgetStateRolloverAtBootKeepsManualPause(t *testing.T) {
 	r.sup.saveBudgetStates()
 	r.settle(t)
 	r.now = r.now.Add(30 * 24 * time.Hour)
-	next := newSupervisor(r.root, r.sup.bin, []loopDef{{name: "plan", file: "WORKFLOW.plan.md"}}, []int{0})
+	next := newSupervisor(r.root, r.sup.bin, []loopDef{{name: "plan", file: "WORKFLOW.plan.md"}})
 	next.clock = r.sup.clock
 	next.initBudget(map[string]config.Budget{"plan": r.sup.budgets["plan"]})
 	if !next.isPaused("plan") {

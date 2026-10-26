@@ -83,7 +83,7 @@ Files and formats:
 | Wake request file | `<hash>.wake` next to the status file. |
 | Budget state and requests | `<hash>.budget.json` (per workflow: `period_start`, `paused`, `paused_by`, `override`, `warned`) and one `<hash>.budget.request.<time>-<pid>` file per request from `pause`, `resume` and `budget override`, next to the status file. |
 | Cleanup record and lock | `<hash>.cleanup.json` and `<hash>.cleanup.lock` next to the status file. |
-| Registry and locks | `registry.json` in `<user cache dir>/jigz/`, with `.lock` (port claim) and `.update.lock` (registry read-modify-write) beside it. |
+| Registry and locks | `registry.json` in `<user cache dir>/jigz/`, with `.update.lock` (registry read-modify-write) beside it. |
 | Child logs | `<repo>/.jigz/logs/<workflow>.log`, rotated at 10 MiB, 3 files kept. |
 | Schema | `schema_version` is 1. Changes are additive: the top-level `cleanup` and `sleep` sections and the workflow field `log_path` were added without changing existing fields. |
 
@@ -112,7 +112,6 @@ Implementation facts:
   state `exited`. A clean exit removes it.
 - A sleep stop is a requested stop, so no exit counts as a crash.
 - A child whose state query fails counts as busy for sleep.
-- `--no-server` runs never sleep, because they have no ports to query.
 - `stop --when-idle` and `restart --when-idle` also wait on retrying work.
 
 ### Known gaps and unverified items

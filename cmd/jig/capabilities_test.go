@@ -91,7 +91,6 @@ func gatedSup(t *testing.T, g engine.Gate) (*supervisor, string) {
 	mustWrite(t, filepath.Join(root, ".jigz", "workflows", "WORKFLOW.issues.md"), flow("github", "claude-code"))
 	mustWrite(t, filepath.Join(root, ".jigz", "workflows", "WORKFLOW.prs.md"), flow("github-pr", "claude-code"))
 	sup := newTestSup(t, root, "issues", "prs")
-	sup.ports["issues"], sup.ports["prs"] = 0, 0
 	sup.bin = writeScript(t, root, "sortie", `echo "$SORTIE_AGENT_KIND $SORTIE_AGENT_COMMAND" >> "`+root+`/agent.log"`+"\nwhile true; do sleep 1; done\n")
 	sup.setGate(g)
 	t.Cleanup(sup.shutdown)

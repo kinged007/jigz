@@ -215,8 +215,7 @@ a typo cannot leave that loop's work unwatched.
 ## Dashboard
 
 Every run serves a dashboard (default `http://127.0.0.1:7677`, bound to
-loopback) and its own debug port per loop, starting at 7678. The dashboard
-is read-only: it shows state and history, and nothing on it starts, stops,
+loopback). The dashboard is read-only: it shows state and history, and nothing on it starts, stops,
 restarts, edits or changes anything. Loops are controlled with the `jig`
 commands (`jig stop`, `jig restart`, `jig reload`, `jig wake`,
 `jig cleanup`, `jig pause`, `jig resume`, `jig budget override`), and
@@ -237,16 +236,18 @@ each loop's child log.
 
 ### Run data
 
-While a loop's engine answers on its port, the dashboard reads that loop
-through the engine's HTTP API: finished runs from `/api/v1/runs`, the
-parked, retrying and budget-held issues from `/api/v1/state`, and the
-all-time run counts from `/api/v1/stats`. Each pass copies the runs the
-history database does not have yet, matched by the engine's run id. When two
-workflows share one engine database, only the runs of each workflow's own
-file are copied to it.
+The dashboard reads each loop's SQLite database read-only: finished runs,
+the all-time run counts, and the parked, retrying and budget-held issues.
+Each pass copies the runs the history database does not have yet, matched
+by the engine's run id. When two workflows share one engine database, only
+the runs of each workflow's own file are copied to it. The history of a
+stopped repository stays visible.
 
-When the engine does not answer, the dashboard reads the loop's SQLite
-database read-only, so the history of a stopped repository stays visible.
+A running session is listed from the supervisor's reading of the loop's log,
+because the database records a run only when it ends. Its tokens and model
+appear after its first completed turn, when the database has them. The
+dashboard shows no cost for a running session.
+
 The database reader accepts the engine schema versions 18 to 43 (the
 engine releases 1.28.1 and 1.29.0 write 38 and 43) when the tables and
 columns it reads exist. A database written by a newer engine than the
@@ -258,7 +259,7 @@ engine reports no workspace path, prompt template, API request count,
 handoff counter reset or review metadata, so the dashboard does not show
 them. If the engine database was replaced by a new one, whose newest run id
 is lower than the last copied one, the stored runs of that workflow are
-removed and copied again from the engine.
+removed and copied again from the database.
 
 Running loops in several repos at once? Pass `--unite`:
 
@@ -291,9 +292,6 @@ The dashboard refuses a request whose `Host` header is not one it serves
 and a non-GET request from another origin. Naming one interface
 with `--host` limits the accepted `Host` values to that address and the
 loopback names; a wildcard bind accepts any `Host`.
-
-Each loop runs its own engine server. These bind `127.0.0.1` and are used
-internally by Jigz; the dashboard does not link to them.
 
 ## Install
 
@@ -465,7 +463,7 @@ in time, it prints the last log lines and exits non-zero. Stop the run with
 differs from the shipped one. It never changes an existing workflow file.
 
 `jig status [--json] [repo-root]` reports the run serving the
-repo-root: version, pid, state, and per workflow its state, port, pid,
+repo-root: version, pid, state, and per workflow its state, pid,
 restart count and last exit code. `--json` prints the status document
 with an added `liveness` field: `running` when the pid is alive, `stale`
 when the document says running but the pid is dead, `exited` when the
@@ -501,6 +499,11 @@ document. A run that ends on a loop failure leaves it with state
 being asked to ends the run. `last_exit_code` is `-1` when the child was
 killed by a signal. `log_path` is the absolute path of the workflow's log
 file.
+
+A workflow entry has `sessions`, the agent sessions running now, each with
+`issue_id`, `identifier`, `attempt`, `started_at` and `turns`. `sessions_known`
+is false while the supervisor cannot account for every session of the child,
+for example before the child has logged its first poll.
 
 The status document has a top-level `cleanup` object once a cleanup has
 run: `last_run_at`, `duration_ms`, `exit_code`, `dry_run` and `paths`.
@@ -562,9 +565,8 @@ and deletes at its next 2-second tick, whatever the sleep settings are.
 
 Flags: `--unite` joins (or starts) the shared dashboard,
 `--dashboard-port=N` forces the dashboard onto port N,
-`--no-dashboard` / `--no-server` disable the dashboard page and the
-per-loop debug ports respectively. A positional arg selects the repo
-root (default: current directory).
+`--no-dashboard` disables the dashboard page. A positional arg selects the
+repo root (default: current directory).
 
 `JIG_ONLY=plan,build` starts only those loops; unset runs them
 all. It applies to `jig` and `jig start`. This is how Jigz picks a per-repo workflow set.
@@ -691,16 +693,18 @@ Both values are Go durations and must be positive when `enabled` is true;
 `jig` refuses to start otherwise. With `enabled: false` the loops
 run all the time.
 
-Every 30 seconds the supervisor asks each child's `GET /api/v1/state` on
-`127.0.0.1` for its running and retrying work. A child with running or
-retrying work is busy. A child that cannot be queried (connection error,
-timeout, bad response) is also busy, so the supervisor never sleeps on an
-error. When no child has been busy for `idle_timeout`, the supervisor stops
-all children and keeps running. The idle time starts again at every busy
+Every 30 seconds the supervisor checks each child for running sessions and
+pending retries. It reads the running sessions from the child's log and the
+retries from the workflow database. A child with a running session or a
+pending retry is busy. A child whose sessions the supervisor cannot account
+for, such as one that has not yet logged its first poll, is also busy, so
+the supervisor never sleeps on a guess. A session whose end the log does not
+show counts as running until the child's next poll finds none. When no
+child has been busy for `idle_timeout`, the supervisor stops all children
+and keeps running. The idle time starts again at every busy
 observation and whenever the children are started, so `idle_timeout`
 should be larger than the polling interval of the workflows: a freshly
-started child needs that long to find work. A run started with
-`--no-server` has no state endpoint and never sleeps.
+started child needs that long to find work.
 
 The children start again `wake_interval` after sleep began, or when
 `jig wake` is run. A wake starts them the same way as startup,
