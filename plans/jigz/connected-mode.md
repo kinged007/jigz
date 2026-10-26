@@ -262,14 +262,19 @@ home path.
 
 ### 2.7 No local dashboard
 
-`jig daemon` starts no dashboard and no question scanner.
+`jig daemon` starts no dashboard. It runs the question scanner for the
+projects of its loops (`plans/jigz/questions.md` 2.5): candidates are open
+items with the runner label and `needs-human`, and a ready item is
+resumed with label calls only, using the tracker token. After a resume
+the daemon wakes the matching workflows.
 
 - The Questions page is not available for hub projects; the hub lists
-  questions and writes answers (protocol 4). Prompts are the same in both
-  modes. Until the hub writes answers, a parked item needs a person to
-  write the `agent-answer` comment and change the labels on GitHub.
+  questions. A person answers with an `agent-answer` comment on GitHub,
+  or through the hub, which posts it with the person's own token
+  (protocol 4). Prompts are the same in both modes.
 - The `github:` block (`enrich`, `api_url`, `questions_*`) is dashboard
-  only; the hub source does not write it.
+  only; the hub source does not write it. The daemon's scanner uses a
+  2-minute interval and the API base of the fallback search (2.4).
 - A standalone or united run on the same machine keeps its dashboard and
   does not show the daemon's loops (separate registry; decision 15).
 
@@ -318,6 +323,9 @@ error)`, `Statuses()`, `Runs()`, `Enrollments()`, `Connected()`,
 - No agent credentials, `machine.yaml` env values or tokens go to the
   hub; pool entries are reported by name and runtime.
 - Phase 6 commands are rejected, so a hub cannot start a session.
+- The daemon's own GitHub writes are the question scanner's label calls
+  (2.7), made with the tracker token on items that carry the runner
+  label.
 - Accepted risks:
   - The fallback search sends the tracker token to the API base of the
     served issues workflow (`tracker.endpoint`), so a hub that serves a
@@ -451,8 +459,7 @@ limits it to loops with work); an item with the runner label that
 matches no enabled workflow is never claimed (logged once); if the
 engine re-reads its workflow file during a run (WP0), a run claimed in
 the 2 s between idle check and swap sees new files; hub-served hooks run
-as the member (2.9); parked items need manual answers until the hub
-writes them; enroll reports memory 0 on macOS (`internal/host`).
+as the member (2.9); enroll reports memory 0 on macOS (`internal/host`).
 
 Decisions. 1 to 10 and 18 resolve gaps or conflicts between the roadmap,
 the protocol and the code.
