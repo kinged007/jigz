@@ -72,7 +72,7 @@ func parseArgs(argv []string) (cmdline, error) {
 			c.remote = name
 			c.remoteArgs = argv[i+1:]
 			i = len(argv)
-		case "join", "leave":
+		case "start", "join", "leave":
 			c.remote = name
 			c.remoteArgs = argv[i+1:]
 			i = len(argv)
@@ -126,36 +126,83 @@ func parseArgs(argv []string) (cmdline, error) {
 var usageWriter = func(s string) { fmt.Println(s) }
 
 func usage() {
-	usageWriter(`Usage: jig [--no-server] [--no-dashboard] [--dashboard-port=N] [--host=ADDR] [--unite] [repo-root]
-         jig setup [repo-root] [--repo=owner/name] [--json]
-         jig stop [--when-idle] [repo-root]
-         jig restart [--when-idle] [repo-root]
-         jig status [--json] [repo-root]
-         jig cleanup [--dry-run] [--json] [repo-root]
-         jig wake [--json] [repo-root]
-         jig pause <workflow> [--json] [repo-root]
-         jig resume <workflow> [--json] [repo-root]
-         jig budget override <workflow> [--json] [repo-root]
-         jig reload [--json] [repo-root]
-         jig validate [--json] [repo-root]
-         jig join <hub-url> <token> [--name <name>] [--no-service] [--yes]
-         jig leave
-  Run every WORKFLOW.*.md loop in .jigz/workflows/ against the repo at repo-root (default: cwd).
-  JIG_ONLY=plan,build  start only these loops (default: all of them)
-  --host=ADDR is the address that binds the dashboard, default 127.0.0.1; 0.0.0.0 listens on all interfaces. The dashboard has no authentication.
-  Settings live in <root>/.jigz/config.yaml; repo id defaults to the git remote.
-  stop/restart act on the run already serving this repo-root, found through the shared registry.
-  stop and restart are immediate; --when-idle waits for each loop to finish what it is working on, one loop at a time.
-  status prints the state of the run serving this repo-root; --json prints its status document with a liveness field.
-  cleanup runs the configured cleanup command once, records the result for status, and exits non-zero when it fails.
-  wake starts the engine loops of a run that is sleeping (settings: sleep: in config.yaml); it does nothing when the run is awake.
-  pause stops one workflow's engine loop and keeps it stopped, also after a budget pause; resume starts it again.
-  budget override lifts a budget pause and turns the cap off for the rest of the period (settings: workflows: in config.yaml).
-  resume of a loop that is at or over its cap also turns the cap off for the rest of the period, because the loop would otherwise be paused again at the next poll.
-  reload re-reads .jigz/config.yaml without restarting children; supervisor-level settings (sleep, cleanup, budgets) take effect immediately, workflow filter changes need restart --when-idle.
-  validate checks .jigz/config.yaml (sleep, cleanup, budgets) and runs the engine's validation on each workflow.
-  join enrolls this machine with a hub and installs the jigd service; a token of - is read from stdin, the tracker token comes from JIG_TOKEN, GITHUB_TOKEN, GH_TOKEN or gh auth token. leave removes the service and hub.json and keeps the loop roots.
-  --version prints the tool version and the engine it drives; --dump-version prints only the engine version.`)
+	usageWriter(`jig runs the workflow loops of a repo and manages the run.
+
+Usage
+  jig [options] [repo-root]       run in the foreground (Ctrl-C stops)
+  jig <command> [args]
+
+Run
+  start [options] [repo-root]     run in the background and print its pid,
+                                  dashboard address and log file; does
+                                  nothing when a run already serves the root
+  [repo-root]                     defaults to the current directory; loops
+                                  are the WORKFLOW.*.md files in
+                                  .jigz/workflows/, and JIG_ONLY=plan,build
+                                  starts only those
+
+Control (act on the run serving repo-root, found through the registry)
+  stop [--when-idle]              stop now, or let each loop finish its
+                                  current item first, one loop at a time
+  restart [--when-idle]           restart, immediately or when idle
+  status [--json]                 show the state of the run; --json adds a
+                                  liveness field
+  wake [--json]                   start the loops of a sleeping run
+  pause <workflow> [--json]       stop one loop and keep it stopped, also
+                                  after a budget pause
+  resume <workflow> [--json]      start it again; at or over its cap this
+                                  also turns the cap off for the period
+  budget override <workflow>      lift a budget pause and turn the cap off
+                                  for the rest of the period
+  reload [--json]                 re-read .jigz/config.yaml without
+                                  restarting loops; sleep, cleanup and
+                                  budgets apply now, workflow filter
+                                  changes need restart --when-idle
+  cleanup [--dry-run] [--json]    run the configured cleanup command once
+                                  and exit non-zero when it fails
+  validate [--json]               check config.yaml and run the engine's
+                                  validation on each workflow
+
+Setup
+  setup [--repo=owner/name] [--json]
+                                  write config, labels and workflow files
+                                  in repo-root; the repo id defaults to the
+                                  git remote
+  join <hub-url> <token> [--name <name>] [--no-service] [--yes]
+                                  enroll this machine with a hub and
+                                  install the jigd service; token - reads
+                                  stdin; the tracker token comes from
+                                  JIG_TOKEN, GITHUB_TOKEN, GH_TOKEN or
+                                  gh auth token
+  leave                           remove the service and hub.json; loop
+                                  roots are kept
+  daemon                          run the hub daemon in the foreground
+                                  (the jigd service runs it in the
+                                  background; a binary named jigd does the
+                                  same)
+
+Options for the run and for start
+  --host=ADDR                     dashboard bind address, default 127.0.0.1;
+                                  0.0.0.0 listens on all interfaces. The
+                                  dashboard has no authentication.
+  --dashboard-port=N              dashboard port
+  --no-dashboard                  do not serve the dashboard
+  --no-server                     disable the per-loop debug ports
+  --unite                         join or start the shared dashboard
+
+Other
+  --version, -V                   print the tool and engine versions
+  --dump-version                  print only the engine version
+  --help, -h                      print this help
+
+Settings are in <repo-root>/.jigz/config.yaml.`)
+}
+
+// isJigdName reports whether the executable was invoked as jigd, the
+// name the installed service runs.
+func isJigdName(arg0 string) bool {
+	base := filepath.Base(arg0)
+	return base == "jigd" || base == "jigd.exe"
 }
 
 func main() { os.Exit(run()) }
@@ -176,6 +223,9 @@ func run() (code int) {
 		fmt.Fprintln(os.Stderr, "jig:", fe.err)
 		code = 1
 	}()
+	if isJigdName(os.Args[0]) {
+		return runDaemon(os.Args[1:])
+	}
 	if len(os.Args) > 1 && os.Args[1] == "daemon" {
 		return runDaemon(os.Args[2:])
 	}
@@ -185,7 +235,7 @@ func run() (code int) {
 		return 0
 	}
 	if err != nil {
-		fatal(err)
+		fatal(fmt.Errorf("%w (jig --help lists the commands)", err))
 	}
 	if c.dumpVersion || c.showVersion {
 		spec, err := engine.Configured()
@@ -202,6 +252,9 @@ func run() (code int) {
 	if c.setup {
 		runSetup(c.dir, c.repo, c.setupJSON)
 		return 0
+	}
+	if c.remote == "start" {
+		return runStart(c.remoteArgs)
 	}
 	if c.remote == "join" {
 		runJoin(c.remoteArgs)
