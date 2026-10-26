@@ -34,3 +34,13 @@ The repo uses the `pi` agent. Any new workflows or prompts belong in `.jigz/work
 - This repo is self-contained. Do not commit secrets (API keys, tokens, .env); use .env.example as the template if needed.
 - No secrets in commits. Do not copy `.env` files or tokens into docs.
 - The engine binary is fetched at install time and not vendored here.
+
+## Naming
+
+The project and brand is `Jigz` (repository `kinged007/jigz`, Go module `github.com/kinged007/jigz`). The command is `jig`.
+
+- Names that identify data on disk or in the repository use `jigz`: the repository directory `.jigz/`, the per-user directories `jigz` under the config, state, data and cache directories (for example `~/.config/jigz/hub.json`), the workflow databases `jigz-<name>.db`, and `.gitignore` entries.
+- Executables, processes, services and environment variables use `jig`: the command `jig` and its subcommands, the background service `jigd` (runs `jig daemon`; systemd unit `jigd.service`, launchd label `io.github.kinged007.jigd`), and the environment variables `JIG_*`.
+- New code, docs, environment variables and file names follow these two rules.
+- Do not introduce the engine's name in user-facing strings. User-facing text calls it "the engine". The engine's own `SORTIE_*` variables are set only where the code passes them to the engine.
+- Environment variables are documented in `README.md` next to the feature they configure.
