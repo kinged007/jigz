@@ -534,14 +534,26 @@ func TestAcceptance(t *testing.T) {
 			}
 		}
 		var qs apiQs
-		waitFor("the scanner to ignore the answer from mallory", 150*time.Second, func() bool {
+		hasParkedAgain := func() bool {
+			for _, it := range qs.Items {
+				if it.Project == slug && it.Number == c {
+					for _, p := range it.Problems {
+						if p.Kind == "parked_again" {
+							return true
+						}
+					}
+				}
+			}
+			return false
+		}
+		waitFor("the scanner to ignore the answer from mallory and flag #"+fmt.Sprint(c), 150*time.Second, func() bool {
 			qs = apiQs{}
 			if getJSON(dash+"/api/v1/questions", &qs) != nil {
 				return false
 			}
 			for _, q := range qs.Questions {
 				if q.Project == slug && q.Number == a && len(q.IgnoredAnswers) == 1 && q.IgnoredAnswers[0].Author == "mallory" {
-					return true
+					return hasParkedAgain()
 				}
 			}
 			return false
@@ -571,21 +583,12 @@ func TestAcceptance(t *testing.T) {
 		if onA != 1 || onC != 1 {
 			t.Errorf("%d questions listed for #%d and %d for #%d, want 1 each: %+v", onA, a, onC, c, qs.Questions)
 		}
-		parkedAgain := false
 		for _, it := range qs.Items {
-			if it.Project != slug {
-				continue
-			}
-			if it.Number == b {
+			if it.Project == slug && it.Number == b {
 				t.Errorf("problem item listed for #%d: %+v", b, qs.Items)
 			}
-			if it.Number == c {
-				for _, p := range it.Problems {
-					parkedAgain = parkedAgain || p.Kind == "parked_again"
-				}
-			}
 		}
-		if !parkedAgain {
+		if !hasParkedAgain() {
 			t.Errorf("no parked_again problem for #%d: %+v", c, qs.Items)
 		}
 		for _, n := range []int{b, c} {
