@@ -475,3 +475,175 @@ func TestSetAssignees(t *testing.T) {
 		t.Errorf("search: %d %s", code, body)
 	}
 }
+
+type eventRow struct {
+	Event string
+	Actor struct{ Login string }
+	Label struct{ Name string }
+	At    string `json:"created_at"`
+}
+
+func eventRows(t *testing.T, body string) []eventRow {
+	t.Helper()
+	var rows []eventRow
+	if err := json.Unmarshal([]byte(body), &rows); err != nil {
+		t.Fatalf("events %q: %v", body, err)
+	}
+	return rows
+}
+
+func steppingClock() func() time.Time {
+	t := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	return func() time.Time {
+		t = t.Add(2 * time.Second)
+		return t
+	}
+}
+
+func TestEventsList(t *testing.T) {
+	s, ts := newServer(t)
+	s.SetClock(steppingClock())
+	s.Add(Item{Repo: "o/r", Title: "t", Labels: []string{"agent:plan"}})
+	call(t, ts, "POST", "/repos/o/r/issues/1/labels", `{"labels":["in-progress"]}`)
+	s.AddLabelAsPerson("o/r", 1, "needs-human", "alice")
+	call(t, ts, "DELETE", "/repos/o/r/issues/1/labels/in-progress", "")
+	s.RemoveLabelAsPerson("o/r", 1, "needs-human", "bob")
+	code, body, _ := call(t, ts, "GET", "/repos/o/r/issues/1/events", "")
+	if code != 200 {
+		t.Fatalf("events: %d %s", code, body)
+	}
+	var got []string
+	var last time.Time
+	for _, e := range eventRows(t, body) {
+		got = append(got, e.Event+" "+e.Label.Name+" "+e.Actor.Login)
+		at, err := time.Parse(time.RFC3339, e.At)
+		if err != nil || !at.After(last) {
+			t.Errorf("created_at %q not after %v (%v)", e.At, last, err)
+		}
+		last = at
+	}
+	want := []string{"labeled in-progress me", "labeled needs-human alice", "unlabeled in-progress me", "unlabeled needs-human bob"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("events %v, want %v", got, want)
+	}
+	if _, body, _ := call(t, ts, "GET", "/repos/o/r/issues/1/labels", ""); len(names(t, body)) != 1 {
+		t.Errorf("labels %s", body)
+	}
+}
+
+func TestPersonLabelIsLaterThanComment(t *testing.T) {
+	s, ts := newServer(t)
+	s.Add(Item{Repo: "o/r", Title: "t"})
+	id := s.AddComment("o/r", 1, Comment{Author: "alice", Body: "b"})
+	s.AddLabelAsPerson("o/r", 1, "needs-human", "alice")
+	s.AddLabelAsPerson("o/r", 1, "needs-human", "alice")
+	ev := s.LabelEvents("o/r", 1)
+	if len(ev) != 1 || ev[0].Actor != "alice" || !ev[0].Added {
+		t.Fatalf("events %+v", ev)
+	}
+	it, _ := s.Get("o/r", 1)
+	if id == 0 || !ev[0].At.After(it.Comments[0].Created) {
+		t.Errorf("label at %v, comment at %v", ev[0].At, it.Comments[0].Created)
+	}
+	if _, body, _ := call(t, ts, "GET", "/repos/o/r/issues/1/labels", ""); !reflect.DeepEqual(names(t, body), []string{"needs-human"}) {
+		t.Errorf("labels %s", body)
+	}
+	s.RemoveLabelAsPerson("o/r", 1, "absent", "alice")
+	if n := len(s.LabelEvents("o/r", 1)); n != 1 {
+		t.Errorf("events after no-op remove: %d", n)
+	}
+}
+
+func TestEventsHandoffTimestamps(t *testing.T) {
+	s, ts := newServer(t)
+	s.SetClock(steppingClock())
+	s.Add(Item{Repo: "o/r", Title: "t", Labels: []string{"agent:plan", "in-progress"}})
+	s.EngineHandoff("o/r", 1, "agent:plan", "in-progress")
+	_, body, _ := call(t, ts, "GET", "/repos/o/r/issues/1/events", "")
+	rows := eventRows(t, body)
+	if len(rows) != 3 {
+		t.Fatalf("events %s", body)
+	}
+	for i := 1; i < len(rows); i++ {
+		if rows[i].At <= rows[i-1].At {
+			t.Errorf("created_at not increasing: %s then %s", rows[i-1].At, rows[i].At)
+		}
+	}
+}
+
+func TestEventsPaging(t *testing.T) {
+	s, ts := newServer(t)
+	s.Add(Item{Repo: "o/r", Title: "t"})
+	for _, l := range []string{"a", "b", "c"} {
+		s.AddLabelAsPerson("o/r", 1, l, "alice")
+	}
+	_, body, h := call(t, ts, "GET", "/repos/o/r/issues/1/events?per_page=2", "")
+	if rows := eventRows(t, body); len(rows) != 2 || rows[0].Label.Name != "a" {
+		t.Errorf("page 1: %s", body)
+	}
+	link := h.Get("Link")
+	if !strings.Contains(link, `rel="next"`) || !strings.Contains(link, "page=2") {
+		t.Fatalf("Link %q", link)
+	}
+	_, body, h = call(t, ts, "GET", "/repos/o/r/issues/1/events?per_page=2&page=2", "")
+	if rows := eventRows(t, body); len(rows) != 1 || rows[0].Label.Name != "c" || h.Get("Link") != "" {
+		t.Errorf("page 2: %s link %q", body, h.Get("Link"))
+	}
+}
+
+func TestEventsETag(t *testing.T) {
+	s, ts := newServer(t)
+	s.Add(Item{Repo: "o/r", Title: "t"})
+	_, _, h := call(t, ts, "GET", "/repos/o/r/issues/1/events", "")
+	tag := h.Get("ETag")
+	if tag == "" {
+		t.Fatal("no ETag")
+	}
+	if code, _, _ := call(t, ts, "GET", "/repos/o/r/issues/1/events", "", "If-None-Match", tag); code != 304 {
+		t.Errorf("same: %d", code)
+	}
+	s.AddComment("o/r", 1, Comment{Author: "alice", Body: "b"})
+	s.SetAssignees("o/r", 1, "me")
+	if code, _, _ := call(t, ts, "GET", "/repos/o/r/issues/1/events", "", "If-None-Match", tag); code != 304 {
+		t.Errorf("comment and assignee change: %d", code)
+	}
+	s.AddLabelAsPerson("o/r", 1, "needs-human", "alice")
+	code, _, h := call(t, ts, "GET", "/repos/o/r/issues/1/events", "", "If-None-Match", tag)
+	if code != 200 || h.Get("ETag") == tag {
+		t.Errorf("after event: %d %q", code, h.Get("ETag"))
+	}
+	call(t, ts, "POST", "/repos/o/r/issues/1/labels", `{"labels":["x"]}`)
+	if code, _, _ := call(t, ts, "GET", "/repos/o/r/issues/1/events", "", "If-None-Match", h.Get("ETag")); code != 200 {
+		t.Errorf("after POST event: %d", code)
+	}
+}
+
+func TestEventsRejectsUnknownAndPut(t *testing.T) {
+	s, ts := newServer(t)
+	s.Add(Item{Repo: "o/r", Title: "t"})
+	if code, _, _ := call(t, ts, "GET", "/repos/o/r/issues/1/events?since=x", ""); code != 422 {
+		t.Errorf("param: %d", code)
+	}
+	if code, _, _ := call(t, ts, "PUT", "/repos/o/r/issues/1/labels", `{"labels":[]}`); code != 422 {
+		t.Errorf("PUT labels: %d", code)
+	}
+	if code, _, _ := call(t, ts, "GET", "/repos/o/r/issues/9/events", ""); code != 404 {
+		t.Errorf("missing: %d", code)
+	}
+	if len(s.Unexpected()) != 2 {
+		t.Errorf("unexpected %v", s.Unexpected())
+	}
+}
+
+func TestClockStrictlyIncreasing(t *testing.T) {
+	s, _ := newServer(t)
+	fixed := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	s.SetClock(func() time.Time { return fixed })
+	s.Add(Item{Repo: "o/r", Title: "t"})
+	a := s.AddComment("o/r", 1, Comment{Author: "a", Body: "1"})
+	b := s.AddComment("o/r", 1, Comment{Author: "a", Body: "2"})
+	it, _ := s.Get("o/r", 1)
+	if a == b || !it.Comments[1].Created.After(it.Comments[0].Created) {
+		t.Errorf("comment times %v %v", it.Comments[0].Created, it.Comments[1].Created)
+	}
+}
