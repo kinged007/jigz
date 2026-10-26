@@ -50,8 +50,10 @@ section 6.
 - Run data through sortie's HTTP API; SQLite only for history (`internal/collector/api.go`, `internal/rollup`) — exists
 - Outcome classes of the hub protocol, mapped in one adapter (`internal/store/outcome.go`) — exists
 - Disabled-feature notices from capability detection (`capabilities.go`, `alerts.go`) — exists
-- Questions page with answering; the last answer removes `needs-human`
-  and `agent:done` and adds the `resume` trigger — exists ([plan](questions.md))
+- Read-only Questions page: questions across repositories, problems,
+  links to GitHub, copyable `agent-answer` template [3] ([plan](questions.md))
+- Question scanner resumes a parked item when every blocking question has
+  an authorized answer (dashboard and `jig daemon`) [3] ([plan](questions.md))
 - Working hours and account pool status (`gate.go`, `agents.go`) — exists
 - Preview links on runs [5]
 

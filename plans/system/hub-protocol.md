@@ -252,8 +252,9 @@ Example start marker:
   touch `needs-human`. A parked item therefore carries `needs-human` and
   `agent:done` and no trigger; `resume` records the trigger.
 
-Answers are comments in this form, written by the hub, by `jig`,
-or by a human:
+Answers are comments in this form. A person posts one on GitHub, or the
+hub posts one with the logged-in user's own GitHub token, so the comment
+author is always the person who answered. `jig` posts no answers.
 
 ```markdown
 <!-- agent-answer id="q-<short-id>" by="<user or agent role>" -->
@@ -261,13 +262,22 @@ or by a human:
 <!-- /agent-answer -->
 ```
 
-- When an item has at least one blocking question and every blocking
-  question has an answer, the writer of the last answer removes both
-  `needs-human` and `agent:done`, one `DELETE` call per label, so no
-  other label is overwritten, then adds the label named by `resume` unless
-  the item already carries a trigger. The next poll dispatches the item as
-  a new run. Neither label is removed from an item that has no blocking
-  question.
+- `by` is optional and informational. Only answers whose comment author passes the
+  author filter count: the token account, the repository owner, authors
+  with association `OWNER`, `MEMBER` or `COLLABORATOR`, and the item's
+  assignees (`plans/jigz/questions.md` 2.2).
+- An item is ready to resume when it carries `needs-human`, has at least
+  one blocking question, every blocking question has a counted answer, no
+  block is malformed, the `resume` values agree, and at least one counted
+  answer was created after the latest `labeled` event for `needs-human`.
+- A ready item is resumed with one call per label: add the `resume`
+  label unless the item already carries a trigger, then `DELETE`
+  `agent:done`, then `DELETE` `needs-human`; a 404 counts as success and
+  `PUT .../labels` is never used. The `jig` question scanner (in the
+  dashboard and in `jig daemon`) does this, and the hub may too. The
+  calls are idempotent, so several resumers do not conflict. Neither label
+  is removed from an item that is not ready. The next poll dispatches the
+  item as a new run.
 - Prompts instruct agents to read answers before acting and to treat an
   unanswered non-blocking question as answered with its suggestion.
 

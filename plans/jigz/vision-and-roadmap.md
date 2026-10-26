@@ -147,11 +147,15 @@ Without the fork, the issue workflow runs with `claude-code`, `codex`, or
 - Plan and review prompts write questions in the `agent-question` format
   (`hub-protocol.md` section 4); a blocking question escalates the item to
   `needs-human`, which the shipped workflows already exclude from dispatch.
-- Dashboard page listing open questions across repositories; answering
-  there writes an `agent-answer` comment. When every blocking question on
-  the item has an answer, the dashboard removes `needs-human` and
-  `agent:done` and adds the trigger label named in the question's
+- People answer on GitHub with an `agent-answer` comment, or through the
+  hub, which posts it with the person's own token. When every blocking
+  question on a parked item has an authorized answer, the question
+  scanner (in the dashboard and in `jig daemon`) removes `needs-human`
+  and `agent:done` and adds the trigger label named in the question's
   `resume` attribute.
+- Read-only dashboard page listing questions across repositories, with
+  links to GitHub and a copyable answer template; the dashboard writes
+  nothing to GitHub.
 
 ### 5.4 Previews
 
@@ -289,13 +293,15 @@ Done.
   trigger label in `resume`, because the engine removes the trigger at
   handoff.
 - Prompts read `agent-answer` comments before acting.
-- Dashboard Questions page across repositories: list, filter by audience
-  and blocking, answer (writes an `agent-answer` comment; removes
-  `needs-human` and `agent:done` and adds the `resume` trigger when every
-  blocking question on the item has an answer).
+- Read-only dashboard Questions page across repositories: list, filter by
+  audience and blocking, link to GitHub, copy an answer template.
+- The question scanner resumes a parked item (adds the `resume` trigger,
+  removes `agent:done` and `needs-human`) when every blocking question
+  has an authorized answer posted after the item was parked.
 - Plan: [questions.md](questions.md).
-- Acceptance: a blocking question stops dispatch; answering it in the
-  dashboard resumes it and the next run sees the answer.
+- Acceptance: a blocking question stops dispatch; an `agent-answer`
+  comment on GitHub from an authorized author resumes it and the next
+  run sees the answer.
 
 ### Phase 4: Connected mode (5.5)
 
