@@ -53,7 +53,9 @@ section 6.
 - Read-only Questions page: questions across repositories, problems,
   links to GitHub, copyable `agent-answer` template [3] ([plan](questions.md))
 - Question scanner resumes a parked item when every blocking question has
-  an authorized answer (dashboard and `jig daemon`) [3] ([plan](questions.md))
+  an authorized answer posted after the latest `needs-human` label event
+  (dashboard and `jig daemon`); `github.questions` switches it per project;
+  reads up to 100 parked items per project per pass [3] ([plan](questions.md))
 - Working hours and account pool status (`gate.go`, `agents.go`) — exists
 - Preview links on runs [5]
 
@@ -68,7 +70,8 @@ section 6.
 - PR workflow: review, review-fix, merge (needs `github-pr`, fork only) —
   exists
 - `agent-question` and `agent-answer` format in prompts; blocking
-  questions use `needs-human` — exists ([plan](questions.md))
+  questions use `needs-human`; prompts consider only comments from
+  authorized authors — exists ([plan](questions.md))
 - Preview stage or command [5]
 
 ## 6. Connected mode

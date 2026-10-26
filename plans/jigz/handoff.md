@@ -141,9 +141,10 @@ squash, with CI green (check, acceptance, four builds):
 - #18: the default agent runtime `claude-code` with `claude-haiku-5-5`,
   and removal of the `pi` to `claude-code` fallback.
 
-PR #12 and issue #14 are closed. Issue #20 is open: the scanner keeps
-only answers from authorized authors; the prompts still trust every
-comment. PR #10 is open and unrelated to this work.
+PR #12 and issue #14 are closed. Issue #20 is open: the scanner and the
+prompts consider only comments from authorized authors (token account,
+repository owner, associations `OWNER`, `MEMBER` and `COLLABORATOR`,
+assignees); a stricter and configurable filter is not done. PR #10 is open and unrelated to this work.
 
 `gh` defaults to `kinged007/jigz` in this clone (`gh repo set-default`). A
 second remote, `upstream`, points to `sortie-ai/sortie`. Never push to it
@@ -156,22 +157,27 @@ removes every other configured state label, including the trigger and
 outranks the trigger. A run that exits 0 is `succeeded`. Poll dispatch
 does not pass comments to the prompt.
 
-Phase 3 (Questions) is merged into `main` (PR #22, commit `d940a08`). The
-work packages (WP) are in `plans/jigz/questions.md` section 3:
+Phase 3 (Questions) is merged into `main` (PR #22, commit `d940a08`).
+The current design is in `plans/jigz/questions.md`:
 
-| WP | Change |
-| -- | ------ |
-| WP1 | `internal/questions` parser. An independent review found two blockers; both are fixed and tested. |
-| WP2 | `internal/github` Post, Delete and User; `internal/store` tables `question_items` and `questions`; `internal/fleetconfig` keys `questions_interval` and `questions_window`. |
-| WP3 | `internal/fakegithub`: comments with ETag, `/user`, assignees, label DELETE and POST, PUT rejected, and the `EngineHandoff` helper. |
-| WP4 | `internal/collector/questions.go`: the scanner, the answer path (post the `agent-answer` comment, add the `resume` trigger, remove `agent:done` and `needs-human`), remove-labels for malformed blocks, and `cmd/jig/questions.go` with the `/questions` handlers and `/api/v1/questions`. |
-| WP5 | The Questions page (`cmd/jig/templates/questions.html`, the nav entry in `layout.html`). |
-| WP6 | The five prompts with the question block and `resume`, the prs workflow comment, and prompt tests. |
-| WP7 | The acceptance scenario `f_blocking_question_stops_and_answer_resumes` in `cmd/jig/acceptance_test.go`; `make acceptance` passes. |
-| WP8 | README (labels and the Questions section), `features.md` Phase 3 items, and this file. |
-
-The worktrees `/home/coder/sortie-loop-wt/wp1`, `wp2`, `wp3` and `wp6`
-(branches `wp/questions-1` and so on) can be removed.
+- The dashboard Questions page is read-only: it lists questions, problems
+  and links to GitHub, and gives a copyable `agent-answer` template. It
+  writes nothing to GitHub.
+- A person answers on GitHub, with an `agent-answer` block that carries the
+  question id, or through the hub, which posts the same comment with the
+  person's token. Plain text comments cannot be matched to a question and
+  never resume an item; the person changes the labels by hand.
+- The scanner (`internal/collector/questions.go`) runs in the dashboard
+  and in `jig daemon`. It resumes an item when every blocking question has
+  an answer from an authorized author posted after the latest `needs-human`
+  label event (one-second precision). It adds the `resume` trigger and
+  removes `agent:done` and `needs-human`; it posts no comment.
+- `github.questions` (default `true`, per project) switches the scanner and
+  the page. `github.enrich` switches only run-history enrichment.
+- The scanner reads up to 100 parked items per project per pass.
+- The five prompts read only comments from authorized authors.
+- The acceptance scenario is `f_blocking_question_stops_and_answer_resumes`
+  in `cmd/jig/acceptance_test.go`.
 
 Phase 1 (working hours, account pool,
 `agent-exec`, runtime failover, dashboard pages) is in `internal/machine`,
@@ -256,13 +262,14 @@ Outside this repository:
 4. Phase 5 (previews) and Phase 6 (agent session host, `task.run`) are not
    started.
 5. Decisions waiting for the user:
-   - Issue #20 (author trust in the prompts).
+   - Issue #20 (a stricter, configurable author filter).
    - Whether to raise `timeout-minutes` of the CI `acceptance` job if it
      approaches 15 minutes. It ran 8m4s on the Phase 4 PR.
 
-Issue #20 (trust only comments from authorized authors) is open: the
-scanner filters authors (`internal/collector/questions.go`), the prompts
-do not.
+Issue #20 (trust only comments from authorized authors) is open for the
+stricter, configurable mode: the scanner filters authors
+(`internal/collector/questions.go`) and the prompts filter by
+`author_association` and the token account, owner and assignees.
 
 The upstream PRs for the `pi` adapter and the `github-pr` tracker are in
 progress and owned by the user.
