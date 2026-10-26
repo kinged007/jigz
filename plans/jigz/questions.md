@@ -61,10 +61,11 @@ line 12). A trigger label is an `agent:*` label other than `agent:done`.
 `internal/collector/questions.go` (`Scanner`) reads GitHub through the
 client in `internal/github/github.go`. It runs in two places:
 
-- In the dashboard process (standalone and united mode), beside the
-  enricher, when `github.enrich` is set, over every registered project.
-  Each project uses the token its loops use (`projectTarget` in
-  `cmd/jig/history.go`). `jig --no-dashboard` runs no scanner.
+- In the dashboard process (standalone and united mode), over every
+  registered project whose `github.questions` is true. Each project uses
+  the token its loops use (`projectTarget` in `cmd/jig/history.go`); a
+  project without a token is not scanned and reports "no GitHub token".
+  `jig --no-dashboard` runs no scanner.
 - In `jig daemon` (connected mode), over the projects of its loops (2.5).
 
 One pass per project:
@@ -84,6 +85,11 @@ One pass per project:
    the events check and the resume of 2.4.
 
 `GET /user` gives the token account's login for the author filter (2.2).
+Keys in the `github:` block of `.jigz/config.yaml` (`GitHub` type in
+`internal/fleetconfig/config.go`, read by `config.LoadGitHub` with the
+strict decoder): `questions` (boolean, default `true`) switches the
+scanner, its resume and the Questions page for the project;
+`github.enrich` switches only run-history enrichment.
 `github.questions_interval` is the time between passes (default `2m`,
 minimum `1m`); `github.questions_window` is how far back step 2 looks
 (default `168h`). Rate use: one search call per project per pass plus one
@@ -187,7 +193,7 @@ never adds `in-progress`.
   with the tracker token from `hub.json`.
 - Search qualifier: `label:runner:<name>` is added to step 1 of 2.1, so
   only items routed to this machine are candidates. Step 2 is skipped.
-- Settings: `enrich` on, `questions_interval` `2m`, and the API base of
+- Settings: `questions` on, `questions_interval` `2m`, and the API base of
   the fallback search (the issues workflow's `tracker.endpoint`, else
   `https://api.github.com`). The hub config has no `github:` block.
 - Store: the daemon's store.
@@ -204,9 +210,10 @@ requires (`plans/jigz/connected-mode.md` 2.4).
 `cmd/jig/templates/questions.html`, handler `cmd/jig/questions.go`. The
 page has no form that posts and no route that writes.
 
-- When `github.enrich` is off, the page shows only "Set github.enrich to
-  see questions and resume answered items".
-- The time of the last pass per project and its error, if any.
+- When no registered project has `github.questions` on, the page shows
+  only "Questions are off (github.questions: false)".
+- The time of the last pass per project and its error, if any; a project
+  without a token shows "no GitHub token".
 - One row per question: project, item link, title, audience, blocking,
   age, question text, suggested answer, link to the question comment on
   GitHub, the current answer with its author and link, and "ignored:
@@ -293,7 +300,7 @@ page); `complex` (claude opus); `review2` (claude sonnet, read-only);
 | WP | Lane | Files owned | Depends on |
 | -- | ---- | ----------- | ---------- |
 | 1 | tests | `internal/fakegithub/*` | none |
-| 2 | complex | `internal/collector/questions.go`, `internal/collector/questions_test.go`, `internal/store/questions.go`, `internal/store/questions_test.go` | 1 |
+| 2 | complex | `internal/collector/questions.go`, `internal/collector/questions_test.go`, `internal/store/questions.go`, `internal/store/questions_test.go`, `internal/config/config.go`, `internal/config/config_test.go`, `internal/fleetconfig/config.go`, `internal/fleetconfig/config_test.go` | 1 |
 | 3 | ui | `cmd/jig/questions.go`, `cmd/jig/questions_test.go`, `cmd/jig/questions_page_test.go`, `cmd/jig/templates/questions.html`, `cmd/jig/web.go`, `cmd/jig/api.go`, `cmd/jig/history.go` | 2 |
 | 4 | complex | `cmd/jig/daemon.go`, `cmd/jig/daemon_test.go` | 2 |
 | 5 | tests | `cmd/jig/acceptance_test.go` | 1; green after 2, 3 |
@@ -314,7 +321,9 @@ a person would. Unit tests for each; `PUT .../labels` stays rejected.
 `LabelsNotRemoved` problem. Remove `Answer`, `AnswerBody`,
 `RemoveLabels`, `RemoveTrigger`, `Triggers`, `ErrNotMalformed`,
 `ErrNeedTrigger`, `ErrAnswerText`, and the `first_labels` reads and
-writes. Tests against `fakegithub`:
+writes. The `questions` key (2.1) in the `GitHub` struct, default
+`true`, accepted by the strict decoder in `config.LoadGitHub`; the
+scanner gated on it, not on `enrich`. Tests against `fakegithub`:
 rule 2 in all cases (no blocks, one of two answered, all answered,
 malformed block, differing `resume`, only an unauthorized answer, no
 `needs-human`, labels already removed); the events check both ways; call
@@ -322,7 +331,10 @@ order `POST` trigger, `DELETE agent%3Adone`, `DELETE needs-human`, no
 `POST` when a trigger is present, 404 as success, no `PUT`, no comment,
 no `in-progress`; a failed `DELETE` leaves "resume failed" and the next
 pass completes it; two scanners on one item end with the same labels;
-no pass with `github.enrich` off; `OnResume` once per resume.
+no pass for a project with `questions: false`; a pass with `enrich`
+off and `questions` on (default); no pass and a "no GitHub token" status
+without a token; `OnResume` once per resume. Config tests: default
+`true`, `questions: false` parsed, an unknown key still rejected.
 
 **Review pass (review2) on WP2** before WP3 and WP4 start, aimed at
 rule 2, the events check, the call order and the author filter.
@@ -332,11 +344,14 @@ rule 2, the events check, the call order and the author filter.
 `/questions/refresh`, their handlers, the form tokens (`formToken`,
 `issue`, `useToken`) and the per-item locks. The page per 2.6 with the
 answer template and Copy button, problems, last-pass time; `OnResume`
-writes `a.audit` in `history.go`. Tests:
+writes `a.audit` in `history.go`; `Targets` in `history.go` passes each
+project's `questions` value, and the enrich-based block selection
+(`githubFrom`) stays for enrichment only. Tests:
 each removed route returns 404 and `POST /questions` 405; the page has
 no `<form method="post">` and no `name="token"`, and shows for an open
 question the template with its `qid` and suggested answer, the item link
-and the question comment link; each filter, the `github.enrich` message,
+and the question comment link; each filter, the "Questions are off"
+message, the "no GitHub token" status,
 problems with links, ignored answers, empty state; `GET
 /api/v1/questions` keeps its fields; a Go-side fetch of `/questions` on a
 running instance (obscura refuses loopback; Playwright is not installed
@@ -354,9 +369,10 @@ carries `label:runner:<name>`; the token is not logged. **Review pass
 rewritten scenario fails on `main`.
 
 **WP6. Docs.** README Questions section: answer on GitHub with the
-template; the scanner resumes the item; resume needs `github.enrich` and
-a running dashboard in standalone mode; the daemon scans its runner-label
-items; the dashboard writes nothing to GitHub. `features.md` entries
+template; the scanner resumes the item; the `github.questions` key
+(default `true`) and a token are required, `github.enrich` is not; in
+standalone mode the dashboard must run; the daemon scans its
+runner-label items; the dashboard writes nothing to GitHub. `features.md` entries
 marked existing after WP5 passes; handoff update; final review2 pass over
 the whole diff before the PR.
 
@@ -365,9 +381,9 @@ the whole diff before the PR.
 Scenario `f_blocking_question_stops_and_answer_resumes` in
 `TestAcceptance` (`cmd/jig/acceptance_test.go`). The mock agent writes no
 comments and edits no labels, so the test adds through the fake the
-comments and labels that agents and people write. The test's dashboard
-has `github.enrich` set, `questions_interval: 1m` and `github.api_url` at
-the fake.
+comments and labels that agents and people write. The test's config
+has `github.enrich` off, `github.questions` unset (default `true`),
+`questions_interval: 1m` and `github.api_url` at the fake.
 
 1. Seed issue A: label `agent:plan`, assigned to the token owner, one
    comment with a blocking `agent-question` (id `q-1`, audience
@@ -411,8 +427,9 @@ the WP4 unit tests.
 Risks:
 
 - A parked item is resumed only while a scanner runs: a dashboard with
-  `github.enrich` set, or `jig daemon`. With enrichment off, or with
-  `jig --no-dashboard`, a person changes the labels on GitHub.
+  `github.questions` on and a token, or `jig daemon`. With
+  `questions: false` or `jig --no-dashboard`, a person changes the labels
+  on GitHub.
 - Resume time is up to one `questions_interval` (2 minutes by default)
   after the answer. The acceptance scenario takes about two minutes
   longer.
@@ -425,16 +442,6 @@ Risks:
   comment instead. The README states it.
 - An agent sees an answer only if its prompt reads comments through
   `gh`. The mock agent runs no `gh`; `embed_test.go` checks the prompts.
-
-Open points for the lead:
-
-- `github.enrich` is off by default, so a standalone install resumes no
-  items until it is set. Either keep the gate (this plan) or run the
-  scanner's resume without `github.enrich`.
-- The events check (rule 2, last condition) keeps the scanner from
-  resuming a PR escalated for review after its questions were answered.
-  It costs one call per ready item; the hub needs the same check
-  (`hub-protocol.md` section 4). Confirm it, or accept that risk.
 
 Later: questions in PR review bodies and inline review comments, after
 the issue path works.

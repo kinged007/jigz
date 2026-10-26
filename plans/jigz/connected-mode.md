@@ -272,9 +272,10 @@ the daemon wakes the matching workflows.
   questions. A person answers with an `agent-answer` comment on GitHub,
   or through the hub, which posts it with the person's own token
   (protocol 4). Prompts are the same in both modes.
-- The `github:` block (`enrich`, `api_url`, `questions_*`) is dashboard
-  only; the hub source does not write it. The daemon's scanner uses a
-  2-minute interval and the API base of the fallback search (2.4).
+- The `github:` block (`enrich`, `questions`, `api_url`, `questions_*`)
+  is dashboard only; the hub source does not write it. The daemon's
+  scanner is always on and uses the tracker token, a 2-minute interval and
+  the API base of the fallback search (2.4).
 - A standalone or united run on the same machine keeps its dashboard and
   does not show the daemon's loops (separate registry; decision 15).
 
