@@ -12,8 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
+
 	"github.com/kinged007/jigz/internal/hubproto"
-	"github.com/kinged007/jigz/internal/wsclient"
 )
 
 const sha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -24,6 +25,9 @@ type harness struct {
 	ts  *httptest.Server
 	id  string
 	cr  string
+	// ctx bounds every socket call, so a missing message fails the test
+	// instead of hanging it.
+	ctx context.Context
 }
 
 func newHarness(t *testing.T) *harness {
@@ -31,7 +35,21 @@ func newHarness(t *testing.T) *harness {
 	hub := New("enroll-secret")
 	ts := httptest.NewServer(hub)
 	t.Cleanup(ts.Close)
-	return &harness{t: t, hub: hub, ts: ts}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+	return &harness{t: t, hub: hub, ts: ts, ctx: ctx}
+}
+
+// recv returns the next value from ch, or fails the test after 10 s.
+func recv[T any](t *testing.T, ch <-chan T, what string) T {
+	t.Helper()
+	select {
+	case v := <-ch:
+		return v
+	case <-time.After(10 * time.Second):
+		t.Fatalf("timed out waiting for %s", what)
+		panic("unreachable")
+	}
 }
 
 func (h *harness) do(method, path, body string, hdr map[string]string) (*http.Response, string) {
@@ -305,8 +323,8 @@ func TestSetDown(t *testing.T) {
 	if h.hub.Connected() {
 		t.Error("socket still connected while down")
 	}
-	if _, err := conn.Read(context.Background()); err == nil {
-		t.Error("client read succeeded after SetDown")
+	if _, _, err := conn.Read(h.ctx); websocket.CloseStatus(err) != websocket.StatusGoingAway {
+		t.Errorf("client read after SetDown: %v, want close 1001", err)
 	}
 	for _, rt := range [][2]string{{"GET", "config"}, {"POST", "status"}, {"POST", "runs"}, {"GET", "ws"}, {"POST", "enroll"}, {"GET", "other"}} {
 		resp, body := h.do(rt[0], base+rt[1], "", h.auth())
@@ -338,8 +356,8 @@ func TestRevoke(t *testing.T) {
 	if h.hub.Connected() {
 		t.Error("socket still connected after Revoke")
 	}
-	if _, err := conn.Read(context.Background()); err == nil {
-		t.Error("client read succeeded after Revoke")
+	if _, _, err := conn.Read(h.ctx); websocket.CloseStatus(err) != websocket.StatusGoingAway {
+		t.Errorf("client read after Revoke: %v, want close 1001", err)
 	}
 	for _, rt := range [][2]string{{"GET", "config"}, {"POST", "status"}, {"GET", "ws"}} {
 		if resp, _ := h.do(rt[0], base+rt[1], statusBody(), h.auth()); resp.StatusCode != 401 {
@@ -351,7 +369,7 @@ func TestRevoke(t *testing.T) {
 	}
 }
 
-func (h *harness) dial() *wsclient.Conn {
+func (h *harness) dial() *websocket.Conn {
 	h.t.Helper()
 	hdr := http.Header{}
 	for k, v := range h.auth() {
@@ -359,11 +377,11 @@ func (h *harness) dial() *wsclient.Conn {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	conn, err := wsclient.Dial(ctx, "ws"+strings.TrimPrefix(h.ts.URL, "http")+base+"ws", hdr, wsclient.Options{})
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(h.ts.URL, "http")+base+"ws", &websocket.DialOptions{HTTPHeader: hdr})
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	h.t.Cleanup(func() { conn.Close(wsclient.StatusNormal, "") })
+	h.t.Cleanup(func() { conn.CloseNow() })
 	return conn
 }
 
@@ -391,7 +409,7 @@ func TestSendAckRoundTrip(t *testing.T) {
 	go func() {
 		defer close(done)
 		for i := 0; i < 2; i++ {
-			msg, err := conn.Read(context.Background())
+			_, msg, err := conn.Read(h.ctx)
 			if err != nil {
 				t.Error(err)
 				return
@@ -406,7 +424,7 @@ func TestSendAckRoundTrip(t *testing.T) {
 				ack = hubproto.Ack{ID: cmd.ID, Type: "ack", Error: &hubproto.AckError{Code: hubproto.AckUnsupported, Message: "session.open"}}
 			}
 			data, _ := json.Marshal(ack)
-			conn.Write(context.Background(), data)
+			conn.Write(h.ctx, websocket.MessageText, data)
 		}
 	}()
 
@@ -418,7 +436,7 @@ func TestSendAckRoundTrip(t *testing.T) {
 	if err != nil || ack.ID != "x-9" || ack.OK || ack.Error.Code != hubproto.AckUnsupported {
 		t.Fatalf("session.open ack = %+v, %v", ack, err)
 	}
-	<-done
+	recv(t, done, "the client reader")
 	if u := h.hub.Unexpected(); len(u) != 0 {
 		t.Errorf("unexpected = %v", u)
 	}
@@ -440,7 +458,7 @@ func TestBadSocketMessages(t *testing.T) {
 	conn := h.dial()
 	waitConnected(t, h.hub, true)
 	for _, msg := range []string{`{"id":"zz","type":"ack","ok":true}`, `{"id":"a","type":"ack","ok":true,"x":1}`, `not json`} {
-		conn.Write(context.Background(), []byte(msg))
+		conn.Write(h.ctx, websocket.MessageText, []byte(msg))
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for len(h.hub.Unexpected()) < 3 && time.Now().Before(deadline) {
@@ -457,8 +475,8 @@ func TestSocketPendingFailsWhenClientCloses(t *testing.T) {
 	conn := h.dial()
 	waitConnected(t, h.hub, true)
 	go func() {
-		conn.Read(context.Background())
-		conn.Close(wsclient.StatusNormal, "")
+		conn.Read(h.ctx)
+		conn.Close(websocket.StatusNormalClosure, "")
 	}()
 	if _, err := h.hub.Send(hubproto.Command{Type: hubproto.CmdPause}); err == nil {
 		t.Error("Send succeeded although the client closed without an ack")
@@ -488,10 +506,12 @@ func TestReconnectWhilePending(t *testing.T) {
 	waitConnected(t, h.hub, true)
 
 	got1 := make(chan hubproto.Command, 1)
+	end1 := make(chan error, 1)
 	go func() {
 		for {
-			msg, err := conn1.Read(context.Background())
+			_, msg, err := conn1.Read(h.ctx)
 			if err != nil {
+				end1 <- err
 				return
 			}
 			var cmd hubproto.Command
@@ -504,12 +524,30 @@ func TestReconnectWhilePending(t *testing.T) {
 		_, err := h.hub.Send(hubproto.Command{ID: "old", Type: hubproto.CmdPause})
 		err1 <- err
 	}()
-	<-got1
+	recv(t, got1, "the first command")
 
+	h.hub.mu.Lock()
+	sk1 := h.hub.sock
+	h.hub.mu.Unlock()
 	conn2 := h.dial()
+	// Dial returns once the upgrade is answered, which can be before the
+	// hub replaces its socket.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		h.hub.mu.Lock()
+		replaced := h.hub.sock != nil && h.hub.sock != sk1
+		h.hub.mu.Unlock()
+		if replaced {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the hub did not replace the socket")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	cmd2 := make(chan hubproto.Command, 1)
 	go func() {
-		msg, err := conn2.Read(context.Background())
+		_, msg, err := conn2.Read(h.ctx)
 		if err != nil {
 			return
 		}
@@ -525,25 +563,28 @@ func TestReconnectWhilePending(t *testing.T) {
 		}
 		res2 <- err
 	}()
-	cmd := <-cmd2
+	cmd := recv(t, cmd2, "the command on the replacement socket")
 	if cmd.ID != "new" {
 		t.Fatalf("second socket received %+v", cmd)
 	}
 
-	if err := <-err1; err == nil {
+	if err := recv(t, end1, "the end of the replaced socket"); websocket.CloseStatus(err) != websocket.StatusGoingAway {
+		t.Errorf("replaced socket read: %v, want close 1001", err)
+	}
+	if err := recv(t, err1, "the pending Send on the replaced socket"); err == nil {
 		t.Error("command pending on the replaced socket did not fail")
 	}
 	late, _ := json.Marshal(hubproto.Ack{ID: "old", Type: "ack", OK: true})
-	conn1.Write(context.Background(), late)
+	conn1.Write(h.ctx, websocket.MessageText, late)
 	time.Sleep(50 * time.Millisecond)
 	if !h.hub.Connected() {
 		t.Fatal("the replacement socket was dropped")
 	}
 	ack, _ := json.Marshal(hubproto.Ack{ID: "new", Type: "ack", OK: true})
-	if err := conn2.Write(context.Background(), ack); err != nil {
+	if err := conn2.Write(h.ctx, websocket.MessageText, ack); err != nil {
 		t.Fatal(err)
 	}
-	if err := <-res2; err != nil {
+	if err := recv(t, res2, "the Send on the replacement socket"); err != nil {
 		t.Errorf("command on the replacement socket: %v", err)
 	}
 }

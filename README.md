@@ -956,8 +956,8 @@ Both are Go durations with a minimum of `1m`. The defaults are `15m` and
 - When the hub rejects the credential, the loops are drained and the
   daemon retries every 10 minutes.
 - The daemon listens on no port. It opens the connections: HTTPS to the
-  hub and one WebSocket for commands. The WebSocket client uses the Go
-  standard library.
+  hub and one WebSocket for commands. The WebSocket client is
+  `github.com/coder/websocket`.
 
 Commands implemented: `start`, `stop`, `drain`, `restart_when_idle`,
 `pause`, `resume`, `wake`, `reload_config`. `pause` drains every loop and

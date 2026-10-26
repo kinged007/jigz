@@ -4,18 +4,25 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"slices"
 	"time"
 
+	"github.com/coder/websocket"
+
 	"github.com/kinged007/jigz/internal/hubproto"
-	"github.com/kinged007/jigz/internal/wsclient"
+)
+
+// pingInterval and pongTimeout are variables so tests can shorten them.
+var (
+	pingInterval = 30 * time.Second
+	pongTimeout  = 90 * time.Second
 )
 
 const (
-	pingInterval = 30 * time.Second
-	pongTimeout  = 90 * time.Second
+	readLimit = 1 << 20
 	// resetAfter is how long a socket must stay up before the back-off
 	// starts again at BackoffMin.
 	resetAfter = 60 * time.Second
@@ -35,8 +42,10 @@ var supported = []hubproto.CommandType{
 // receive loop, so it must return promptly.
 type Handler func(ctx context.Context, cmd hubproto.Command) *hubproto.AckError
 
-// Connect opens the command socket once, with the credential headers.
-func (c *Client) Connect(ctx context.Context) (*wsclient.Conn, error) {
+// Connect opens the command socket once, with the credential headers. A
+// refused upgrade is a status error like any other request: 401 and 403
+// match ErrRevoked, 5xx is retryable, every other status is not.
+func (c *Client) Connect(ctx context.Context) (*websocket.Conn, error) {
 	u, err := c.endpoint("ws")
 	if err != nil {
 		return nil, c.fail("GET", "ws", false, err)
@@ -49,20 +58,20 @@ func (c *Client) Connect(ctx context.Context) (*wsclient.Conn, error) {
 	default:
 		return nil, c.fail("GET", "ws", false, fmt.Errorf("unsupported URL scheme %q", u.Scheme))
 	}
-	conn, err := wsclient.Dial(ctx, u.String(), c.header(false), wsclient.Options{
-		PingInterval:     pingInterval,
-		PongTimeout:      pongTimeout,
-		HandshakeTimeout: defaultTimeout,
+	conn, resp, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{
+		HTTPClient: c.httpClient(),
+		HTTPHeader: c.header(false),
 	})
 	if err == nil {
+		conn.SetReadLimit(readLimit)
 		return conn, nil
 	}
 	if ctx.Err() != nil {
 		return nil, c.fail("GET", "ws", false, ctx.Err())
 	}
-	var se *wsclient.StatusError
-	if errors.As(err, &se) {
-		return nil, c.statusError("GET", "ws", se.Code, nil)
+	if resp != nil && resp.StatusCode != http.StatusSwitchingProtocols {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, c.statusError("GET", "ws", resp.StatusCode, body)
 	}
 	return nil, c.fail("GET", "ws", true, err)
 }
@@ -100,10 +109,13 @@ func (c *Client) Commands(ctx context.Context, h Handler) error {
 
 // serve reads commands until the socket ends. The returned error is always
 // Retryable unless ctx ended.
-func (c *Client) serve(ctx context.Context, conn *wsclient.Conn, h Handler) error {
-	defer conn.Close(wsclient.StatusNormal, "")
+func (c *Client) serve(ctx context.Context, conn *websocket.Conn, h Handler) error {
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	kctx, stop := context.WithCancel(ctx)
+	defer stop()
+	go keepalive(kctx, conn, pingInterval, pongTimeout)
 	for {
-		msg, err := conn.Read(ctx)
+		_, msg, err := conn.Read(ctx)
 		if err != nil {
 			return c.fail("GET", "ws", ctx.Err() == nil, err)
 		}
@@ -116,10 +128,33 @@ func (c *Client) serve(ctx context.Context, conn *wsclient.Conn, h Handler) erro
 			return c.fail("GET", "ws", true, err)
 		}
 		wctx, cancel := context.WithTimeout(ctx, ackTimeout)
-		err = conn.Write(wctx, data)
+		err = conn.Write(wctx, websocket.MessageText, data)
 		cancel()
 		if err != nil {
 			return c.fail("GET", "ws", ctx.Err() == nil, err)
+		}
+	}
+}
+
+// keepalive pings the hub every interval and closes the socket when a pong
+// does not arrive within timeout, which ends the pending Read.
+func keepalive(ctx context.Context, conn *websocket.Conn, interval, timeout time.Duration) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		pctx, cancel := context.WithTimeout(ctx, timeout)
+		err := conn.Ping(pctx)
+		cancel()
+		if err != nil {
+			if ctx.Err() == nil {
+				conn.CloseNow()
+			}
+			return
 		}
 	}
 }
