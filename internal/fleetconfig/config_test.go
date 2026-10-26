@@ -338,6 +338,9 @@ func TestExampleConfigLoadsAndResolves(t *testing.T) {
 	if len(all) != len(c.Repos) {
 		t.Fatalf("resolved %d of %d repositories", len(all), len(c.Repos))
 	}
+	if !c.GitHub.QuestionsOn() || !(GitHub{}).QuestionsOn() {
+		t.Error("github.questions is not on by default")
+	}
 	var scoped, disabled, tokenScoped int
 	for _, r := range all {
 		if len(r.Workflows) > 0 {

@@ -20,15 +20,25 @@ import (
 	"github.com/kinged007/jigz/internal/store"
 )
 
-// Labels the answer path reads and writes (plans/jigz/questions.md section 1).
+// Labels the resume reads and writes (plans/jigz/questions.md section 1).
 const (
 	NeedsHuman = "needs-human"
 	AgentDone  = "agent:done"
 )
 
-// LabelsNotRemoved is the problem kind of an item whose blocking questions
-// are all answered while it still carries needs-human or agent:done.
-const LabelsNotRemoved = "labels_not_removed"
+// Problem kinds the scanner adds to those of the parser
+// (plans/jigz/questions.md section 2.4).
+const (
+	// ResumeFailed is an item whose resume stopped at a failed call; the
+	// next pass retries it.
+	ResumeFailed = "resume_failed"
+	// ParkedAgain is an answered item whose needs-human was added after
+	// its latest answer.
+	ParkedAgain = "parked_again"
+)
+
+// errNoToken is the status of a project without a token.
+var errNoToken = errors.New("no GitHub token")
 
 const commentsPerPage = 100
 
@@ -44,8 +54,8 @@ func IsTrigger(label string) bool {
 func HasTrigger(labels []string) bool { return slices.ContainsFunc(labels, IsTrigger) }
 
 // ItemProblem is one problem of a scanned item, stored as a JSON string in
-// question_items.problems. Kind is a questions.ProblemKind or
-// LabelsNotRemoved.
+// question_items.problems. Kind is a questions.ProblemKind, ResumeFailed or
+// ParkedAgain.
 type ItemProblem struct {
 	Kind       string `json:"kind"`
 	QuestionID string `json:"question_id,omitempty"`
@@ -69,7 +79,7 @@ func Problems(it store.QuestionItem) []ItemProblem {
 }
 
 // Malformed reports whether problems hold a malformed question block, which
-// stops the answer path from removing labels.
+// stops the resume.
 func Malformed(ps []ItemProblem) bool {
 	return slices.ContainsFunc(ps, func(p ItemProblem) bool {
 		return p.Kind == string(questions.MalformedQuestion) || p.Kind == string(questions.MalformedBlock)
@@ -83,23 +93,33 @@ type ItemScan struct {
 	Status questions.Status
 }
 
-// Question returns the question with id qid, or nil.
-func (sc ItemScan) Question(qid string) *questions.Question {
-	for i := range sc.Result.Questions {
-		if sc.Result.Questions[i].ID == qid {
-			return &sc.Result.Questions[i]
-		}
-	}
-	return nil
+// ready reports whether the item meets the first three conditions of
+// rule 2: it carries needs-human, every blocking question has an
+// authorized answer, and the parse found no problem that stops a resume.
+func (sc ItemScan) ready() bool {
+	return slices.Contains(sc.Item.Labels, NeedsHuman) && sc.Status.CanResume()
 }
 
-// Scanner finds agent questions and answers on GitHub (plans/jigz/questions.md
-// section 2.1) and writes answers and labels (section 2.5). It does nothing
-// unless github.enrich is set. Fill the exported fields before use.
+// Scanner finds agent questions and answers on GitHub and resumes parked
+// items whose blocking questions are answered (plans/jigz/questions.md
+// sections 2.1 and 2.4). Its only writes are label changes. Fill the
+// exported fields before use.
 type Scanner struct {
 	Store    *store.Store
 	Settings func() config.GitHub
 	Targets  func() []Target
+	// Questions reports whether a project has github.questions on. Nil
+	// scans every target.
+	Questions func(project string) bool
+	// Qualifier is added to the search of step 1, such as
+	// label:runner:<name>.
+	Qualifier string
+	// SearchOnly skips step 2: items with a recent run are not candidates
+	// unless the search finds them.
+	SearchOnly bool
+	// OnResume is called once per resumed item with the trigger it now
+	// carries.
+	OnResume func(project string, number int, trigger string)
 	Now      func() time.Time
 
 	// passMu keeps passes from overlapping.
@@ -109,6 +129,14 @@ type Scanner struct {
 	last    time.Time
 	status  map[string]EnrichStatus
 	items   map[string]map[int]bool
+	events  map[string]eventsCache
+}
+
+// eventsCache is the latest needs-human labeled time of one item and the
+// ETag of the events page it was read from.
+type eventsCache struct {
+	etag string
+	at   time.Time
 }
 
 func (s *Scanner) now() time.Time {
@@ -134,9 +162,6 @@ func (s *Scanner) gh() *github.Client {
 	}
 	return c
 }
-
-// Enabled reports whether github.enrich is set.
-func (s *Scanner) Enabled() bool { return s.Settings().Enrich }
 
 // Status returns the outcome of the last pass over a project.
 func (s *Scanner) Status(project string) EnrichStatus {
@@ -217,23 +242,19 @@ func (s *Scanner) Run(ctx context.Context) {
 	}
 }
 
-// Once runs a pass when github.enrich is set and questions_interval has
-// passed.
+// Once runs a pass when questions_interval has passed.
 func (s *Scanner) Once(ctx context.Context) {
 	g := s.Settings()
 	s.mu.Lock()
-	due := g.Enrich && (s.last.IsZero() || s.now().Sub(s.last) >= g.QuestionPassInterval())
+	due := s.last.IsZero() || s.now().Sub(s.last) >= g.QuestionPassInterval()
 	s.mu.Unlock()
 	if due {
 		s.Pass(ctx)
 	}
 }
 
-// Pass scans every target, if github.enrich is set.
+// Pass scans every target whose project has github.questions on.
 func (s *Scanner) Pass(ctx context.Context) {
-	if !s.Enabled() {
-		return
-	}
 	s.passMu.Lock()
 	defer s.passMu.Unlock()
 	s.mu.Lock()
@@ -242,6 +263,9 @@ func (s *Scanner) Pass(ctx context.Context) {
 	for _, t := range s.Targets() {
 		if ctx.Err() != nil {
 			return
+		}
+		if s.Questions != nil && !s.Questions(t.Project) {
+			continue
 		}
 		st := s.project(ctx, t)
 		s.mu.Lock()
@@ -294,13 +318,6 @@ type ghComment struct {
 	CreatedAt         time.Time `json:"created_at"`
 }
 
-func noToken(t Target) error {
-	if t.TokenEnv != "" {
-		return fmt.Errorf("no token: %s is unset or empty", t.TokenEnv)
-	}
-	return errors.New("no token: set token_env, GITHUB_TOKEN or GH_TOKEN")
-}
-
 func (s *Scanner) project(ctx context.Context, t Target) EnrichStatus {
 	now := s.now()
 	st := EnrichStatus{At: now, OK: true}
@@ -309,12 +326,12 @@ func (s *Scanner) project(ctx context.Context, t Target) EnrichStatus {
 		return st
 	}
 	if t.Token == "" {
-		return fail(noToken(t))
+		return fail(errNoToken)
 	}
 	if until, limited := s.gh().LimitedUntil(t.Project); limited {
 		return fail(&github.RateLimitError{Until: until})
 	}
-	login, err := s.Login(ctx, t)
+	login, err := s.gh().User(ctx, t.Project, t.Token)
 	if err != nil {
 		return fail(err)
 	}
@@ -328,11 +345,17 @@ func (s *Scanner) project(ctx context.Context, t Target) EnrichStatus {
 			return st
 		}
 		keep[c.Number] = true
-		if _, err := s.scan(ctx, t, login, c, false); err != nil {
-			if errors.Is(err, github.ErrNotFound) {
-				continue
-			}
+		sc, err := s.scan(ctx, t, login, c, false)
+		if errors.Is(err, github.ErrNotFound) {
+			continue
+		}
+		if err != nil {
 			return fail(err)
+		}
+		if sc.ready() {
+			if err := s.resume(ctx, t, login, sc); err != nil {
+				return fail(err)
+			}
 		}
 	}
 	if err := s.dropStale(t.Project, keep); err != nil {
@@ -341,10 +364,15 @@ func (s *Scanner) project(ctx context.Context, t Target) EnrichStatus {
 	return st
 }
 
-// candidates lists the open items to scan: those labelled needs-human,
-// and those with a run within questions_window.
+// candidates lists the open items to scan: those labelled needs-human
+// that match Qualifier, and, unless SearchOnly is set, those with a run
+// within questions_window.
 func (s *Scanner) candidates(ctx context.Context, t Target, now time.Time) ([]store.QuestionItem, error) {
-	q := url.QueryEscape(fmt.Sprintf("repo:%s state:open label:%s", t.Project, NeedsHuman))
+	query := fmt.Sprintf("repo:%s state:open label:%s", t.Project, NeedsHuman)
+	if s.Qualifier != "" {
+		query += " " + s.Qualifier
+	}
+	q := url.QueryEscape(query)
 	resp, err := s.gh().Get(ctx, t.Project, t.Token, "/search/issues?q="+q+"&per_page=100", "")
 	if err != nil {
 		return nil, err
@@ -364,6 +392,9 @@ func (s *Scanner) candidates(ctx context.Context, t Target, now time.Time) ([]st
 			it.IssueETag = prev.IssueETag
 		}
 		out = append(out, it)
+	}
+	if s.SearchOnly {
+		return out, nil
 	}
 	runs, err := s.Store.RunItems(t.Project)
 	if err != nil {
@@ -449,31 +480,10 @@ func (s *Scanner) dropStale(project string, keep map[int]bool) error {
 	return nil
 }
 
-// Login returns the token account's login, read once per project token.
-func (s *Scanner) Login(ctx context.Context, t Target) (string, error) {
-	if t.Token == "" {
-		return "", noToken(t)
-	}
-	return s.gh().User(ctx, t.Project, t.Token)
-}
-
-// ScanItem reads one item and its comments without ETags, stores the
-// result, and returns it.
-func (s *Scanner) ScanItem(ctx context.Context, t Target, n int) (ItemScan, error) {
-	login, err := s.Login(ctx, t)
-	if err != nil {
-		return ItemScan{}, err
-	}
-	it, _, err := s.issue(ctx, t, n, false)
-	if err != nil {
-		return ItemScan{}, err
-	}
-	return s.scan(ctx, t, login, it, true)
-}
-
 // scan reads the comments of it, parses them and stores the result. Without
 // force it sends the stored comments ETag and skips an item whose comments
-// and fields are unchanged; the returned scan is then empty.
+// and fields are unchanged, unless the stored item may be ready to resume;
+// the returned scan is then empty.
 func (s *Scanner) scan(ctx context.Context, t Target, login string, it store.QuestionItem, force bool) (ItemScan, error) {
 	prev, err := s.Store.QuestionItem(t.Project, it.Number)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -489,7 +499,7 @@ func (s *Scanner) scan(ctx context.Context, t Target, login string, it store.Que
 		return ItemScan{}, err
 	}
 	if notModified {
-		if sameItem(prev, it) {
+		if sameItem(prev, it) && !s.mayResume(prev) {
 			s.remember(t.Project, it.Number)
 			return ItemScan{}, nil
 		}
@@ -501,7 +511,7 @@ func (s *Scanner) scan(ctx context.Context, t Target, login string, it store.Que
 	st := questions.Check(res)
 	it.CommentsETag = cetag
 	it.ScannedAt = s.now().UTC().Format(time.RFC3339)
-	it.Problems = encodeProblems(res, st, it.Labels)
+	it.Problems = encodeProblems(res, st)
 	if err := s.Store.ReplaceQuestions(it, storeQuestions(res)); err != nil {
 		return ItemScan{}, err
 	}
@@ -576,21 +586,17 @@ func authorized(project, login string, assignees []string) func(questions.Commen
 	}
 }
 
-func encodeProblems(res questions.Result, st questions.Status, labels []string) []string {
-	var ps []ItemProblem
+func encodeProblems(res questions.Result, st questions.Status) []string {
+	out := []string{}
 	for _, p := range append(slices.Clone(res.Problems), st.Problems...) {
-		ps = append(ps, ItemProblem{Kind: string(p.Kind), QuestionID: p.QuestionID, CommentURL: p.CommentURL, Author: p.Author, Message: p.Message})
-	}
-	if st.CanResume() && (slices.Contains(labels, NeedsHuman) || slices.Contains(labels, AgentDone)) {
-		ps = append(ps, ItemProblem{Kind: LabelsNotRemoved,
-			Message: "every blocking question is answered, but " + NeedsHuman + " or " + AgentDone + " is still set"})
-	}
-	out := make([]string, 0, len(ps))
-	for _, p := range ps {
-		b, _ := json.Marshal(p)
-		out = append(out, string(b))
+		out = append(out, encodeProblem(ItemProblem{Kind: string(p.Kind), QuestionID: p.QuestionID, CommentURL: p.CommentURL, Author: p.Author, Message: p.Message}))
 	}
 	return out
+}
+
+func encodeProblem(p ItemProblem) string {
+	b, _ := json.Marshal(p)
+	return string(b)
 }
 
 func storeQuestions(res questions.Result) []store.Question {
@@ -614,167 +620,190 @@ func storeQuestions(res questions.Result) []store.Question {
 	return out
 }
 
-// ErrAnswerText means an answer text was refused before anything was sent.
-var ErrAnswerText = errors.New("answer text")
-
-// AnswerBody is the comment that answers question qid as login. It refuses
-// a text that is empty, contains "<!--", or would not parse back as one
-// answer block with that id.
-func AnswerBody(qid, login, text string) (string, error) {
-	text = strings.TrimSpace(text)
-	switch {
-	case text == "":
-		return "", fmt.Errorf("%w: the answer is empty", ErrAnswerText)
-	case strings.Contains(text, "<!--"):
-		return "", fmt.Errorf("%w: the answer must not contain <!--", ErrAnswerText)
+// mayResume reports whether a stored item may be ready to resume, so a
+// pass reads it in full even when GitHub reports it unchanged: a resume
+// that failed is retried. An item parked again after its last answer stays
+// so until its comments or labels change.
+func (s *Scanner) mayResume(prev store.QuestionItem) bool {
+	if !slices.Contains(prev.Labels, NeedsHuman) {
+		return false
 	}
-	body := fmt.Sprintf("<!-- agent-answer id=\"%s\" by=\"%s\" -->\n%s\n<!-- /agent-answer -->", qid, login, text)
-	res := questions.Parse([]questions.Comment{{Body: body}}, func(questions.Comment) bool { return true })
-	if len(res.Problems) != 1 || res.Problems[0].Kind != questions.UnknownAnswer || res.Problems[0].QuestionID != qid {
-		return "", fmt.Errorf("%w: the text would not form one answer block, for example because of an unclosed code fence", ErrAnswerText)
-	}
-	return body, nil
-}
-
-// Answer posts the answer to question qid on item n as the token account.
-func (s *Scanner) Answer(ctx context.Context, t Target, n int, qid, text string) error {
-	login, err := s.Login(ctx, t)
-	if err != nil {
-		return err
-	}
-	body, err := AnswerBody(qid, login, text)
-	if err != nil {
-		return err
-	}
-	payload, err := json.Marshal(map[string]string{"body": body})
-	if err != nil {
-		return err
-	}
-	_, err = s.gh().Post(ctx, t.Project, t.Token, fmt.Sprintf("/repos/%s/issues/%d/comments", t.Project, n), payload)
-	return err
-}
-
-// Resumed says what Resume did.
-type Resumed struct {
-	Scan ItemScan
-	// Removed is set when rule 2 held and both labels are gone.
-	Removed bool
-	// Added is the trigger added, "" when the item already had one.
-	Added string
-}
-
-// Resume is step 4 of the answer path: it rescans item n and, when rule 2
-// holds, adds the resume trigger unless the item carries one and removes
-// agent:done and needs-human (see relabel).
-func (s *Scanner) Resume(ctx context.Context, t Target, n int) (Resumed, error) {
-	sc, err := s.ScanItem(ctx, t, n)
-	if err != nil {
-		return Resumed{}, err
-	}
-	if !sc.Status.CanResume() {
-		return Resumed{Scan: sc}, nil
-	}
-	return s.relabel(ctx, t, sc, sc.Status.Resume)
-}
-
-// ErrNotMalformed refuses remove-labels on an item without a malformed
-// question block.
-var ErrNotMalformed = errors.New("the item has no malformed question block")
-
-// ErrNeedTrigger means remove-labels found no trigger to add and the
-// person has to choose one.
-var ErrNeedTrigger = errors.New("choose the trigger to add")
-
-// RemoveTrigger is the trigger remove-labels adds to an item with a
-// malformed block: the resume label of its latest blocking question when
-// the questions agree, else the trigger in first_labels, else "".
-func RemoveTrigger(sc ItemScan) string {
-	if sc.Status.Resume != "" && len(sc.Status.Problems) == 0 {
-		return sc.Status.Resume
-	}
-	for _, l := range sc.Item.FirstLabels {
-		if IsTrigger(l) {
-			return l
+	for _, p := range Problems(prev) {
+		switch questions.ProblemKind(p.Kind) {
+		case ParkedAgain, questions.MalformedQuestion, questions.MalformedBlock, questions.ResumeConflict:
+			return false
 		}
 	}
-	return ""
-}
-
-// RemoveLabels runs the label calls of step 4 on item n, which must have a
-// malformed question block. choice is the trigger to add when
-// RemoveTrigger finds none.
-func (s *Scanner) RemoveLabels(ctx context.Context, t Target, n int, choice string) (Resumed, error) {
-	sc, err := s.ScanItem(ctx, t, n)
+	qs, err := s.Store.Questions(store.QuestionFilter{Project: prev.Project, Number: prev.Number})
 	if err != nil {
-		return Resumed{}, err
+		return true
 	}
-	if !sc.Status.Malformed {
-		return Resumed{Scan: sc}, ErrNotMalformed
-	}
-	trigger := RemoveTrigger(sc)
-	if trigger == "" && !HasTrigger(sc.Item.Labels) {
-		if !IsTrigger(choice) {
-			return Resumed{Scan: sc}, ErrNeedTrigger
+	blocking := false
+	for _, q := range qs {
+		if q.Blocking {
+			blocking = true
+			if q.AnsweredAt == "" {
+				return false
+			}
 		}
-		trigger = choice
 	}
-	return s.relabel(ctx, t, sc, trigger)
+	return blocking
 }
 
-// relabel adds trigger unless the item has a trigger, then removes
-// agent:done and last needs-human, with one DELETE each and a 404 meaning
-// already gone. agent:done outranks the trigger and needs-human keeps the
-// item out of the dispatch query, so a failure midway dispatches nothing
-// and leaves needs-human or agent:done for the scanner to report. Each
-// call changes only its own label.
-func (s *Scanner) relabel(ctx context.Context, t Target, sc ItemScan, trigger string) (Resumed, error) {
+// resume runs the resume of plans/jigz/questions.md section 2.4 on an item
+// that meets the first three conditions of rule 2. A failed GitHub call is
+// stored as the item's ResumeFailed problem; only a store error is
+// returned.
+func (s *Scanner) resume(ctx context.Context, t Target, login string, sc ItemScan) error {
 	n := sc.Item.Number
-	out := Resumed{Scan: sc}
-	err := func() error {
-		if !HasTrigger(sc.Item.Labels) && trigger != "" {
-			body, err := json.Marshal(map[string][]string{"labels": {trigger}})
-			if err != nil {
-				return err
-			}
-			if _, err := s.gh().Post(ctx, t.Project, t.Token, fmt.Sprintf("/repos/%s/issues/%d/labels", t.Project, n), body); err != nil {
-				return fmt.Errorf("add %s: %w", trigger, err)
-			}
-			out.Added = trigger
-		}
-		for _, l := range []string{AgentDone, NeedsHuman} {
-			name := strings.ReplaceAll(url.PathEscape(l), ":", "%3A")
-			err := s.gh().Delete(ctx, t.Project, t.Token, fmt.Sprintf("/repos/%s/issues/%d/labels/%s", t.Project, n, name))
-			if err != nil && !errors.Is(err, github.ErrNotFound) {
-				return fmt.Errorf("remove %s: %w", l, err)
-			}
-		}
-		return nil
-	}()
-	out.Removed = err == nil
-	if after, serr := s.ScanItem(ctx, t, n); serr == nil {
-		out.Scan = after
+	labeled, err := s.labeledAt(ctx, t, n)
+	if err != nil {
+		return s.addProblem(sc, ResumeFailed, "resume failed: read events: "+err.Error())
 	}
-	return out, err
+	if !answeredAfter(sc.Result, labeled) {
+		return s.addProblem(sc, ParkedAgain, "parked again after the last answer")
+	}
+	it, _, err := s.issue(ctx, t, n, false)
+	if err != nil {
+		return s.addProblem(sc, ResumeFailed, "resume failed: read item: "+err.Error())
+	}
+	fresh, err := s.scan(ctx, t, login, it, true)
+	if err != nil {
+		return s.addProblem(sc, ResumeFailed, "resume failed: read comments: "+err.Error())
+	}
+	if !fresh.ready() {
+		return nil
+	}
+	if !answeredAfter(fresh.Result, labeled) {
+		return s.addProblem(fresh, ParkedAgain, "parked again after the last answer")
+	}
+	trigger, err := s.relabel(ctx, t, fresh)
+	if err != nil {
+		return s.addProblem(fresh, ResumeFailed, "resume failed: "+err.Error())
+	}
+	item := fresh.Item
+	item.Labels = slices.DeleteFunc(slices.Clone(item.Labels), func(l string) bool { return l == AgentDone || l == NeedsHuman })
+	if !slices.Contains(item.Labels, trigger) {
+		item.Labels = append(item.Labels, trigger)
+	}
+	item.IssueETag = ""
+	if err := s.Store.ReplaceQuestions(item, storeQuestions(fresh.Result)); err != nil {
+		return err
+	}
+	if s.OnResume != nil {
+		s.OnResume(t.Project, n, trigger)
+	}
+	return nil
 }
 
-// Triggers lists the project's trigger labels, for the person to choose
-// from when remove-labels finds none.
-func (s *Scanner) Triggers(ctx context.Context, t Target) ([]string, error) {
-	resp, err := s.gh().Get(ctx, t.Project, t.Token, fmt.Sprintf("/repos/%s/labels?per_page=100", t.Project), "")
-	if err != nil {
-		return nil, err
-	}
-	var ls []struct {
-		Name string `json:"name"`
-	}
-	if err := json.Unmarshal(resp.Body, &ls); err != nil {
-		return nil, fmt.Errorf("labels: %w", err)
-	}
-	var out []string
-	for _, l := range ls {
-		if IsTrigger(l.Name) {
-			out = append(out, l.Name)
+// addProblem stores the item of sc with one more problem.
+func (s *Scanner) addProblem(sc ItemScan, kind, msg string) error {
+	it := sc.Item
+	it.Problems = append(slices.Clone(it.Problems), encodeProblem(ItemProblem{Kind: kind, Message: msg}))
+	return s.Store.ReplaceQuestions(it, storeQuestions(sc.Result))
+}
+
+// answeredAfter reports whether an authorized answer to a blocking question
+// was created strictly after t, both at one-second precision.
+func answeredAfter(res questions.Result, t time.Time) bool {
+	t = t.Truncate(time.Second)
+	for _, q := range res.Questions {
+		if a := q.Current(); q.Blocking && a != nil && a.Created.Truncate(time.Second).After(t) {
+			return true
 		}
 	}
-	return out, nil
+	return false
+}
+
+const eventsPerPage = 100
+
+// labeledAt returns the time of the latest labeled event for needs-human on
+// item n, zero when there is none. It reads every events page, sending the
+// cached ETag on the first. The ETag is cached only when the events fit on
+// one page, because a new event on a later page does not change the first
+// page's ETag.
+func (s *Scanner) labeledAt(ctx context.Context, t Target, n int) (time.Time, error) {
+	key := t.Project + "#" + strconv.Itoa(n)
+	s.mu.Lock()
+	cached, ok := s.events[key]
+	s.mu.Unlock()
+	var latest time.Time
+	first := ""
+	for page := 1; ; page++ {
+		path := fmt.Sprintf("/repos/%s/issues/%d/events?per_page=%d", t.Project, n, eventsPerPage)
+		send := ""
+		if page == 1 && ok {
+			send = cached.etag
+		}
+		if page > 1 {
+			path += "&page=" + strconv.Itoa(page)
+			first = ""
+		}
+		resp, err := s.gh().Get(ctx, t.Project, t.Token, path, send)
+		if err != nil {
+			return time.Time{}, err
+		}
+		if resp.NotModified {
+			return cached.at, nil
+		}
+		if page == 1 {
+			first = resp.ETag
+		}
+		var es []struct {
+			Event string `json:"event"`
+			Label struct {
+				Name string `json:"name"`
+			} `json:"label"`
+			CreatedAt time.Time `json:"created_at"`
+		}
+		if err := json.Unmarshal(resp.Body, &es); err != nil {
+			return time.Time{}, fmt.Errorf("events of %d: %w", n, err)
+		}
+		for _, e := range es {
+			if e.Event == "labeled" && strings.EqualFold(e.Label.Name, NeedsHuman) && e.CreatedAt.After(latest) {
+				latest = e.CreatedAt
+			}
+		}
+		if len(es) < eventsPerPage {
+			break
+		}
+	}
+	s.mu.Lock()
+	if s.events == nil {
+		s.events = map[string]eventsCache{}
+	}
+	s.events[key] = eventsCache{etag: first, at: latest}
+	s.mu.Unlock()
+	return latest, nil
+}
+
+// relabel adds the item's resume trigger unless it carries a trigger, then
+// removes agent:done and last needs-human, with one DELETE each and a 404
+// meaning already gone. It returns the trigger the item now carries.
+// agent:done outranks the trigger and needs-human keeps the item out of the
+// dispatch query, so a failure midway dispatches nothing. Each call changes
+// only its own label, so the calls are idempotent and another writer's
+// labels are kept.
+func (s *Scanner) relabel(ctx context.Context, t Target, sc ItemScan) (string, error) {
+	n := sc.Item.Number
+	trigger := sc.Status.Resume
+	if i := slices.IndexFunc(sc.Item.Labels, IsTrigger); i >= 0 {
+		trigger = sc.Item.Labels[i]
+	} else {
+		body, err := json.Marshal(map[string][]string{"labels": {trigger}})
+		if err != nil {
+			return "", err
+		}
+		if _, err := s.gh().Post(ctx, t.Project, t.Token, fmt.Sprintf("/repos/%s/issues/%d/labels", t.Project, n), body); err != nil {
+			return "", fmt.Errorf("add %s: %w", trigger, err)
+		}
+	}
+	for _, l := range []string{AgentDone, NeedsHuman} {
+		name := strings.ReplaceAll(url.PathEscape(l), ":", "%3A")
+		err := s.gh().Delete(ctx, t.Project, t.Token, fmt.Sprintf("/repos/%s/issues/%d/labels/%s", t.Project, n, name))
+		if err != nil && !errors.Is(err, github.ErrNotFound) {
+			return "", fmt.Errorf("remove %s: %w", l, err)
+		}
+	}
+	return trigger, nil
 }

@@ -38,6 +38,7 @@ workflows:
       max_usd: 5
 github:
   enrich: true
+  questions: true
   interval: 10m
   api_url: https://api.github.com
   details: false

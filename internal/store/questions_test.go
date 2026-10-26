@@ -73,62 +73,6 @@ func TestReplaceQuestionsReplacesAnItemsRows(t *testing.T) {
 	}
 }
 
-func TestFirstLabelsKeptAcrossPasses(t *testing.T) {
-	s := open(t)
-	firstLabels := func() []string {
-		t.Helper()
-		got, err := s.QuestionItem("o/a", 3)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return got.FirstLabels
-	}
-
-	// A pass that finds no question does not set first_labels.
-	it := qitem(3, "agent:x")
-	if err := s.ReplaceQuestions(it, nil); err != nil {
-		t.Fatal(err)
-	}
-	if got := firstLabels(); len(got) != 0 {
-		t.Fatalf("first_labels after empty pass = %v, want none", got)
-	}
-
-	// A pass that finds only a problem, such as a malformed block, stores
-	// that pass's labels.
-	malformed := qitem(4, "agent:m")
-	malformed.Problems = []string{"malformed block"}
-	if err := s.ReplaceQuestions(malformed, nil); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := s.QuestionItem("o/a", 4); err != nil || !sameStrings(got.FirstLabels, []string{"agent:m"}) {
-		t.Fatalf("first_labels of a malformed-only item = %v, %v; want [agent:m]", got.FirstLabels, err)
-	}
-
-	// The first pass that finds a question stores that pass's labels.
-	it.Labels = []string{"agent:x", "agent:y"}
-	if err := s.ReplaceQuestions(it, []Question{question("q1")}); err != nil {
-		t.Fatal(err)
-	}
-	if got := firstLabels(); !sameStrings(got, []string{"agent:x", "agent:y"}) {
-		t.Fatalf("first_labels = %v, want [agent:x agent:y]", got)
-	}
-
-	// Later passes never change it, with or without questions.
-	it.Labels = []string{"agent:z"}
-	if err := s.ReplaceQuestions(it, []Question{question("q2")}); err != nil {
-		t.Fatal(err)
-	}
-	if got := firstLabels(); !sameStrings(got, []string{"agent:x", "agent:y"}) {
-		t.Errorf("first_labels = %v, want kept [agent:x agent:y]", got)
-	}
-	if err := s.ReplaceQuestions(it, nil); err != nil {
-		t.Fatal(err)
-	}
-	if got := firstLabels(); !sameStrings(got, []string{"agent:x", "agent:y"}) {
-		t.Errorf("first_labels = %v, want kept [agent:x agent:y]", got)
-	}
-}
-
 func TestQuestionsFilters(t *testing.T) {
 	s := open(t)
 	answered := question("q2")
@@ -212,25 +156,21 @@ func TestPreviousVersionMigratesToQuestionTables(t *testing.T) {
 	}
 }
 
-func TestReplaceQuestionsKeepsFirstLabelsAndLastDuplicateQID(t *testing.T) {
+func TestReplaceQuestionsKeepsLastDuplicateQID(t *testing.T) {
 	s := open(t)
-	if err := s.ReplaceQuestions(qitem(4, "a"), nil); err != nil {
-		t.Fatal(err)
-	}
 	dup := question("q1")
 	dup.Question = "second"
-	if err := s.ReplaceQuestions(qitem(4, "b"), []Question{question("q1"), question("q2"), dup}); err != nil {
+	it := qitem(4, "b")
+	it.Problems = []string{"bad block"}
+	if err := s.ReplaceQuestions(it, []Question{question("q1"), question("q2"), dup}); err != nil {
 		t.Fatal(err)
+	}
+	var first string
+	if err := s.db.QueryRow(`SELECT first_labels FROM question_items WHERE project = 'o/a' AND number = 4`).Scan(&first); err != nil || first != "" {
+		t.Errorf("first_labels = %q, %v; want it unwritten", first, err)
 	}
 	if err := s.ReplaceQuestions(qitem(4, "c"), []Question{question("q1")}); err != nil {
 		t.Fatal(err)
-	}
-	got, err := s.QuestionItem("o/a", 4)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !sameStrings(got.FirstLabels, []string{"b"}) {
-		t.Errorf("first labels = %v, want [b]", got.FirstLabels)
 	}
 	if err := s.ReplaceQuestions(qitem(4, "c"), []Question{question("q1"), question("q2"), dup}); err != nil {
 		t.Fatal(err)
