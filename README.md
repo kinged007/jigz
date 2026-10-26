@@ -544,7 +544,8 @@ replace `.jigz/` with:
 jigz-*.db
 ```
 
-`.jigz/config.yaml`:
+`.jigz/config.yaml`. An unknown key at any level is an error that names the
+file, the line and the key:
 
 ```yaml
 repo: ""        # empty = detect from git remote; or pin owner/name
