@@ -143,10 +143,12 @@ Run
 
 Control (act on the run serving repo-root, found through the registry)
   stop [--when-idle]              stop now, or let each loop finish its
-                                  current item first, one loop at a time
+                                  current item first, one loop at a time;
+                                  then list the other runs still going
   restart [--when-idle]           restart, immediately or when idle
-  status [--json]                 show the state of the run; --json adds a
-                                  liveness field
+  status [--json]                 show the state of the run and list the
+                                  other runs; --json adds liveness and
+                                  instances fields
   wake [--json]                   start the loops of a sleeping run
   pause <workflow> [--json]       stop one loop and keep it stopped, also
                                   after a budget pause
@@ -300,7 +302,7 @@ func run() (code int) {
 		dir = "."
 	}
 	noServer, noDashboard, dashPort, unite, hostFlag := c.noServer, c.noDashboard, c.dashPort, c.unite, c.host
-	abs, err := filepath.Abs(dir)
+	abs, err := absRoot(dir)
 	if err != nil {
 		fatal(err)
 	}
@@ -385,6 +387,13 @@ func run() (code int) {
 		names[i] = l.name
 	}
 	sup := newSupervisor(abs, bin, loops, loopPorts)
+	switch {
+	case noServer || noDashboard:
+	case dashPort > 0:
+		sup.dash = dashInfo{URL: dashboardURL(hostFlag, dashPort), Serve: true}
+	case dashPort < 0:
+		sup.dash = dashInfo{URL: fmt.Sprintf("http://127.0.0.1:%d", -dashPort)}
+	}
 	sup.setGate(engine.Detect(bin))
 	sup.sleepCfg = cfg.Sleep
 	sup.initBudget(cfg.Budgets)

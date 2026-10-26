@@ -175,7 +175,7 @@ func TestOldFormatRegistryStillLoads(t *testing.T) {
 	old := `{"entries":{"/r":{"repo_name":"o/n","updated_at":"2026-01-01T00:00:00Z","pid":1,` +
 		`"loops":[{"repo":"/r","repo_name":"o/n","loop":"plan","port":7678,"db_path":"/x"}]}}}`
 	mustWrite(t, path, old)
-	if err := writeRegistry("/s", nil, time.Now()); err != nil {
+	if err := writeRegistry("/s", nil, time.Now(), dashInfo{}); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(path)

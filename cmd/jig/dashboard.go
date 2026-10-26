@@ -94,13 +94,23 @@ func serveDashboard(port int, unite bool, sup *supervisor, hostFlag string) {
 	// The process exit closes the history database's connections, which
 	// SQLite tolerates.
 	a.startHistory()
-	fmt.Printf("dashboard http://%s (bound to %s)\n", browseAddr(g, port), bindLabel(g, port))
+	fmt.Printf("dashboard %s (bound to %s)\n", dashboardURL(hostFlag, port), bindLabel(g, port))
 	// The server must not block the caller: main runs the supervisor loop.
 	go func() {
 		if err := serve(a, g, port); err != nil {
 			fmt.Fprintln(os.Stderr, "jig: dashboard:", err)
 		}
 	}()
+}
+
+// dashboardURL is the address a browser on this machine opens for a
+// dashboard served on port with the given --host value.
+func dashboardURL(hostFlag string, port int) string {
+	host := hostFlag
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	return "http://" + browseAddr(newHostGuard(host), port)
 }
 
 // bindLabel names the address the listener binds.

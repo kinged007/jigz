@@ -60,6 +60,16 @@ type registryEntry struct {
 	StartedAt time.Time `json:"started_at,omitempty"`
 	// StatusPath is the supervisor's status document.
 	StatusPath string `json:"status_path,omitempty"`
+	// Dashboard is the address of the dashboard this run serves or joined.
+	Dashboard string `json:"dashboard,omitempty"`
+	// ServesDashboard is true for the run whose process serves it.
+	ServesDashboard bool `json:"serves_dashboard,omitempty"`
+}
+
+// dashInfo is what a run records about its dashboard in the registry.
+type dashInfo struct {
+	URL   string
+	Serve bool
 }
 
 // registryPath returns the registry file, creating its directory. A
@@ -189,7 +199,7 @@ func findUniteDashboardOn(p int) int {
 
 // writeRegistry records this Jigz's endpoints so a --unite
 // dashboard started later can discover them without probing.
-func writeRegistry(root string, endpoints []loopEndpoint, startedAt time.Time) error {
+func writeRegistry(root string, endpoints []loopEndpoint, startedAt time.Time, dash dashInfo) error {
 	path, err := registryPath()
 	if err != nil {
 		return err
@@ -220,6 +230,9 @@ func writeRegistry(root string, endpoints []loopEndpoint, startedAt time.Time) e
 		Version:    version,
 		StartedAt:  startedAt.UTC(),
 		StatusPath: statusFile,
+
+		Dashboard:       dash.URL,
+		ServesDashboard: dash.Serve,
 	}
 	data, err := json.MarshalIndent(reg, "", "  ")
 	if err != nil {
@@ -258,6 +271,7 @@ func dropRegistry(root string) {
 	// stopped repository keeps its history. The zero pid is what stops
 	// the reader from probing their dead ports.
 	e.PID = 0
+	e.Dashboard, e.ServesDashboard = "", false
 	e.UpdatedAt = time.Now().UTC()
 	reg.Entries[root] = e
 	data, err = json.MarshalIndent(reg, "", "  ")

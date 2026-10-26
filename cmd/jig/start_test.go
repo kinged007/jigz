@@ -86,7 +86,7 @@ func TestStartRegisters(t *testing.T) {
 	f.st.spawn = func(argv []string, logPath string) (int, <-chan error, error) {
 		f.spawned = append(f.spawned, argv)
 		appendLog(t, logPath, "loop plan WORKFLOW.plan.md filter \"\"\ndashboard http://127.0.0.1:7677 (bound to 127.0.0.1:7677)\n")
-		f.registry = registryEntry{PID: 77}
+		f.registry = registryEntry{PID: 77, Dashboard: "http://127.0.0.1:7677"}
 		f.live = true
 		return 77, make(chan error), nil
 	}
