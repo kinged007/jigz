@@ -40,6 +40,11 @@ Read, in order:
   in the hub" features and no links to the hub.
 - No authentication in the dashboard. It binds to 127.0.0.1 by default;
   `--host 0.0.0.0` opens it. The Host and Origin checks stay.
+- The dashboard is read-only, because anyone who can reach it may view it.
+  It has only GET routes: no action, wizard, editor, restore or remove
+  route, and no form or button. Pages that named a control show the
+  equivalent `jig` command as text. Creating a project is done with
+  `jig setup`.
 - Dashboard scope: the current pages stay; metrics stay local and recent.
   Long history, cross-machine views, and analytics belong to the hub.
 - The agent session host (roadmap Phase 6) is internal: not in the user

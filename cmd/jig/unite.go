@@ -229,9 +229,9 @@ func writeRegistry(root string, endpoints []loopEndpoint, startedAt time.Time) e
 }
 
 // dropRegistry marks this repo's entry stopped on clean shutdown. The
-// entry stays so a dashboard that outlives this run can offer start
-// again with the arguments this run was started with; a removal would
-// take the repo off the page with no way back from the browser.
+// entry stays so a dashboard that outlives this run keeps the repo
+// listed with its last known state and the arguments this run was started
+// with.
 func dropRegistry(root string) {
 	path, err := registryPath()
 	if err != nil {

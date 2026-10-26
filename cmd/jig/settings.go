@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kinged007/jigz/internal/edit"
 	"github.com/kinged007/jigz/internal/engine"
 	fleetconfig "github.com/kinged007/jigz/internal/fleetconfig"
 	"github.com/kinged007/jigz/internal/rollup"
@@ -21,12 +20,11 @@ type pair struct{ Name, Value string }
 
 type settingsView struct {
 	pageData
-	BindAddr    string
-	Versions    []pair
-	Paths       []pair
-	SampleDays  int
-	BackupsKept int
-	GitHub      fleetconfig.GitHub
+	BindAddr   string
+	Versions   []pair
+	Paths      []pair
+	SampleDays int
+	GitHub     fleetconfig.GitHub
 	// GitHubInterval and GitHubAPI are the effective values of the github
 	// section; Statuses has one line per project and is set only when
 	// enrichment is on.
@@ -36,7 +34,7 @@ type settingsView struct {
 }
 
 func (a *app) settings(w http.ResponseWriter, r *http.Request) {
-	v := settingsView{pageData: a.pageView(r, "settings", "Settings"), SampleDays: int(store.SampleRetention.Hours() / 24), BackupsKept: edit.KeepBackups}
+	v := settingsView{pageData: a.pageView(r, "settings", "Settings"), SampleDays: int(store.SampleRetention.Hours() / 24)}
 	a.mu.Lock()
 	v.BindAddr = a.bindAddr
 	dir := a.stateDir
@@ -95,4 +93,20 @@ func firstLine(bin string, args ...string) string {
 	}
 	line, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
 	return line
+}
+
+type backupsView struct {
+	pageData
+	Backups []store.Backup
+}
+
+func (a *app) backupsPage(w http.ResponseWriter, r *http.Request) {
+	d := backupsView{pageData: a.pageView(r, "settings", "Backups")}
+	if a.store != nil {
+		var err error
+		if d.Backups, err = a.store.Backups("", 200); err != nil {
+			d.Err = err.Error()
+		}
+	}
+	execPage(w, "backups", d)
 }

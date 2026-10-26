@@ -214,11 +214,13 @@ a typo cannot leave that loop's work unwatched.
 
 ## Dashboard
 
-Every run serves a control page (default `http://127.0.0.1:7677`, bound to
-loopback) and its own debug port per loop, starting at 7678. The page is
-also the control panel: it starts, stops, drains and restarts each
-repository, wakes a sleeping run, runs the cleanup command, pauses or
-resumes one workflow, overrides a budget hold, and stops everything.
+Every run serves a dashboard (default `http://127.0.0.1:7677`, bound to
+loopback) and its own debug port per loop, starting at 7678. The dashboard
+is read-only: it shows state and history, and nothing on it starts, stops,
+restarts, edits or changes anything. Loops are controlled with the `jig`
+commands (`jig stop`, `jig restart`, `jig reload`, `jig wake`,
+`jig cleanup`, `jig pause`, `jig resume`, `jig budget override`), and
+projects are set up with `jig setup`.
 
 It reads the shared registry and each repository's status document plus
 run data from its loops, so the numbers survive restarts and a repository
@@ -230,8 +232,8 @@ needs no build step and works as static HTML without scripting.
 Pages: Operations (fleet, alerts, token charts, per-repository and
 per-loop rows), Runs and Usage from the history database, Workflows (the
 pipeline each repository's files describe, plus validation), Projects,
-Agents (the settings each workflow file declares), Settings, the workflow
-editor, and each loop's child log.
+Agents (the settings each workflow file declares), Settings, Backups, and
+each loop's child log.
 
 ### Run data
 
@@ -269,11 +271,8 @@ join instead of starting a second page. Without `--unite` the page shows
 only its own repository; with it, every registered repository appears
 with whatever process is supervising it.
 
-Controls act on the running process, not on a copy: they signal it, or
-write the same request files the CLI writes, so the page and the
-commands cannot disagree. A repository that stopped keeps its row, so it
-can be started again from the page; a state-changing request from another
-origin is refused.
+A repository that stopped keeps its row with its last known state.
+The dashboard answers only `GET` requests; any other method is refused.
 
 ### Access
 
@@ -282,13 +281,14 @@ only processes on the same machine can reach it. `--host 0.0.0.0` (or
 `--host ::`) listens on all interfaces, and `--host ADDR` binds one
 address. A non-loopback bind prints a notice on stderr at startup.
 
-Anyone who can reach the dashboard can start and stop agents and edit the
-configuration. Use it locally, on a private network, or behind your own
-secure proxy, for example an SSH tunnel, Tailscale, or a reverse proxy
-that requires authentication.
+Anyone who can reach the dashboard can view it. It shows project names,
+run history, token use and log tails, and has no capability to change
+anything. Use it locally, on a private network, or behind your own secure
+proxy, for example an SSH tunnel, Tailscale, or a reverse proxy that
+requires authentication.
 
 The dashboard refuses a request whose `Host` header is not one it serves
-and a state-changing request from another origin. Naming one interface
+and a non-GET request from another origin. Naming one interface
 with `--host` limits the accepted `Host` values to that address and the
 loopback names; a wildcard bind accepts any `Host`.
 

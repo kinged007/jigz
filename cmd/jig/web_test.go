@@ -231,27 +231,16 @@ func TestLoopRowWithoutServerUsesStatusDoc(t *testing.T) {
 }
 
 // A page on another site can post a form to 127.0.0.1. The Origin header
-// is what tells that apart from a form the dashboard served itself.
+// tells that apart from a request made from the dashboard's own origin.
 func TestCrossOriginPostRefused(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	a := &app{sizes: newRepoSizes(), stateDir: t.TempDir(), quit: make(chan struct{})}
+	a := &app{sizes: newRepoSizes(), stateDir: t.TempDir()}
 	h := a.routes(newHostGuard("127.0.0.1"))
-	post := func(origin string) int {
-		req := httptest.NewRequest("POST", "/action", strings.NewReader("op=bogus"))
-		req.Host = "127.0.0.1"
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		if origin != "" {
-			req.Header.Set("Origin", origin)
-		}
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, req)
-		return rec.Code
-	}
-	if got := post("http://evil.example"); got != http.StatusForbidden {
+	if got := serveForm(h, "POST", "/", "", "http://evil.example").Code; got != http.StatusForbidden {
 		t.Errorf("cross-site post = %d, want 403", got)
 	}
-	if got := post("http://127.0.0.1"); got == http.StatusForbidden {
-		t.Error("a same-origin post was refused")
+	if got := serveForm(h, "POST", "/", "", "http://127.0.0.1").Code; got != http.StatusMethodNotAllowed {
+		t.Errorf("same-origin post = %d, want 405", got)
 	}
 }
 
@@ -283,14 +272,6 @@ func TestUnknownPathIs404(t *testing.T) {
 	}
 }
 
-func wizardTestServer(t *testing.T) http.Handler {
-	t.Helper()
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	t.Setenv("HOME", t.TempDir())
-	a := &app{sizes: newRepoSizes(), stateDir: t.TempDir(), configPath: filepath.Join(t.TempDir(), "jigz.yaml"), quit: make(chan struct{})}
-	return a.routes(newHostGuard("127.0.0.1"))
-}
-
 func serveForm(h http.Handler, method, path, body, origin string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Host = "127.0.0.1"
@@ -301,44 +282,4 @@ func serveForm(h http.Handler, method, path, body, origin string) *httptest.Resp
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec
-}
-
-func TestWizardPageRenders(t *testing.T) {
-	rec := serveForm(wizardTestServer(t), "GET", "/projects/new", "", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /projects/new = %d, want 200", rec.Code)
-	}
-	body := rec.Body.String()
-	for _, want := range []string{"<h1>Add project</h1>", `action="/projects/new"`} {
-		if !strings.Contains(body, want) {
-			t.Errorf("wizard page lacks %q", want)
-		}
-	}
-}
-
-func TestWizardPostEmptyInputShowsWizard(t *testing.T) {
-	rec := serveForm(wizardTestServer(t), "POST", "/projects/new", "step=1", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("POST /projects/new = %d, want 200", rec.Code)
-	}
-	body := rec.Body.String()
-	if !strings.Contains(body, `action="/projects/new"`) {
-		t.Error("response is not the wizard form")
-	}
-	if !strings.Contains(body, "<h1>Add project</h1>") {
-		t.Error("response lacks the wizard heading")
-	}
-	if !strings.Contains(body, "Nothing was written.") {
-		t.Error("response lacks the validation banner")
-	}
-}
-
-func TestProjectRemoveUnknownAndCrossOrigin(t *testing.T) {
-	h := wizardTestServer(t)
-	if rec := serveForm(h, "POST", "/projects/no/such/remove", "confirm=1", ""); rec.Code != http.StatusNotFound {
-		t.Errorf("remove of unknown project = %d, want 404", rec.Code)
-	}
-	if rec := serveForm(h, "POST", "/projects/no/such/remove", "confirm=1", "http://evil.example"); rec.Code != http.StatusForbidden {
-		t.Errorf("cross-origin remove = %d, want 403", rec.Code)
-	}
 }

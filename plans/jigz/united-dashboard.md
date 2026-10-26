@@ -2,6 +2,11 @@
 
 Status: implemented — branch `feat/united-dashboard`, uncommitted on top of `52e9003` — the dashboard serves the fleet dashboard's pages; `gofmt -l` empty, `go vet`/`go build`/`go test` green
 
+The dashboard is read-only: it serves only GET routes and has no form,
+button or script that starts, stops, restarts, edits or changes anything.
+Sections below that describe actions, the editor, the wizard or the confirm
+page describe the design of the original port.
+
 Recreate the fleet dashboard and control panel inside `jig`, so every
 `jig` run serves the same pages
 whether it is one repo or `—-unite` (many repos). The extra binary

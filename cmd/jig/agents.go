@@ -26,9 +26,9 @@ var agentColumns = []agentColumn{
 type agentCell struct{ Value, Origin, File string }
 
 type agentRow struct {
-	Label, EditURL, Note string
-	Group                bool
-	Cells                []agentCell
+	Label, Note string
+	Group       bool
+	Cells       []agentCell
 }
 
 type agentsView struct {
@@ -60,7 +60,7 @@ type machineView struct {
 
 func (a *app) agents(w http.ResponseWriter, r *http.Request) {
 	v := agentsView{pageData: a.pageView(r, "agents", "Agents"), Columns: agentColumns}
-	v.Span = len(agentColumns) + 2
+	v.Span = len(agentColumns) + 1
 	for _, p := range a.projects() {
 		slug := p.Repo.Repo
 		v.Rows = append(v.Rows, agentRow{Label: slug, Group: true})
@@ -71,7 +71,7 @@ func (a *app) agents(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, n := range names {
 			file, note := a.workflowKnobs(p, n)
-			row := agentRow{Label: n, EditURL: "/edit/workflow/" + slug + "/" + n, Note: note}
+			row := agentRow{Label: n, Note: note}
 			for _, col := range agentColumns {
 				row.Cells = append(row.Cells, agentCellFor(file[col.Key]))
 			}
