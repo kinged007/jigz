@@ -38,7 +38,7 @@ func installedWorkflows(r fleetconfig.Resolved) []string {
 }
 
 func (a *app) pageView(r *http.Request, nav, title string) pageData {
-	d := a.dataFor(r, r.URL.Query().Get("msg"), r.URL.Query().Get("err"))
+	d := a.dataFor(r, "", "")
 	d.Nav, d.Title = nav, title
 	return d
 }

@@ -1,0 +1,12 @@
+{{define "backups"}}{{template "shell-top" .}}
+<p class="sub"><a href="/settings">Settings</a> / backups</p>
+<h1>Backups</h1>
+<p class="sub">Copies of files saved before earlier changes to them.</p>
+{{if .Backups}}
+<div class="tw"><table>
+<thead><tr><th>#</th><th>Time (UTC)</th><th>File</th><th>Scope</th><th>Saved by</th></tr></thead><tbody>
+{{range .Backups}}<tr><td>{{.ID}}</td><td>{{utc .TS}}</td><td><code>{{.Path}}</code></td><td>{{.Scope}}</td><td>{{.Actor}}</td></tr>{{end}}
+</tbody></table></div>
+{{else}}<p class="empty">No backups.</p>{{end}}
+{{template "statuspoll"}}
+{{template "shell-bottom" .}}{{end}}

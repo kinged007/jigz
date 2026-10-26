@@ -291,6 +291,22 @@ func TestAcceptance(t *testing.T) {
 			}
 		}
 
+		for _, path := range []string{"/action", "/projects/new", "/edit/validate", "/edit/apply", "/backups/restore"} {
+			resp, err := http.Post(dash+path, "application/x-www-form-urlencoded", strings.NewReader("op=stop"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusNotFound && resp.StatusCode != http.StatusMethodNotAllowed {
+				t.Errorf("POST %s: %s, want 404 or 405", path, resp.Status)
+			}
+		}
+		for _, path := range []string{"/", "/live", "/projects", "/workflows", "/agents", "/settings", "/backups"} {
+			if body := strings.ToLower(getBody(t, dash+path)); strings.Contains(body, `method="post"`) {
+				t.Errorf("%s has a form that posts", path)
+			}
+		}
+
 		var fleet struct {
 			SchemaNotices []json.RawMessage `json:"schema_notices"`
 			Totals        struct{ Runs int }

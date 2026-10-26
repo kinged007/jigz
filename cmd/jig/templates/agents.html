@@ -8,9 +8,9 @@
 </div>
 
 <div class="tw"><table class="agents">
-<thead><tr><th>Project / workflow</th>{{range .Columns}}<th>{{.Label}}</th>{{end}}<th>Edit</th></tr></thead><tbody>
+<thead><tr><th>Project / workflow</th>{{range .Columns}}<th>{{.Label}}</th>{{end}}</tr></thead><tbody>
 {{range .Rows}}{{if .Group}}<tr class="group"><td colspan="{{$.Span}}">{{.Label}}</td></tr>
-{{else}}<tr><td>{{.Label}}{{if .Note}} <span class="muted">{{.Note}}</span>{{end}}</td>{{range .Cells}}<td>{{if .Value}}<code>{{.Value}}</code>{{else}}<span class="muted">&mdash;</span>{{end}}</td>{{end}}<td><a class="btn" href="{{.EditURL}}">Edit</a></td></tr>
+{{else}}<tr><td>{{.Label}}{{if .Note}} <span class="muted">{{.Note}}</span>{{end}}</td>{{range .Cells}}<td>{{if .Value}}<code>{{.Value}}</code>{{else}}<span class="muted">&mdash;</span>{{end}}</td>{{end}}</tr>
 {{end}}{{end}}
 </tbody></table></div>
 

@@ -17,7 +17,7 @@ import (
 type wfRule struct{ Name, Match, Agent, Template, Stage, Next string }
 
 type wfFile struct {
-	Name, Kind, EditURL string
+	Name, Kind string
 	// Status is valid, invalid or unknown; Detail is the first error, or
 	// why the check did not run.
 	Status, Detail string
@@ -121,7 +121,7 @@ func pollingText(ms int) string {
 
 func (a *app) workflowFile(p fleetconfig.Resolved, name string) wfFile {
 	path := a.workflowPath(p, name)
-	f := wfFile{Name: name, EditURL: "/edit/workflow/" + p.Repo.Repo + "/" + name, Status: "unknown"}
+	f := wfFile{Name: name, Status: "unknown"}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		f.Detail = err.Error()

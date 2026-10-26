@@ -14,7 +14,6 @@
 tr.lp td { background: var(--bg2); padding-top: .1rem; padding-bottom: .1rem; }
 .running td:nth-child(-n+3), .audit td:nth-child(-n+4) { white-space: nowrap; }
 tr.lp td:first-child { padding-left: 1.6rem; }
-.acts { display: flex; gap: .25rem; flex-wrap: wrap; }
 .s-sleeping { --c: var(--info); }
 .s-awake { --c: var(--ok); }
 .errtext { color: var(--err); overflow-wrap: anywhere; }
@@ -24,7 +23,6 @@ tr.lp td:first-child { padding-left: 1.6rem; }
     <h1>Operations</h1>
     <p class="sub">Fleet state, budgets and usage</p>
   </div>
-  <div class="row">{{template "fleetbulk" .}}{{template "fleetactions" .}}</div>
 </div>
 {{template "livetop" .}}{{template "metrics" .}}
 <div class="sechead">
@@ -37,13 +35,6 @@ tr.lp td:first-child { padding-left: 1.6rem; }
   </form>
 </div>
 {{template "livebody" .}}{{template "chartjs"}}{{template "livescript"}}{{template "shell-bottom" .}}{{end}}
-
-{{define "fleetbulk"}}<form class="row" method="post" action="/action">
-  <div class="acts">
-    <button name="op" value="startall" {{ctl "Start every project that is stopped and ready"}}>{{template "icon-play"}} start all</button>
-    <button name="op" value="drainall" {{ctl "Each loop stops as soon as it has no work in flight. This page keeps running."}}>{{template "icon-drain"}} drain all</button>
-  </div>
-</form>{{end}}
 
 {{define "live"}}{{template "livetop" .}}{{template "livebody" .}}{{end}}
 
@@ -59,24 +50,6 @@ tr.lp td:first-child { padding-left: 1.6rem; }
 </div>
 </div>{{end}}
 
-{{define "projectacts"}}<form class="inline" method="post" action="/action">
-  <input type="hidden" name="repo" value="{{.Slug}}">
-  <div class="acts">
-    {{if .IsRunning}}
-      <button class="sm" name="op" value="stop" {{ctl ""}}>{{template "icon-stop"}} stop</button>
-      <button class="sm" name="op" value="drain" {{ctl "Each loop stops as soon as it has no work in flight, one loop at a time. The loop run decides when; the dashboard only asks."}}>{{template "icon-drain"}} stop when idle</button>
-    {{else}}
-      <button class="sm" name="op" value="start" {{ctl ""}}>{{template "icon-play"}} start</button>
-    {{end}}
-    <button class="sm" name="op" value="restart" {{ctl "Stop now and start again, interrupting whatever is running"}}>{{template "icon-restart"}} restart</button>
-    {{if .CanWake}}<button class="sm" name="op" value="wake" {{ctl "Wake this project's sleeping loops now"}}>{{template "icon-play"}} wake</button>{{end}}
-    {{if .CanCleanup}}
-      <button class="sm" name="op" value="cleanup" {{ctl "List what the cleanup command would remove. Nothing is deleted."}}>Run cleanup (dry run)</button>
-      <button class="sm danger" name="op" value="cleanup" formaction="/action?dry_run=0" {{ctl "Run the cleanup command for real"}} onclick="return confirm('Run cleanup for {{.Slug}} now? This deletes what the cleanup command removes.')">Run cleanup</button>
-    {{end}}
-  </div>
-</form>{{end}}
-
 {{define "livebody"}}<div id="live">
 {{if not .Ops.AnyStatus}}<div class="banner info">Sleep, wake and cleanup details need the loop status document, which these loops do not write. Only process state is shown.</div>{{end}}
 {{if not .Ops.Projects}}<p class="empty">no projects are configured</p>{{else}}
@@ -90,7 +63,6 @@ tr.lp td:first-child { padding-left: 1.6rem; }
   <th class="num" title="The engine does not record cost yet">Cost</th>
   <th title="A project's share of all projects, and a loop's share of its project, in the selected period">Share</th>
   {{if .Ops.AnyCleanup}}<th title="The last time the project's cleanup command ran">Last cleanup</th>{{end}}
-  <th title="Stop waits for the agents rather than cutting a run off mid-turn">Actions</th>
 </tr></thead>
 <tbody>
 {{range .Ops.Projects}}
@@ -114,7 +86,6 @@ tr.lp td:first-child { padding-left: 1.6rem; }
   {{if $.Ops.AnyCleanup}}<td>{{with .Cleanup}}<span class="chip s-{{if .Ok}}succeeded{{else}}failed{{end}}">{{if .Ok}}ok{{else}}failed{{end}}</span>{{if .DryRun}} <span class="muted">dry run</span>{{end}}
     <span class="muted" title="{{.At}}">{{.Ago}}</span>
     <div class="muted">exit code {{.ExitCode}}, {{.Paths}} path{{if ne .Paths 1}}s{{end}}</div>{{else}}{{if .CanCleanup}}<span class="muted">no run yet</span>{{end}}{{end}}</td>{{end}}
-  <td>{{template "projectacts" .}}</td>
 </tr>
 {{range .Loops}}
 <tr class="lp">
@@ -135,21 +106,13 @@ tr.lp td:first-child { padding-left: 1.6rem; }
   <td class="num" title="Cost of the agents running now, as the engine estimates it">{{usd .L.Cost}}</td>
   <td>{{template "share" .Figures.Share}}</td>
   {{if $.Ops.AnyCleanup}}<td></td>{{end}}
-  <td><form class="inline" method="post" action="/action">
-    <input type="hidden" name="repo" value="{{.L.Repo}}">
-    <input type="hidden" name="workflow" value="{{.L.Loop}}">
-    <div class="acts">
-      {{if .Paused}}<button class="sm" name="op" value="resume" {{ctl "Let this workflow run again"}}>resume</button>
-      {{else}}<button class="sm" name="op" value="pause" {{ctl "Stop this workflow from picking up new work; a running agent finishes its turn"}}>pause</button>{{end}}
-      <button class="sm" name="op" value="override" {{ctl "Clear this period's budget hold so the workflow runs again"}}>budget override</button>
-    </div>
-  </form></td>
 </tr>
 {{end}}
 {{end}}
 </tbody>
 </table></div>
-<p class="sub">A budget line shows this period's spend against the workflow's cap. Pause stops a workflow from picking up new work and resume undoes it; budget override clears this period's cap hold. A running agent finishes its turn either way.</p>
+<p class="sub">A budget line shows this period's spend against the workflow's cap.</p>
+<p class="sub">This dashboard is read-only. Loops are controlled from the command line: <code>jig stop</code>, <code>jig restart</code>, <code>jig reload</code>, <code>jig wake</code>, <code>jig cleanup</code>, <code>jig pause &lt;workflow&gt;</code>, <code>jig resume &lt;workflow&gt;</code> and <code>jig budget override &lt;workflow&gt;</code>.</p>
 {{end}}
 
 <div class="card">

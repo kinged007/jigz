@@ -18,6 +18,19 @@ import (
 	"github.com/kinged007/jigz/internal/supervise"
 )
 
+func (a *app) project(slug string) (fleetconfig.Resolved, bool) {
+	for _, r := range a.projects() {
+		if r.Repo.Repo == slug {
+			return r, true
+		}
+	}
+	return fleetconfig.Resolved{}, false
+}
+
+func (a *app) workflowPath(r fleetconfig.Resolved, workflow string) string {
+	return filepath.Join(r.Dir, ".jigz", "workflows", "WORKFLOW."+workflow+".md")
+}
+
 // projectPeriodDays is the window of the token figure on the Projects page.
 const projectPeriodDays = 14
 
@@ -181,9 +194,6 @@ type projectView struct {
 	Ops      *opsProject
 	ShowHash bool
 }
-
-// IsRunning decides between offering start and stop.
-func (v projectView) IsRunning() bool { return v.State == supervise.StateRunning }
 
 // detail gathers one project's page.
 func (a *app) detail(r *http.Request, d pageData, slug string) (projectView, bool) {

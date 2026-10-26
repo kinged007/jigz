@@ -1,9 +1,7 @@
 package main
 
 import (
-	"context"
 	"embed"
-	"errors"
 	"fmt"
 	"html/template"
 	"log"
@@ -16,7 +14,6 @@ import (
 	"time"
 
 	machine "github.com/kinged007/jigz/internal/host"
-	"github.com/kinged007/jigz/internal/loopsrc"
 	"github.com/kinged007/jigz/internal/rollup"
 	"github.com/kinged007/jigz/internal/supervise"
 )
@@ -43,15 +40,6 @@ var funcs = template.FuncMap{
 	"agent":    agentLabel,
 	"utc":      utc,
 	"trunc":    trunc,
-	"ctl":      ctl,
-}
-
-// ctl returns the title attribute of a control that changes something.
-func ctl(title string) template.HTMLAttr {
-	if title == "" {
-		return ""
-	}
-	return template.HTMLAttr(`title="` + template.HTMLEscapeString(title) + `"`)
 }
 
 // size renders a directory size in whichever unit keeps it readable.
@@ -290,8 +278,7 @@ func active(f rollup.Fleet, agents map[string]string) []activeRun {
 
 // hostGuard decides which Host header values are served.
 //
-// The page can start and stop agents holding a GitHub write token, and a
-// browser on another site can reach a private address with an arbitrary
+// A browser on another site can reach a private address with an arbitrary
 // Host header (DNS rebinding), so the header is checked rather than
 // trusted. The loopback names are always accepted.
 type hostGuard struct {
@@ -383,18 +370,10 @@ func (a *app) routes(g hostGuard) http.Handler {
 	mux.HandleFunc("GET /workflows", a.workflows)
 	mux.HandleFunc("GET /projects", a.projectsPage)
 	mux.HandleFunc("GET /projects/{owner}/{name}", a.projectPage)
-	mux.HandleFunc("GET /projects/new", a.wizardGet)
-	mux.HandleFunc("POST /projects/new", a.wizardPost)
-	mux.HandleFunc("POST /projects/{owner}/{name}/remove", a.projectRemove)
 	mux.HandleFunc("GET /agents", a.agents)
 	mux.HandleFunc("GET /settings", a.settings)
-	mux.HandleFunc("GET /edit/workflow/{owner}/{name}/{workflow}", a.editGet("workflow", false))
-	mux.HandleFunc("POST /edit/validate", a.editValidate)
-	mux.HandleFunc("POST /edit/apply", a.editApply)
 	mux.HandleFunc("GET /backups", a.backupsPage)
-	mux.HandleFunc("POST /backups/restore", a.backupRestore)
 	mux.HandleFunc("GET /status", a.status)
-	mux.HandleFunc("POST /action", a.action)
 	mux.HandleFunc("GET /api/v1/fleet", a.apiFleet)
 	mux.HandleFunc("GET /api/v1/projects", a.apiProjects)
 	mux.HandleFunc("GET /api/v1/projects/{owner}/{name}", a.apiProject)
@@ -413,9 +392,9 @@ func (a *app) routes(g hostGuard) http.Handler {
 	})
 }
 
-// sameOrigin refuses a state-changing request a browser sent from another
-// site. The page has no authentication, so binding loopback is what keeps
-// it local, and that alone does not stop a page on the internet posting a
+// sameOrigin refuses a non-GET request a browser sent from another site.
+// The page has no authentication, so binding loopback is what keeps it
+// local, and that alone does not stop a page on the internet posting a
 // form to 127.0.0.1: the Origin header is what tells the two apart. A
 // request without one is not a cross-site form post.
 func sameOrigin(r *http.Request) bool {
@@ -467,8 +446,7 @@ type repoView struct {
 	Share         int
 }
 
-// IsRunning is whether the child process is up, which is what decides
-// between offering start and offering stop.
+// IsRunning is whether the child process is up.
 func (v repoView) IsRunning() bool { return v.State == supervise.StateRunning }
 
 // pageData is everything the template renders.
@@ -486,10 +464,6 @@ type pageData struct {
 	Exposed bool
 	// Active is every busy agent in the fleet, flattened.
 	Active []activeRun
-	// Confirm and WhenIdle mark the page that asks before stopping the
-	// whole fleet, and say which of the two stops is about to happen.
-	Confirm  bool
-	WhenIdle bool
 	// Nav is the sidebar entry of the page being rendered, and Title the
 	// page's name in the browser tab.
 	Nav, Title string
@@ -564,8 +538,7 @@ func (a *app) dataFor(r *http.Request, msg, errMsg string) pageData {
 
 func (a *app) page(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	q := r.URL.Query()
-	if err := page.ExecuteTemplate(w, "page", a.opsFor(r, q.Get("msg"), q.Get("err"))); err != nil {
+	if err := page.ExecuteTemplate(w, "page", a.opsFor(r, "", "")); err != nil {
 		// A template that fails partway has already written a header, so
 		// http.Error's own is superfluous and its message never reaches
 		// the browser. Log it: otherwise the page is silently truncated
@@ -591,251 +564,6 @@ func (a *app) status(w http.ResponseWriter, r *http.Request) {
 	if err := page.ExecuteTemplate(w, "status", a.dataFor(r, "", "")); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
-}
-
-// action starts, stops, or restarts one repository, or brings the whole
-// fleet down. It is a plain form post, so the page works without
-// scripting.
-func (a *app) action(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
-		http.Redirect(w, r, "/?err="+query("bad form"), http.StatusSeeOther)
-		return
-	}
-	slug, op := r.FormValue("repo"), r.FormValue("op")
-	whenIdle := r.FormValue("when_idle") != ""
-	// Stopping the fleet takes this process down with it, and there is
-	// no way back from that, so the button asks first and this is the
-	// answer. The confirmation page says which of the two stops is about
-	// to happen, because the unticked box is a different promise.
-	if op == "stopall" && r.FormValue("confirm") == "" {
-		d := a.dataFor(r, "", "")
-		d.Confirm, d.WhenIdle = true, whenIdle
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := page.ExecuteTemplate(w, "confirm", d); err != nil {
-			log.Printf("confirm: %v", err)
-		}
-		return
-	}
-	var err error
-	var note, target string
-	stopping := false
-	switch op {
-	case "startall":
-		a.sup.StartAll()
-		note = "start all: every stopped project was started"
-	case "drainall":
-		err = a.drainAll()
-		note = "drain all: each project stops as its loops go idle"
-	case "wake":
-		note, err = a.wake(r.Context(), slug)
-	case "pause", "resume", "override":
-		// Per workflow, not per repository: the request is the same file
-		// the pause, resume and budget commands write.
-		workflow := r.FormValue("workflow")
-		root, _, ok := resolveRepo(slug, true, nil)
-		switch {
-		case !ok:
-			err = fmt.Errorf("unknown project %q", slug)
-		case workflow == "":
-			err = fmt.Errorf("%s needs a workflow", op)
-		default:
-			var res budgetCmdResult
-			if res, err = controlWorkflow(root, op, workflow); err == nil {
-				switch {
-				case res.Paused:
-					note = op + " " + workflow + " on " + slug + ": paused"
-				case res.Override:
-					note = op + " " + workflow + " on " + slug + ": budget overridden for this period"
-				default:
-					note = op + " " + workflow + " on " + slug
-				}
-			}
-		}
-	case "cleanup":
-		dry := r.FormValue("dry_run") != "0"
-		target = "run"
-		if dry {
-			target = "dry run"
-		}
-		note, err = a.cleanup(r.Context(), slug, dry)
-	case "start":
-		err = a.sup.Start(slug)
-	case "stop":
-		err = a.sup.Stop(slug)
-	case "drain":
-		// Wait for the agents to finish, then stop. Returns at once; the
-		// supervisor watches for the idle moment.
-		err = a.sup.StopWhenIdle(slug)
-	case "restart":
-		err = a.sup.Restart(slug)
-	case "stopall":
-		a.stopAll(whenIdle)
-		if whenIdle {
-			slug = "every loop, each as it goes idle, then this process"
-		} else {
-			slug = "every loop now, then this process"
-		}
-		stopping = true
-	case "apply":
-		// Re-read the config and re-materialize everything, then start
-		// whatever is ready and stopped. A running child whose settings
-		// moved is handed back to its own run, which waits for its loops
-		// to go quiet unless the box is unticked.
-		if err = a.reload(whenIdle); err == nil {
-			a.sup.StartAll()
-		}
-	default:
-		err = fmt.Errorf("unknown action %q", op)
-	}
-	text := op + " " + slug
-	result := "ok"
-	if note != "" {
-		text, result = note, note
-	}
-	if err != nil {
-		text, result = err.Error(), err.Error()
-	}
-	project := slug
-	if op == "stopall" || op == "apply" || op == "startall" || op == "drainall" {
-		project = ""
-	}
-	a.audit(r, op, project, target, result)
-	// A redirect here would point the browser at a port the process is
-	// already leaving, so it gets this page instead: the last thing the
-	// browser loads, and its next tick says the process is gone.
-	if stopping {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if e := page.ExecuteTemplate(w, "page", a.opsFor(r, text, "")); e != nil {
-			log.Printf("page: %v", e)
-		}
-		return
-	}
-	back := "/"
-	if next := safeNext(r.FormValue("next")); strings.HasPrefix(next, "/projects/") {
-		back = next
-	}
-	key := "msg"
-	if err != nil {
-		key = "err"
-	}
-	http.Redirect(w, r, back+"?"+key+"="+query(text), http.StatusSeeOther)
-}
-
-// drainAll asks every running project to stop each loop as it goes idle.
-// Unlike stop all it leaves this process running.
-func (a *app) drainAll() error {
-	var errs []error
-	for _, r := range a.repos() {
-		if r.State == supervise.StateRunning {
-			if err := a.sup.StopWhenIdle(r.Slug); err != nil {
-				errs = append(errs, fmt.Errorf("drain %s: %w", r.Slug, err))
-			}
-		}
-	}
-	return errors.Join(errs...)
-}
-
-// operator returns the loop source when the project reports the capability
-// can asks for, or an error saying that it does not.
-func (a *app) operator(slug string, can func(loopsrc.Capabilities) bool, what string) (loopsrc.Operator, error) {
-	op, ok := a.src().(loopsrc.Operator)
-	if !ok || !can(op.ProjectCapabilities(slug)) {
-		return nil, fmt.Errorf("%s %s: not supported by this project's Jigz", what, slug)
-	}
-	return op, nil
-}
-
-// wake wakes a sleeping project and describes what happened.
-func (a *app) wake(ctx context.Context, slug string) (string, error) {
-	op, err := a.operator(slug, func(c loopsrc.Capabilities) bool { return c.Wake }, "wake")
-	if err != nil {
-		return "", err
-	}
-	res, err := op.Wake(ctx, slug)
-	switch {
-	case err != nil:
-		return "", fmt.Errorf("wake %s: %w", slug, err)
-	case res.Woke && res.WasSleeping:
-		return "woke " + slug, nil
-	case res.Woke:
-		return slug + " was already awake", nil
-	}
-	return "wake " + slug + ": the loop did not wake", nil
-}
-
-// cleanup runs a project's cleanup command, or lists what it would remove
-// when dry is set, and describes the outcome.
-func (a *app) cleanup(ctx context.Context, slug string, dry bool) (string, error) {
-	op, err := a.operator(slug, func(c loopsrc.Capabilities) bool { return c.Cleanup }, "cleanup")
-	if err != nil {
-		return "", err
-	}
-	what := "cleanup"
-	if dry {
-		what = "cleanup (dry run)"
-	}
-	res, err := op.Cleanup(ctx, slug, dry)
-	if err != nil {
-		return "", fmt.Errorf("%s of %s: %w", what, slug, err)
-	}
-	msg := fmt.Sprintf("%s of %s: exit code %d in %d ms", what, slug, res.ExitCode, res.DurationMs)
-	if out := strings.TrimSpace(res.OutputTail); out != "" {
-		msg += ". Output: " + trunc(out, 300)
-	}
-	return msg, nil
-}
-
-// stopAll stops every loop and then this process, which is the only
-// supervisor for them: a loop left running after Jigz is gone keeps
-// claiming issues with nobody watching.
-//
-// It returns at once either way. A drained fleet takes as long as its
-// agents take, and an HTTP request is not the place to wait for that.
-func (a *app) stopAll(whenIdle bool) {
-	if whenIdle {
-		a.sup.StopAllWhenIdle()
-		go func() {
-			a.sup.WaitAll()
-			a.shutdown()
-		}()
-		return
-	}
-	go func() {
-		a.sup.StopAll()
-		a.shutdown()
-	}()
-}
-
-// query escapes a message for a redirect target. html/template escapes
-// it again on the way out, so the round trip is safe in both
-// directions.
-func query(s string) string { return url.QueryEscape(s) }
-
-// clientAddr is the host part of the client's address, recorded as the
-// actor of an audit entry.
-func clientAddr(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
-}
-
-// safeNext returns next when it is a same-origin relative path, else "/".
-func safeNext(next string) string {
-	if !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") || strings.ContainsAny(next, "\\\r\n\t") {
-		return "/"
-	}
-	u, err := url.Parse(next)
-	if err != nil || u.Scheme != "" || u.Host != "" {
-		return "/"
-	}
-	return next
-}
-
-// audit records a change made by the client of r.
-func (a *app) audit(r *http.Request, action, project, target, result string) {
-	a.auditAs(clientAddr(r), action, project, target, result)
 }
 
 func (a *app) auditAs(actor, action, project, target, result string) {

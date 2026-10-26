@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	machine "github.com/kinged007/jigz/internal/host"
@@ -70,7 +69,6 @@ func serveDashboard(port int, unite bool, sup *supervisor, hostFlag string) {
 	stateDir := dashboardStateDir()
 	a := &app{
 		sup:       &fleetSupervisor{local: sup, localOnly: !unite},
-		quit:      make(chan struct{}),
 		sys:       machine.New(stateDir),
 		sizes:     newRepoSizes(),
 		stateDir:  stateDir,
@@ -93,20 +91,11 @@ func serveDashboard(port int, unite bool, sup *supervisor, hostFlag string) {
 		fmt.Fprintf(os.Stderr, "jig: dashboard exposed beyond loopback on %s: it has no authentication, so keep it on a private network or behind a secure proxy\n", bindLabel(g, port))
 	}
 	go a.watchSizes(make(chan struct{}))
-	// The history database outlives the request that asks for a stop: the
-	// stop-all page is rendered after the loops are asked to stop, and
-	// closing the store first would answer it with "database is closed".
-	// The process exit closes the connections, which SQLite tolerates.
+	// The process exit closes the history database's connections, which
+	// SQLite tolerates.
 	a.startHistory()
-	// The page's stop-all closes quit. The process then stops its loops
-	// on SIGTERM, and the run's own teardown drops the registry entry.
-	go func() {
-		<-a.quit
-		_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
-	}()
 	fmt.Printf("dashboard http://%s (bound to %s)\n", browseAddr(g, port), bindLabel(g, port))
-	// The server must not block the caller: main runs the supervisor
-	// loop, which is what answers the signals the page sends.
+	// The server must not block the caller: main runs the supervisor loop.
 	go func() {
 		if err := serve(a, g, port); err != nil {
 			fmt.Fprintln(os.Stderr, "jig: dashboard:", err)

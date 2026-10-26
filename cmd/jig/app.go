@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,7 +14,6 @@ import (
 
 	"github.com/kinged007/jigz/internal/collector"
 	"github.com/kinged007/jigz/internal/config"
-	"github.com/kinged007/jigz/internal/edit"
 	fleetconfig "github.com/kinged007/jigz/internal/fleetconfig"
 	machine "github.com/kinged007/jigz/internal/host"
 	"github.com/kinged007/jigz/internal/loopsrc"
@@ -98,8 +96,6 @@ type app struct {
 	bindAddr   string
 	sizes      *repoSizes
 	sys        *machine.Reader
-	quit       chan struct{}
-	quitOnce   sync.Once
 	source     loopsrc.Source
 	stateDir   string
 	github     fleetconfig.GitHub
@@ -111,8 +107,6 @@ type app struct {
 	verOnce    sync.Once
 	versions   []pair
 	alertCache dbAlertCache
-	pipeOnce   sync.Once
-	pipe       *edit.Pipeline
 	// unite is set when this page spans every registered repository,
 	// which the page states in its head so a later run can find it.
 	unite bool
@@ -146,34 +140,6 @@ func (a *app) projectRoots() map[string]string {
 	}
 	return out
 }
-
-// shutdown asks the process to stop. Safe to call more than once.
-func (a *app) shutdown() {
-	a.quitOnce.Do(func() {
-		if a.quit != nil {
-			close(a.quit)
-		}
-	})
-}
-
-// reload re-reads the config and recycles children whose settings moved.
-// Jigz applies a reload with SIGHUP, so each registered repo gets
-// one and the page refreshes when the supervisor rewrites its status.
-func (a *app) reload(whenIdle bool) error {
-	var errs []error
-	for _, r := range a.repos() {
-		if r.PID <= 0 {
-			continue
-		}
-		if _, err := reloadSupervisor(r.Dir); err != nil {
-			errs = append(errs, fmt.Errorf("reload %s: %w", r.Slug, err))
-		}
-	}
-	return errors.Join(errs...)
-}
-
-// workflowFile, wfFile, editSpec, and knownWorkflows are defined in the
-// copied handler files (workflows.go, editors.go).
 
 // validateWorkflow runs the engine's validator on one workflow file in
 // the environment a real loop gets: this repository's own config, whose

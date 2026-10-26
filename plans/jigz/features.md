@@ -9,7 +9,7 @@ section 6.
 ## 1. Setup and config
 
 - `setup` (interactive and `--json`): config scaffold, labels, workflow and
-  prompt install, env file (`setup.go`, `wizard.go`, `embed.go`, `bin.go`)
+  prompt install, env file (`setup.go`, `embed.go`, `bin.go`)
   — exists
 - Repo config and fleet config with validation (`internal/config`,
   `internal/fleetconfig`) — exists; ignored in connected mode
@@ -38,7 +38,11 @@ section 6.
 - Operations, runs, run detail, live run, usage, metrics, workflows,
   pipeline, projects, agents, settings, alerts (`web.go`, `pages.go` and
   page files) — exists
-- Form editing with backups (`editors.go`, `internal/edit`) — exists
+- The dashboard is read-only: it has no route, form or button that starts,
+  stops, restarts, edits or changes anything; loops are controlled with the
+  CLI (`stop`, `restart`, `reload`, `wake`, `cleanup`, `pause`, `resume`,
+  `budget override`, `setup`) — exists
+- Backups page lists saved copies of files, without restore — exists
 - Remove authentication; document local, private-network, and proxy
   deployment [0]
 - `--host` flag, default 127.0.0.1 [0]

@@ -1,13 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"slices"
-	"strings"
 	"syscall"
 	"testing"
-
-	"github.com/kinged007/jigz/internal/supervise"
 )
 
 // A bare restart replaces the run rather than signalling it, so it has no
@@ -61,35 +57,5 @@ func TestRestartArgv(t *testing.T) {
 	// An entry written before Args existed still restarts, without flags.
 	if got := restartArgv(registryEntry{}, "/root"); !slices.Equal(got, []string{"/root"}) {
 		t.Errorf("restartArgv with no recorded args = %q", got)
-	}
-}
-
-// Every repository row offers the control actions, on a unite page and a
-// single-repo page alike: the POST is routed to whichever process owns
-// the repo.
-func TestDashboardControls(t *testing.T) {
-	render := func(p opsProject) string {
-		var buf bytes.Buffer
-		if err := page.ExecuteTemplate(&buf, "projectacts", p); err != nil {
-			t.Fatalf("render: %v", err)
-		}
-		return buf.String()
-	}
-	running := opsProject{repoView: repoView{Repo: supervise.Repo{Slug: "owner/repo", State: supervise.StateRunning}}}
-	out := render(running)
-	for _, want := range []string{`action="/action"`, `value="stop"`, `value="drain"`, `value="restart"`, `value="owner/repo"`} {
-		if !strings.Contains(out, want) {
-			t.Errorf("a running repo is missing %q", want)
-		}
-	}
-	stopped := opsProject{repoView: repoView{Repo: supervise.Repo{Slug: "owner/repo", State: supervise.StateStopped}}}
-	out = render(stopped)
-	for _, want := range []string{`value="start"`, `value="restart"`} {
-		if !strings.Contains(out, want) {
-			t.Errorf("a stopped repo is missing %q", want)
-		}
-	}
-	if strings.Contains(out, `value="stop"`) {
-		t.Error("a stopped repo offers stop")
 	}
 }

@@ -35,7 +35,6 @@ table { border-collapse: collapse; width: 100%; margin-bottom: 1rem; }
 th, td { text-align: left; padding: .3rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { font-weight: 600; color: var(--mut); white-space: nowrap; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-form.inline { display: inline; }
 label.check { display: inline-flex; align-items: center; gap: .25rem;
               margin-right: .4rem; opacity: .8; cursor: help; }
 button, a.btn { font: inherit; padding: .1rem .55rem; background: var(--hover); color: inherit;
@@ -43,8 +42,6 @@ button, a.btn { font: inherit; padding: .1rem .55rem; background: var(--hover); 
                 display: inline-flex; align-items: center; gap: .3rem; line-height: 1.5; }
 button:hover:not(:disabled), a.btn:hover { background: #8883; text-decoration: none; }
 button:disabled { opacity: .4; cursor: not-allowed; }
-button.danger { border-color: var(--err); color: var(--err); }
-.sm { padding: 0 .4rem; font-size: .92em; }
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
 .status { display: flex; align-items: flex-end; gap: .9rem; font-size: .8rem; }
 .status .metric { display: flex; align-items: center; gap: .3rem; }
@@ -136,35 +133,11 @@ table.kv { table-layout: fixed; width: 100%; }
 table.kv td:first-child { width: 40%; overflow-wrap: anywhere; }
 table.kv td { overflow-wrap: anywhere; }
 .field :is(input, select, textarea) { width: 100%; max-width: 32rem; }
-.field input:disabled { opacity: .6; }
-[aria-invalid="true"] { border-color: var(--err); }
-.ferr { color: var(--err); margin-top: .15rem; }
-textarea.raw { min-height: 28rem; }
 button.primary { background: var(--acc); color: var(--bg); border-color: var(--acc); font-weight: 700; }
 .banner.ok { --c: var(--ok); }
 .banner.err { --c: var(--err); }
 .banner ul { margin: .3rem 0 0; padding-left: 1.2rem; }
-.editgrid { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 1rem; align-items: start; }
-@media (max-width: 1050px) { .editgrid { grid-template-columns: minmax(0, 1fr); } .field { grid-template-columns: minmax(0, 1fr); } }
-.tabs { margin-bottom: 1rem; }
-.steps { display: flex; margin: .5rem 0 1rem; padding: 0; flex-wrap: wrap; counter-reset: s; }
-.steps li { list-style: none; flex: 1 1 110px; padding: .3rem .6rem; border: 1px solid var(--line); margin-left: -1px; color: var(--mut); }
-.steps li::before { counter-increment: s; content: counter(s) ". "; }
-.steps li.done { color: var(--ok); }
-.steps li.cur { color: var(--fg); font-weight: 700; box-shadow: inset 0 -3px var(--acc); }
-.steps li.fail { color: var(--err); font-weight: 700; }
-.steps li.skip { opacity: .5; }
-pre.diff { max-height: 28rem; background: var(--bg2); border: 1px solid var(--line); padding: .5rem 0; }
-pre.diff span { display: block; padding: 0 .75rem; white-space: pre-wrap; }
-pre.diff .add { background: color-mix(in srgb, var(--ok) 20%, transparent); }
-pre.diff .del { background: color-mix(in srgb, var(--err) 20%, transparent); }
-pre.diff .hdr { color: var(--mut); }
-ol.out { list-style: none; padding: 0; }
-ol.out li { border: 1px solid var(--line); border-radius: 4px; padding: .3rem .6rem; margin-bottom: .3rem; }
-ol.out li.bad { border-color: var(--err); }
-.bk { justify-content: space-between; margin-bottom: .3rem; }
-table.rules input { width: 100%; min-width: 10rem; }
-details.warns { margin-bottom: 1rem; }
+@media (max-width: 1050px) { .field { grid-template-columns: minmax(0, 1fr); } }
 .chip.v-valid { --c: var(--ok); }
 .chip.v-invalid { --c: var(--err); }
 .org { font-size: .8em; padding: 0 .3rem; border-radius: 3px; border: 1px solid var(--c, var(--line)); }
@@ -205,12 +178,6 @@ table.agents td { white-space: nowrap; }
 {{if .Msg}}<div class="msg ok">{{.Msg}}</div>{{end}}
 {{if .Err}}<div class="msg err">{{.Err}}</div>{{end}}
 {{end}}
-
-{{define "fleetactions"}}<form class="row" method="post" action="/action">
-  <label class="check" title="Checked, work in flight is finished first: apply replaces each loop as it goes idle, and stop all drains before it goes down. Unchecked, apply restarts the loops now and stop all terminates them now."><input type="checkbox" name="when_idle" value="1" checked> when loops are idle</label>
-  <button name="op" value="apply" {{ctl ""}}>{{template "icon-restart"}} reread config and apply</button>
-  <button class="danger" name="op" value="stopall" {{ctl "Stop every loop and then this process. Confirmed on the page that follows."}}>{{template "icon-stop"}} stop all</button>
-</form>{{end}}
 
 {{define "shell-bottom"}}</main>
 </div>
