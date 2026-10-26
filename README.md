@@ -33,6 +33,20 @@ to the `gh` CLI to read comments, open PRs, and move labels. The `pi`
 agent is supported too; see
 [Customizing agents and workflows](#customizing-agents-and-workflows).
 
+## Names
+
+| Name | What it is | Where it appears |
+| --- | --- | --- |
+| `Jigz` | The project and brand. | Repository `kinged007/jigz`, Go module `github.com/kinged007/jigz`. |
+| `jig` | The command. Each loop is one `jig <root>` process per workflow. | Shell, `jig` subcommands, `JIG_*` environment variables. |
+| `jigz` | The name of data on disk and in the repository. | `.jigz/`, `~/.config/jigz/hub.json`, per-user state, data and cache directories `jigz`, `jigz-<name>.db`, `.gitignore` entries. |
+| `jigd` | The background service that runs `jig daemon`. | `jigd.service` (systemd), `io.github.kinged007.jigd` (launchd), `jigd.log`. |
+| The engine | The external binary that polls, claims items and runs agents. It is pinned and not vendored. | `JIG_ENGINE_*` variables, [The engine](#the-engine). |
+| The dashboard | The web page that `jig` serves for a repo. `--no-dashboard` turns it off. | [Dashboard](#dashboard). |
+| The hub | A separate product that jig connects to. | [Connected mode](#connected-mode), `plans/system/hub-protocol.md`. |
+
+Environment variables start with `JIG_`. Each is documented next to the feature it configures.
+
 ## How the agents pick up issues
 
 There is no queue and no webhook. Every loop polls GitHub roughly every
