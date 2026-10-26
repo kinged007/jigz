@@ -28,6 +28,7 @@ section 6.
 - Budgets with pause and override (`budget.go`, `budget_cmd.go`) — exists
 - Workspace cleanup (`cleanup.go`) — exists
 - Status document (`status.go`) — exists
+- `status` lists the other live runs and the dashboard host; `stop` and `restart` list them and warn when the run serves the dashboard (`instances.go`) — exists
 - Working hours per machine and per pool entry (`internal/machine`,
   `cmd/jig/gate.go`) — exists
 - Agent account pool, `agent-exec` wrapper, runtime failover

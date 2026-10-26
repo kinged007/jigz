@@ -43,7 +43,7 @@ func runStatus(args []string) {
 	if dir == "" {
 		dir = "."
 	}
-	abs, err := filepath.Abs(dir)
+	abs, err := absRoot(dir)
 	if err != nil {
 		fatal(err)
 	}
@@ -53,9 +53,15 @@ func runStatus(args []string) {
 			msg, _ := json.Marshal(map[string]string{"error": err.Error()})
 			fmt.Println(string(msg))
 		}
+		if !asJSON {
+			fmt.Println(instancesSection(abs, "other instances", true))
+		}
 		fatal(err)
 	}
 	fmt.Println(out)
+	if !asJSON {
+		fmt.Println(instancesSection(abs, "other instances", true))
+	}
 }
 
 // hubStatusOutput returns the daemon's status document, written by
@@ -90,11 +96,13 @@ func statusOutput(root string, asJSON bool) (string, error) {
 	if !asJSON {
 		return statusSummary(doc, liveness), nil
 	}
+	instances, _ := json.Marshal(instanceSummaries(root))
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return "", err
 	}
 	raw["liveness"], _ = json.Marshal(liveness)
+	raw["instances"] = instances
 	if doc.Cleanup != nil {
 		raw["cleanup"], _ = json.Marshal(doc.Cleanup)
 	}

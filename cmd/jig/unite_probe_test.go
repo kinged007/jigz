@@ -154,7 +154,7 @@ func TestConcurrentRegistryWritesKeepEveryEntry(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			if err := writeRegistry(fmt.Sprintf("/repo/%d", i), nil, time.Now()); err != nil {
+			if err := writeRegistry(fmt.Sprintf("/repo/%d", i), nil, time.Now(), dashInfo{}); err != nil {
 				t.Error(err)
 			}
 		}(i)

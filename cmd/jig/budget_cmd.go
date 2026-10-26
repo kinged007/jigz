@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -127,7 +126,7 @@ func runBudgetCmd(cmd string, args []string) {
 	if len(bare) == 2 {
 		dir = bare[1]
 	}
-	abs, err := filepath.Abs(dir)
+	abs, err := absRoot(dir)
 	if err != nil {
 		fatal(err)
 	}

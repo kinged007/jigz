@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -77,7 +76,7 @@ func runWake(args []string) {
 			dir = a
 		}
 	}
-	abs, err := filepath.Abs(dir)
+	abs, err := absRoot(dir)
 	if err != nil {
 		fatal(err)
 	}

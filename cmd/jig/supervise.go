@@ -113,6 +113,7 @@ type supervisor struct {
 	// still report their exit code.
 	gone      map[string]*loopProc
 	startedAt time.Time
+	dash      dashInfo
 	// failed marks a run that ended because a loop died unrequested.
 	failed bool
 
@@ -621,7 +622,7 @@ func (s *supervisor) endpoints() []loopEndpoint {
 // running, so a rebound port or a stopped loop is visible to whatever
 // reads the registry.
 func (s *supervisor) republish() {
-	if err := writeRegistry(s.root, s.endpoints(), s.startedAt); err != nil {
+	if err := writeRegistry(s.root, s.endpoints(), s.startedAt, s.dash); err != nil {
 		fmt.Fprintln(os.Stderr, "jig: registry:", err)
 	}
 	s.publishStatus("running")

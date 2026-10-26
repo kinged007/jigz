@@ -472,6 +472,25 @@ when the document says running but the pid is dead, `exited` when the
 run ended. The command reads the document from the repo-root and does not
 need a registry entry. It exits non-zero when no document is found.
 
+After the run's own state, `jig status` lists the other live runs in the
+shared registry: repo, repo-root, pid and uptime. Entries of runs that
+exited or whose pid is dead are not listed. With `--unite`, the run that
+serves the shared dashboard is marked, and the dashboard address and
+that run are printed. When the repo-root has no run, the list is still
+printed before the error. The `--json` document has an `instances` array
+with the same runs (`repo_name`, `root`, `pid`, `started_at`,
+`serves_dashboard`, and `dashboard` when known).
+
+Each run records the dashboard address it serves or joined in its registry
+entry (`dashboard`, and `serves_dashboard` for the run that serves it).
+`jig stop` and `jig restart` act only on the run for the repo-root. They
+list the other live runs afterwards. When the stopped run serves the
+dashboard, they first print a warning: the dashboard stops with that
+run, and the other runs keep running without it. A later `--unite` run
+starts a new dashboard. Repo-roots are keyed by their absolute path with
+symlinks resolved, so a run started through a link is found from the real
+path.
+
 The supervisor writes the status document (schema version 1) to
 `<user cache dir>/jigz/status/<hash>.json`, where `<hash>` is the
 first 16 hex digits of the SHA-256 of the absolute repo-root. The registry

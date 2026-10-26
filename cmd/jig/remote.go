@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -40,13 +39,16 @@ func runRemote(action string, args []string) {
 			dir = a
 		}
 	}
-	abs, err := filepath.Abs(dir)
+	abs, err := absRoot(dir)
 	if err != nil {
 		fatal(err)
 	}
 	e, err := runningEntry(abs)
 	if err != nil {
 		fatal(err)
+	}
+	if w := dashboardHostWarning(e, action); w != "" {
+		fmt.Println(w)
 	}
 	if action == "restart" && !whenIdle {
 		// An immediate restart replaces the process, so it is done here
@@ -57,6 +59,7 @@ func runRemote(action string, args []string) {
 			fatal(fmt.Errorf("signal %s: %w", syscall.SIGTERM, err))
 		}
 		fmt.Printf("jig: %s (pid %d) stopped, starting again\n", abs, e.PID)
+		fmt.Println(instancesSection(abs, "still running", false))
 		if !waitGone(e.PID, restartBudget) {
 			fatal(fmt.Errorf("%s (pid %d) is still running; not starting a second run", abs, e.PID))
 		}
@@ -90,6 +93,7 @@ func runRemote(action string, args []string) {
 		what = "stopped now"
 	}
 	fmt.Printf("jig: %s (pid %d) %s\n", abs, e.PID, what)
+	fmt.Println(instancesSection(abs, "still running", false))
 }
 
 // restartArgv rebuilds the command line for the run replacing the old
@@ -160,9 +164,13 @@ func registeredEntry(root string) (registryEntry, error) {
 	if err := json.Unmarshal(data, &reg); err != nil {
 		return registryEntry{}, fmt.Errorf("registry: %w", err)
 	}
-	e, ok := reg.Entries[root]
-	if !ok {
-		return registryEntry{}, fmt.Errorf("no loop is running for %s", root)
+	if e, ok := reg.Entries[root]; ok {
+		return e, nil
 	}
-	return e, nil
+	for key, e := range reg.Entries {
+		if resolvedPath(key) == root {
+			return e, nil
+		}
+	}
+	return registryEntry{}, fmt.Errorf("no loop is running for %s", root)
 }

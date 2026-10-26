@@ -115,7 +115,7 @@ func runStart(args []string) int {
 	if dir == "" {
 		dir = "."
 	}
-	abs, err := filepath.Abs(dir)
+	abs, err := absRoot(dir)
 	if err != nil {
 		fatal(err)
 	}
@@ -127,7 +127,11 @@ func runStart(args []string) int {
 
 func (s starter) start(c cmdline, root string) error {
 	if e, err := s.running(root); err == nil {
-		s.out("already running for %s (pid %d)\nstatus: jig status %s\nstop:   jig stop %s\n", root, e.PID, root, root)
+		s.out("already running for %s (pid %d)\n", root, e.PID)
+		if e.Dashboard != "" {
+			s.out("dashboard %s\n", e.Dashboard)
+		}
+		s.out("status: jig status %s\nstop:   jig stop %s\n", root, root)
 		return nil
 	}
 	logPath, err := s.logPath(root)
@@ -143,14 +147,15 @@ func (s starter) start(c cmdline, root string) error {
 		return fmt.Errorf("start: %w", err)
 	}
 	deadline := time.Now().Add(s.budget)
-	for registered := false; !registered; {
+	var registered registryEntry
+	for done := false; !done; {
 		select {
 		case werr := <-exited:
 			return fmt.Errorf("the run exited before it registered (%v)\n%s", werr, startLogTail(logPath, offset, startLogLines))
 		default:
 		}
 		if e, err := s.running(root); err == nil && e.PID == pid {
-			registered = true
+			registered, done = e, true
 			continue
 		}
 		if time.Now().After(deadline) {
@@ -159,36 +164,11 @@ func (s starter) start(c cmdline, root string) error {
 		time.Sleep(startPollEvery)
 	}
 	s.out("started %s (pid %d)\n", root, pid)
-	if !c.noDashboard {
-		if url := waitDashboardURL(logPath, offset, min(s.budget, 5*time.Second), exited); url != "" {
-			s.out("dashboard %s\n", url)
-		}
+	if registered.Dashboard != "" {
+		s.out("dashboard %s\n", registered.Dashboard)
 	}
 	s.out("log:    %s\nstatus: jig status %s\nstop:   jig stop %s\n", logPath, root, root)
 	return nil
-}
-
-// waitDashboardURL returns the address from the "dashboard" line the run
-// printed after offset, or "" when none appears within budget.
-func waitDashboardURL(logPath string, offset int64, budget time.Duration, exited <-chan error) string {
-	deadline := time.Now().Add(budget)
-	for {
-		for _, line := range strings.Split(logFrom(logPath, offset), "\n") {
-			if rest, ok := strings.CutPrefix(line, "dashboard "); ok {
-				url, _, _ := strings.Cut(rest, " ")
-				return url
-			}
-		}
-		select {
-		case <-exited:
-			return ""
-		default:
-		}
-		if time.Now().After(deadline) {
-			return ""
-		}
-		time.Sleep(startPollEvery)
-	}
 }
 
 func logFrom(path string, offset int64) string {
