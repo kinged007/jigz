@@ -13,9 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
+
 	"github.com/kinged007/jigz/internal/fakehub"
 	"github.com/kinged007/jigz/internal/hubproto"
-	"github.com/kinged007/jigz/internal/wsclient"
 )
 
 const (
@@ -356,6 +357,23 @@ func TestCommandChannel(t *testing.T) {
 		}
 		return nil
 	}
+	// The hub lists the socket and the client records when it connected
+	// in either order, so the test waits for both.
+	connected := make(chan struct{}, 4)
+	c.Logf = func(f string, a ...any) {
+		if strings.Contains(fmt.Sprintf(f, a...), "command channel connected") {
+			connected <- struct{}{}
+		}
+	}
+	waitConnected := func(what string) {
+		t.Helper()
+		select {
+		case <-connected:
+			waitFor(t, what, hub.Connected)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("no %s", what)
+		}
+	}
 	hub.SetDown(true)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -377,7 +395,7 @@ func TestCommandChannel(t *testing.T) {
 	expectSleep(2 * time.Second)
 	hub.SetDown(false)
 	release <- struct{}{}
-	waitFor(t, "socket", hub.Connected)
+	waitConnected("socket")
 
 	ack, err := hub.Send(hubproto.Command{Type: hubproto.CmdWake, Args: json.RawMessage(`{"project":"acme/widgets","workflow":"issues"}`)})
 	if err != nil || !ack.OK || ack.Error != nil {
@@ -402,7 +420,7 @@ func TestCommandChannel(t *testing.T) {
 	expectSleep(4 * time.Second)
 	hub.SetDown(false)
 	release <- struct{}{}
-	waitFor(t, "socket after short connection", hub.Connected)
+	waitConnected("socket after short connection")
 
 	// Connected for over 60 s: the back-off starts again at 1 s.
 	clk.add(61 * time.Second)
@@ -410,7 +428,7 @@ func TestCommandChannel(t *testing.T) {
 	expectSleep(time.Second)
 	hub.SetDown(false)
 	release <- struct{}{}
-	waitFor(t, "socket after reset", hub.Connected)
+	waitConnected("socket after reset")
 	if _, err := hub.Send(hubproto.Command{Type: hubproto.CmdPause}); err != nil {
 		t.Fatal(err)
 	}
@@ -430,11 +448,11 @@ func TestCommandAcks(t *testing.T) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		conn, err := wsclient.Accept(w, r)
+		conn, err := websocket.Accept(w, r, nil)
 		if err != nil {
 			return
 		}
-		defer conn.Close(wsclient.StatusNormal, "")
+		defer conn.Close(websocket.StatusNormalClosure, "")
 		for _, m := range []string{
 			`{"type":"wake"}`,
 			`{"id":"a","type":"self.destruct","args":{}}`,
@@ -442,12 +460,12 @@ func TestCommandAcks(t *testing.T) {
 			`{"id":"c","type":"pause","args":{},"extra":1}`,
 			`{"id":"d","type":"reload_config","args":{}}`,
 		} {
-			if err := conn.Write(r.Context(), []byte(m)); err != nil {
+			if err := conn.Write(r.Context(), websocket.MessageText, []byte(m)); err != nil {
 				return
 			}
 		}
 		for range 4 {
-			msg, err := conn.Read(r.Context())
+			_, msg, err := conn.Read(r.Context())
 			if err != nil {
 				return
 			}
@@ -474,6 +492,106 @@ func TestCommandAcks(t *testing.T) {
 			}
 		case <-time.After(5 * time.Second):
 			t.Fatalf("no ack for %s", w)
+		}
+	}
+}
+
+// TestConnectErrorClasses checks how a refused upgrade, a redirect and a
+// network failure are classed, and that no credential reaches the error.
+func TestConnectErrorClasses(t *testing.T) {
+	const cred = "cred-CANARY-5d1e"
+	var hits atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits.Add(1) }))
+	defer target.Close()
+	var code atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		st := int(code.Load())
+		if st == http.StatusFound {
+			http.Redirect(w, r, target.URL, st)
+			return
+		}
+		w.WriteHeader(st)
+		fmt.Fprintf(w, `{"code":"x","message":%q}`, r.Header.Get("Authorization"))
+	}))
+	defer ts.Close()
+	c := &Client{URL: ts.URL, Version: "1", DaemonID: "d", Credential: cred}
+	for _, tc := range []struct {
+		status         int
+		retry, revoked bool
+	}{
+		{401, false, true},
+		{403, false, true},
+		{500, true, false},
+		{503, true, false},
+		{404, false, false},
+		{400, false, false},
+		{http.StatusFound, false, false},
+		{200, false, false},
+	} {
+		code.Store(int32(tc.status))
+		_, err := c.Connect(context.Background())
+		if err == nil || Retryable(err) != tc.retry || errors.Is(err, ErrRevoked) != tc.revoked {
+			t.Errorf("status %d: err %v retryable %v", tc.status, err, Retryable(err))
+			continue
+		}
+		if strings.Contains(err.Error(), cred) {
+			t.Errorf("status %d: credential in %q", tc.status, err)
+		}
+	}
+	if n := hits.Load(); n != 0 {
+		t.Errorf("redirect followed %d times", n)
+	}
+	ts.Close()
+	if _, err := c.Connect(context.Background()); !Retryable(err) {
+		t.Errorf("network failure not retryable: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	c.URL = "http://127.0.0.1:1"
+	if _, err := c.Connect(ctx); err == nil || Retryable(err) {
+		t.Errorf("cancelled context retryable: %v", err)
+	}
+}
+
+// TestSocketLimits checks that a message over the read limit and a missing
+// pong both end the socket with a retryable error.
+func TestSocketLimits(t *testing.T) {
+	defer func(i, p time.Duration) { pingInterval, pongTimeout = i, p }(pingInterval, pongTimeout)
+	pingInterval, pongTimeout = 20*time.Millisecond, 100*time.Millisecond
+
+	var mode atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.CloseNow()
+		if mode.Load() == 0 {
+			big := `{"id":"a","type":"wake","args":{"project":"` + strings.Repeat("x", readLimit) + `"}}`
+			conn.Write(r.Context(), websocket.MessageText, []byte(big))
+		}
+		// Not reading means pings are never answered.
+		<-r.Context().Done()
+	}))
+	defer ts.Close()
+	for _, m := range []int32{0, 1} {
+		mode.Store(m)
+		var reconnects atomic.Int32
+		c := &Client{URL: ts.URL, Version: "1", DaemonID: "d", Credential: "cred",
+			Logf: func(f string, a ...any) {
+				if strings.Contains(fmt.Sprintf(f, a...), "reconnecting") {
+					reconnects.Add(1)
+				}
+			},
+			Sleep: func(context.Context, time.Duration) error { return errors.New("stop") },
+		}
+		start := time.Now()
+		c.Commands(context.Background(), func(context.Context, hubproto.Command) *hubproto.AckError { return nil })
+		if reconnects.Load() != 1 {
+			t.Errorf("mode %d: socket did not end with a retryable error", m)
+		}
+		if d := time.Since(start); d > 10*time.Second {
+			t.Errorf("mode %d: socket ended after %s", m, d)
 		}
 	}
 }

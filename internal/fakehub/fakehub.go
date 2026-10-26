@@ -22,8 +22,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coder/websocket"
+
 	"github.com/kinged007/jigz/internal/hubproto"
-	"github.com/kinged007/jigz/internal/wsclient"
 )
 
 const (
@@ -31,6 +32,7 @@ const (
 	ackTimeout  = 10 * time.Second
 	defaultBeat = 30
 	minBeat     = 5
+	readLimit   = 1 << 20
 )
 
 // Server is the fake hub. It is an http.Handler.
@@ -62,7 +64,7 @@ type Server struct {
 
 // socket is one accepted command connection. It owns the commands sent on it.
 type socket struct {
-	conn    *wsclient.Conn
+	conn    *websocket.Conn
 	pending map[string]chan hubproto.Ack
 	closed  chan struct{}
 }
@@ -210,7 +212,7 @@ func (s *Server) Send(cmd hubproto.Command) (hubproto.Ack, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), ackTimeout)
 	defer cancel()
-	if err := sk.conn.Write(ctx, data); err != nil {
+	if err := sk.conn.Write(ctx, websocket.MessageText, data); err != nil {
 		return hubproto.Ack{}, err
 	}
 	select {
@@ -234,7 +236,7 @@ func (s *Server) closeSocket() {
 	s.sock = nil
 	s.mu.Unlock()
 	if sk != nil {
-		go sk.conn.Close(wsclient.StatusGoingAway, "")
+		go sk.conn.Close(websocket.StatusGoingAway, "")
 	}
 }
 
@@ -421,18 +423,19 @@ func (s *Server) postRuns(w http.ResponseWriter, r *http.Request, body []byte) {
 }
 
 func (s *Server) socket(w http.ResponseWriter, r *http.Request, _ []byte) {
-	conn, err := wsclient.Accept(w, r)
+	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		s.note(r, "websocket upgrade: "+err.Error())
 		return
 	}
+	conn.SetReadLimit(readLimit)
 	sk := &socket{conn: conn, pending: map[string]chan hubproto.Ack{}, closed: make(chan struct{})}
 	s.mu.Lock()
 	old := s.sock
 	s.sock = sk
 	s.mu.Unlock()
 	if old != nil {
-		go old.conn.Close(wsclient.StatusGoingAway, "replaced")
+		go old.conn.Close(websocket.StatusGoingAway, "replaced")
 	}
 	s.readAcks(sk)
 }
@@ -447,10 +450,10 @@ func (s *Server) readAcks(sk *socket) {
 		}
 		s.mu.Unlock()
 		close(sk.closed)
-		conn.Close(wsclient.StatusNormal, "")
+		conn.Close(websocket.StatusNormalClosure, "")
 	}()
 	for {
-		msg, err := conn.Read(context.Background())
+		_, msg, err := conn.Read(context.Background())
 		if err != nil {
 			return
 		}
