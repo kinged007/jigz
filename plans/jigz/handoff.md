@@ -116,6 +116,9 @@ Read, in order:
 - `needs-human` is the label for blocking questions. There is no
   `needs-answer` label.
 - Releases are deferred until the user asks.
+- `.jigz/config.yaml` is read strictly: every loader in `internal/config`
+  rejects an unknown key at any level. Old configs with unknown keys are not
+  migrated.
 
 Open decisions (do not decide them; ask): none at the time of writing.
 
@@ -254,8 +257,6 @@ Outside this repository:
    started.
 5. Decisions waiting for the user:
    - Approve `github.com/coder/websocket` or keep `internal/wsclient`.
-   - Whether top-level config keys in `.jigz/config.yaml` are validated
-     strictly.
    - Issue #20 (author trust in the prompts).
    - Whether to raise `timeout-minutes` of the CI `acceptance` job if it
      approaches 15 minutes. It ran 8m4s on the Phase 4 PR.
