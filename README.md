@@ -40,7 +40,7 @@ agent is supported too; see
 | `Jigz` | The project and brand. | Repository `kinged007/jigz`, Go module `github.com/kinged007/jigz`. |
 | `jig` | The command. Each loop is one `jig <root>` process per workflow. | Shell, `jig` subcommands, `JIG_*` environment variables. |
 | `jigz` | The name of data on disk and in the repository. | `.jigz/`, `~/.config/jigz/hub.json`, per-user state, data and cache directories `jigz`, `jigz-<name>.db`, `.gitignore` entries. |
-| `jigd` | The background service that runs `jig daemon`. | `jigd.service` (systemd), `io.github.kinged007.jigd` (launchd), `jigd.log`. |
+| `jigd` | The background service that runs `jig daemon`; also the name under which the `jig` binary acts as `jig daemon`. | `jigd.service` (systemd), `io.github.kinged007.jigd` (launchd), `jigd.log`. |
 | The engine | The external binary that polls, claims items and runs agents. It is pinned and not vendored. | `JIG_ENGINE_*` variables, [The engine](#the-engine). |
 | The dashboard | The web page that `jig` serves for a repo. `--no-dashboard` turns it off. | [Dashboard](#dashboard). |
 | The hub | A separate product that jig connects to. | [Connected mode](#connected-mode), `plans/system/hub-protocol.md`. |
@@ -435,7 +435,8 @@ cd your-repo
 jig setup    # writes .jigz/config.yaml, updates .gitignore, creates the labels,
              # installs the engine, and installs .jigz/pm-agent.md
              # (a project-manager prompt)
-jig          # run every WORKFLOW.*.md loop (Ctrl-C stops all)
+jig          # run every WORKFLOW.*.md loop in the foreground (Ctrl-C stops all)
+jig start    # the same run in the background
 ```
 
 `setup` detects `owner/name` from the git `origin` remote
@@ -444,6 +445,21 @@ moving the checkout or forking needs no reconfiguration. A positional
 argument selects the repository root and may sit anywhere on the line,
 so `jig setup ./repo --repo owner/name` and
 `jig setup --repo owner/name ./repo` do the same thing.
+
+`jig start [options] [repo-root]` runs the same fleet in the background. It
+starts this binary in its own session with the bare form and the same
+options, appends its output to `<state>/jigz/<owner>-<name>.log` (the
+repo directory name when the repo id has no owner), and waits up to 15 seconds
+for the run to appear in the registry. It then prints the pid, the dashboard
+address (unless `--no-dashboard`), the log path and the `jig status` and
+`jig stop` commands. When a run already serves the repo-root it prints that
+and exits 0 without starting another. When the run exits or does not register
+in time, it prints the last log lines and exits non-zero. Stop the run with
+`jig stop`.
+
+`jig --help` lists every command in groups: Run, Control (`stop`, `restart`,
+`status`, `wake`, `pause`, `resume`, `budget override`, `reload`, `cleanup`,
+`validate`), Setup (`setup`, `join`, `leave`, `daemon`) and the options.
 
 `setup` confirms before changing a label whose colour or description
 differs from the shipped one. It never changes an existing workflow file.
@@ -532,7 +548,7 @@ per-loop debug ports respectively. A positional arg selects the repo
 root (default: current directory).
 
 `JIG_ONLY=plan,build` starts only those loops; unset runs them
-all. This is how Jigz picks a per-repo workflow set.
+all. It applies to `jig` and `jig start`. This is how Jigz picks a per-repo workflow set.
 
 ## Layout in the target repo
 
@@ -979,8 +995,11 @@ working hours), not the credentials.
   `~/Library/LaunchAgents/`. It runs while the user is logged in.
 - Windows is not supported.
 
-`jig daemon` runs the daemon in the foreground and logs to `jigd.log`.
-SIGTERM stops every loop it started.
+`jig daemon` runs the daemon in the foreground and logs to `jigd.log`. The
+installed service runs it in the background. `jigd` is the same binary under
+another name: an executable named `jigd` or `jigd.exe` (a symlink or copy of
+`jig`) behaves as `jig daemon` with the arguments it is given. SIGTERM stops
+every loop it started.
 
 `jig leave` removes the service, `hub.json` and the daemon state in
 `<state>/jigz/hub` (stored config, pause state, status document and
