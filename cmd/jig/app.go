@@ -104,7 +104,7 @@ type app struct {
 	stateDir   string
 	github     fleetconfig.GitHub
 	enricher   *collector.Enricher
-	questions  *questionsState
+	questions  *collector.Scanner
 	store      *store.Store
 	applyWait  time.Duration
 	pollEvery  time.Duration
