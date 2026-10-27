@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kinged007/jigz/internal/loopsrc"
+	"github.com/kinged007/jigz/internal/runlive"
 	"github.com/kinged007/jigz/internal/store"
 )
 
@@ -39,7 +40,8 @@ type runDetailData struct {
 	Share            string
 	IssueNumber      string
 	OtherRuns        string
-	Log              logCard
+	Parts            runParts
+	Logs             logsView
 }
 
 // logCard says where the log tail loads from, or why it cannot.
@@ -129,7 +131,9 @@ func (a *app) runDetail(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	d.Log = a.logCard(r, project, workflow)
+	in := storedInput(run)
+	d.Parts = a.runParts(in)
+	d.Logs = a.logsView(in, "/runs/"+project+"/"+workflow+"/"+strconv.FormatInt(run.ID, 10)+"/agent-log")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := page.ExecuteTemplate(w, "run", d); err != nil {
 		log.Printf("run: %v", err)
@@ -245,8 +249,17 @@ func (a *app) projectShare(run store.Run) (string, error) {
 	return strconv.FormatFloat(float64(run.TotalTokens)/float64(g[0].Total)*100, 'f', 1, 64) + "%", nil
 }
 
+// logsView is the Logs card of a run page.
+type logsView struct {
+	// Engine says where the engine log loads from, or why it cannot.
+	Engine   logCard
+	AgentURL string
+	Running  bool
+	PollMs   int
+}
+
 // logCard decides whether this viewer can load the workflow log.
-func (a *app) logCard(r *http.Request, project, workflow string) logCard {
+func (a *app) logCard(project, workflow string) logCard {
 	op, ok := a.src().(loopsrc.Operator)
 	switch {
 	case !ok || !op.ProjectCapabilities(project).Logs:
@@ -255,21 +268,49 @@ func (a *app) logCard(r *http.Request, project, workflow string) logCard {
 	return logCard{URL: "/runs/" + project + "/" + workflow + "/log"}
 }
 
-const logLines = 200
+// logsView builds the Logs card. The engine log is filtered to the issue
+// and, for a stored run, to the time the run took.
+func (a *app) logsView(in runInput, agentURL string) logsView {
+	v := logsView{Engine: a.logCard(in.Project, in.Workflow), AgentURL: agentURL, Running: in.Running, PollMs: livePollMillis}
+	if v.Engine.URL == "" {
+		return v
+	}
+	q := url.Values{"issue": {in.IssueID}}
+	if !in.Started.IsZero() {
+		q.Set("from", in.Started.UTC().Format(time.RFC3339))
+	}
+	if !in.Ended.IsZero() {
+		q.Set("to", in.Ended.UTC().Format(time.RFC3339))
+	}
+	v.Engine.URL += "?" + q.Encode()
+	return v
+}
+
+const (
+	logLines      = 200
+	logIssueLines = 1000
+)
 
 // runLog returns the last lines of a workflow's log. The log belongs to
-// the workflow, not to one run.
+// the workflow, not to one run; the issue, from and to parameters keep the
+// lines of one issue in a time window.
 func (a *app) runLog(w http.ResponseWriter, r *http.Request) {
 	project := r.PathValue("owner") + "/" + r.PathValue("name")
 	workflow := r.PathValue("workflow")
 	reply := func(lines []string, msg string) {
 		writeJSON(w, http.StatusOK, map[string]any{"lines": lines, "message": msg})
 	}
-	if c := a.logCard(r, project, workflow); c.Why != "" {
+	if c := a.logCard(project, workflow); c.Why != "" {
 		reply([]string{}, c.Why)
 		return
 	}
-	lines, err := a.src().(loopsrc.Operator).LogTail(project, workflow, logLines)
+	q := r.URL.Query()
+	issue := q.Get("issue")
+	n := logLines
+	if issue != "" {
+		n = logIssueLines
+	}
+	lines, err := a.src().(loopsrc.Operator).LogTail(project, workflow, n)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		reply([]string{}, "the log file does not exist; needs Jigz logs")
@@ -277,6 +318,11 @@ func (a *app) runLog(w http.ResponseWriter, r *http.Request) {
 		log.Printf("run log: %v", err)
 		reply([]string{}, "the log is not available")
 	default:
+		if issue != "" {
+			from, _ := parseTS(q.Get("from"))
+			to, _ := parseTS(q.Get("to"))
+			lines = runlive.IssueLines(lines, issue, from, to)
+		}
 		if lines == nil {
 			lines = []string{}
 		}

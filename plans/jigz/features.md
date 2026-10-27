@@ -48,6 +48,13 @@ section 6.
   hide pages and sections; a hidden page or section answers 404 on every
   route that serves it (`hide.go`, `internal/machine/dashboard.go`). This is
   the built-in protection for a dashboard that is reachable beyond localhost — exists
+- The run page of a running or finished run shows events, tokens, delivery,
+  session and logs, refreshed every 4 seconds while the run is in progress.
+  The agent log tab reads the agent's own transcript (claude-code and pi) or
+  the engine's event rows; the engine log tab reads the workflow log filtered
+  to the issue; the session card gives the workspace and a resume command.
+  Sections `agent_log`, `log_tail` and `session` hide them
+  (`internal/runlive`, `cmd/jig/runparts.go`) — exists
 - Remove authentication; document local, private-network, and proxy
   deployment [0]
 - `--host` flag, default 127.0.0.1 [0]

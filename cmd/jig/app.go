@@ -109,6 +109,9 @@ type app struct {
 	alertCache dbAlertCache
 	// hide is nil when nothing can be hidden, as in tests.
 	hide *hider
+	// liveHome is the home directory the agents keep their transcripts in.
+	// Empty means the home of the user running the dashboard.
+	liveHome string
 	// unite is set when this page spans every registered repository,
 	// which the status fragment states so a later run can find it.
 	unite bool

@@ -290,7 +290,7 @@ func TestAcceptance(t *testing.T) {
 			want []string
 		}{
 			{"/runs", []string{fmt.Sprintf("%s#%d", slug, planned)}},
-			{fmt.Sprintf("/runs/%s/issues/%d", slug, r.ID), []string{"Session id", "Workflow file", "Handoff"}},
+			{fmt.Sprintf("/runs/%s/issues/%d", slug, r.ID), []string{"Session id", "Workflow file", "Handoff", "Workspace", `id="pane-agent"`, `id="pane-engine"`}},
 		} {
 			body := getBody(t, dash+page.path)
 			for _, want := range page.want {
@@ -298,11 +298,15 @@ func TestAcceptance(t *testing.T) {
 					t.Errorf("%s lacks %q", page.path, want)
 				}
 			}
-			for _, gone := range []string{">Workspace<", ">Prompt<", "API requests", "absence counter reset", "handoff counter reset"} {
+			for _, gone := range []string{">Prompt<", "API requests", "absence counter reset", "handoff counter reset"} {
 				if strings.Contains(body, gone) {
 					t.Errorf("%s still shows %q", page.path, gone)
 				}
 			}
+		}
+
+		if body := getBody(t, fmt.Sprintf("%s/runs/%s/issues/%d/agent-log", dash, slug, r.ID)); !strings.Contains(body, `"running":false`) {
+			t.Errorf("agent-log route: %s", body)
 		}
 
 		for _, path := range []string{"/action", "/projects/new", "/edit/validate", "/edit/apply", "/backups/restore"} {

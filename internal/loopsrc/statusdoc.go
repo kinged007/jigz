@@ -406,3 +406,6 @@ func pidAlive(pid int) bool {
 	}
 	return p.Signal(syscall.Signal(0)) == nil
 }
+
+// Root returns the repository root of a project.
+func (d StatusDoc) Root(project string) (string, error) { return d.root(project) }
