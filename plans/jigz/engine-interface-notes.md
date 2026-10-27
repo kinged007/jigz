@@ -1,0 +1,158 @@
+# Engine interface: code map for the implementation phases
+
+Companion to `engine-interface.md`. Records where the current code lives so
+implementation briefs can point at exact files. Line numbers are from
+`feat/engine-interface` at 2026-10-27 and drift as the work lands.
+
+## Configuration
+
+- `internal/config/config.go` — the `.jigz/config.yaml` loader.
+  `Config` struct around line 36: `Repo`, `Token`, `Milestone`, `Assignee`
+  (`*string`), `Dir`, `SortieBin`, `EnvFile`, `Tracker`, `Filters` (map),
+  `Labels` (`[]Label`), `Workspaces`, `Cleanup`, `Sleep`, `Budgets` (map),
+  `GitHub`. Strict keys via `yaml.Decoder.KnownFields(true)` in `Load`,
+  `LoadToken`, `LoadGitHub`. `FilterFor` (line 516) returns `filters[name]`,
+  else `defaultFilters[name]`, else `defaultFilter`, with milestone and
+  assignee scope applied. `defaultFilters` (line 499) holds the `issues` and
+  `prs` queries. The workspace root is `.jigz/workspaces`, expanded from
+  `$JIG_WORKSPACES` (around line 428).
+- `internal/config/strict_test.go` — table of invalid keys, `loadersOn(body)`
+  runs `Load`, `LoadToken`, `LoadGitHub`.
+- `internal/machine/config.go` (line 74) — `machine.yaml` schema: `Hours`,
+  `Pool` (`[]Entry`), `Limits`, `Connected`, `Dashboard`, `Engine`, `Warnings`,
+  `Unsupported`.
+- `internal/machine/hours.go` — `Hours{Timezone, Windows, End}`, `Window{Days
+  [7]bool, Start, End}`. `Hours.Open(t)` handles wrapping windows; `Hours.Next(t)`
+  returns the earliest change after `t` (scans 8 days, zero when none).
+- `internal/machine/pool.go` — `Entry{Name, Runtime, Command, Hours, Env}`,
+  `Entry.ExpandedEnv()`, `Entry.Available(st, t)`, `Config.Pick(st, runtime, t)`,
+  `Config.ActiveRuntime(st, t)`.
+- `internal/machine/state.go` — `EntryState{ExhaustedUntil, Reason, LastUsed}`,
+  `StatePath()` is `<XDG_STATE_HOME or ~/.local/state>/jigz/pool.json`,
+  `UpdateState(path, fn)` takes a flock, `MarkExhausted` writes the exhaustion.
+- `internal/machine/dashboard.go` — `Dashboard{Hide{Pages, Sections}}` and
+  `LoadDashboard(path)` (reads only the `dashboard` block, strict inside it).
+- `internal/fleetconfig/config.go` — `Resolved` (line 269): `Repo`, `Dir`,
+  `Workflows`, `Milestone`, `Assignee`, `TokenEnv`, `Agent`, `PollingIntervalMS`,
+  `Knobs`, `Overrides`. `Load(path)` (line 414) reads `jigz.yaml` with strict
+  keys. `Env()` builds the cascade env (sets `JIG_ONLY`, `JIG_MODEL`, `JIG_TOKEN`,
+  `SORTIE_*`). `ModelVar(workflow)` returns `JIG_MODEL` or `JIG_MODEL_<WORKFLOW>`.
+  Removed in phase 6.
+- `internal/plan/` — `plan.go` `Apply(r config.Resolved) error` (line 424,
+  installs workflows, syncs labels, writes `.env`/`.gitignore`), `Setup`
+  (line 484) wraps `RunSetup` (line 494), `ApplySettings` (line 59) does
+  line-level YAML edits and prunes stale model refs, `Validate` (line 526) runs
+  `sortie validate` per file and returns `Diagnostics`. `workflow.go`
+  `ParseWorkflow(text)` (line 78) reads front matter into `Workflow{TrackerKind,
+  QueryFilter, HandoffState, TerminalStates, PollingMS, AgentKind, Model, Knobs,
+  Template, Rules}` and `Rule{Name, Labels, Agent, Template, Stage, Next}`.
+  `gating.go` `GateLoop(engine.Gate, text, env) LoopGate` (line 27). Removed in
+  phase 6.
+
+## CLI
+
+- `cmd/jig/validate.go` — `listWorkflows` (line 75) scans `.jigz/workflows/`
+  for `WORKFLOW.*.md` and returns `[]loopDef`; `dropRuntimeBlockWarnings`
+  (line 149) filters `sortie validate` output through
+  `plan.IsRuntimeBlockWarning`; `collectValidateChecks` (line 27) runs config
+  load, cleanup, budget and token checks, then per-workflow validation.
+- `cmd/jig/embed.go` — `syncWorkflows` (line 46) writes missing
+  `WORKFLOW.*.md` + `prompts/*.md` from `//go:embed workflows` (line 14), keeps
+  existing edits (never overwrites), returns legacy files. `ensureGitignore`
+  (line 603) writes `.jigz/` and `/jig` and removes granular entries from the
+  old scheme.
+- `cmd/jig/setup.go` — `runSetup` (line 19): resolve root, load repo slug,
+  create `config.yaml` from template, `syncWorkflows`, warn legacy, sync the PM
+  prompt, resolve the engine binary, `ensureGitignore`, load config (strict),
+  `labelSync` through the `gh` CLI.
+- `cmd/jig/gate.go` — `gateEval` (line 67) `(cfg, st, now) gateView`;
+  `gateDecide` (line 85) `(cfg, st, now, loops) (gateView, []gateAct)` with
+  `StopIdle`, `StopNow`, `Start`, `RecycleIdle`; `gateView` (line 36)
+  `{Open, HoursOpen, Runtime, Next, Reason}`; `gateStatus` (line 137)
+  `{Open, HoursOpen, Runtime, NextChange, Hold}`; `gateStep` (line 344) runs on
+  the 2-second ticker (line 305), refreshes `machine.yaml` and `pool.json`
+  (every 10 s), and executes the actions.
+- `cmd/jig/supervise.go` — `childEnv(name)` (line 181) returns `(envFile, env,
+  runtime, error)`: loads config, resolves the engine binary, sets `SORTIE_*`,
+  writes `.env`. `SORTIE_TRACKER_QUERY_FILTER` comes from `cfg.FilterFor(name)`;
+  `SORTIE_AGENT_KIND` and `SORTIE_AGENT_COMMAND` (`"jig agent-exec <runtime>"`)
+  are set from the pool entry. `supervisor.noSession(name)` (line 56) is true
+  when the loop age is at least `drainSettle` (20 s) and no session is active.
+- `cmd/jig/agentexec.go` — `runAgentExec` (line 15): parse runtime and args,
+  load `machine.yaml` and `pool.json`, `cfg.Pick`, expand `env`, start
+  `entry.Command`, relay I/O, scan stderr for usage-limit text per runtime
+  (line 126), call `MarkExhausted`.
+- `cmd/jig/status.go` — `workflowStatus` (line 45) with `Name`, `WorkflowFile`,
+  `LoopType`, `PID`, `State`, `Hold`, `Sessions`, `SessionsKnown`; `noteGate`
+  (line 444) maps `gateView` to `gateStatus`. States: `running`, `idle`, `held`,
+  `disabled`, `off`.
+- `cmd/jig/unite.go` — `dbPathFor(root, file)` (line 264) reads `db_path:` from
+  the front matter as plain text and joins relative paths to
+  `root/.jigz/workflows/`.
+- `cmd/jig/livelog.go` — `liveTracker` (line 29); message literals:
+  `issue dispatched`, `retried issue dispatched`, `turn completed`,
+  `worker exiting`, `worker run failed, scheduling retry`, `tick completed`.
+  `tickDropAfter` is 5 s (line 19). `snapshot()` (line 50) returns sessions and
+  `ticked && unaccounted == 0`.
+
+## Engine coupling
+
+- `internal/engine/engine.go` — `DefaultRepo = "kinged007/sortie"`,
+  `DefaultTag = "v1.28.1"`, `Binary = "sortie"` (lines 29–33). Resolution
+  order: `JIG_ENGINE_BIN`, `JIG_ENGINE_URL` + `JIG_ENGINE_SHA256`, cache at
+  `Spec.CachePath(dir)` (`<dir>/sortie-<owner>+<repo>-<version>`), then GitHub
+  release download. `Ensure(spec)` fetches and links into `~/.local/bin`.
+  `DataDir()` is `$XDG_DATA_HOME/jigz` or `~/.local/share/jigz`.
+- `internal/engine/probe.go` — `Capabilities{Bin, Version, Trackers, Agents,
+  Err}`; `Probe(bin)` is cached per path+mtime+size; `parseRegistered(message)`
+  (line 65) pulls kinds out of `registered: [...]`; `parseKinds` (line 82)
+  parses `sortie validate` JSON errors (`tracker_adapter`, `agent_adapter`).
+- `internal/rollup/schema.go` — `OldestSchema = 18` (line 14),
+  `EngineReleases = []EngineRelease{{"1.28.1", 38}, {"1.29.0", 43}}` (line 26),
+  `SupportedSchemas = []int{18, 35, 38, 43}` (line 32), `requiredColumns` map
+  (line 51) over `run_history`, `aggregate_metrics`, `session_metadata`,
+  `parked_issues`, `retry_entries`, `budget_hold_notices`. `InspectSchema(db)`
+  (line 108) returns `Schema{Notice}` with missing tables and columns.
+- `internal/loopsrc/discover.go` — `Discover(roots map[string]string) []rollup.Loop`
+  scans `root/.jigz/workflows/` for `WORKFLOW.*.md` and `jigz-*.db`, not
+  recursive.
+
+## Shipped documents
+
+`cmd/jig/workflows/WORKFLOW.issues.md` and `WORKFLOW.prs.md`. Front-matter
+keys: `tracker{kind, api_key, project, query_filter, active_states,
+in_progress_state, handoff_state, handoff_evidence, terminal_states,
+comments{on_completion, on_failure}}`, `polling{interval_ms}`, `db_path`,
+`workspace{root, retention_days}`, `hooks{after_create, before_run, after_run,
+timeout_ms}`, `agent{kind, command, max_turns, max_concurrent_agents,
+turn_timeout_ms, read_timeout_ms, stall_timeout_ms, stop_grace_ms,
+max_retry_backoff_ms}`, `pi{model}`, `claude-code{model}`,
+`dispatch{default{template}, rules[{name, match{labels}, agent, template,
+stage, next}]}`. Models are literal lines (`model: "sonnet"`,
+`model: "claude-haiku-5-5"`), not `$JIG_MODEL`.
+
+## Test and CI patterns
+
+- Table-driven subtests with `t.Run`, `t.TempDir()`, `t.Setenv`,
+  `os.WriteFile`. Representative: `cmd/jig/gate_test.go` (`gateCfg` writes
+  YAML to a temp file and calls `machine.Load`), `cmd/jig/supervise_test.go`
+  (`newTestSup` isolates XDG dirs), `internal/machine/machine_test.go`
+  (`isolate`, `load`), `internal/config/strict_test.go`.
+- `internal/fakegithub` — HTTP handler for the github and github-pr tracker
+  routes: `New(user, token)`, `Add(Item) int`, `AddComment`, `Get`, `SetClock`,
+  `LabelEvents`, `Unexpected`.
+- `internal/fakehub` — HTTP handler for the hub daemon protocol v0.
+- `cmd/jig/acceptance_test.go` (build tag `acceptance`): `TestAcceptance`
+  (line 76, pinned engine + `mock` agent, scenarios a_plan, a2_no_server,
+  b_excluded, c_dashboard, d_hours, e_usage_limit, f_question),
+  `TestAcceptanceUpstreamEngine` (line 737, upstream v1.29.0, scenarios
+  a_handoff_pr_disabled, b_dashboard), `TestAcceptanceConnected` (line 945,
+  fakehub). `acceptanceEngine(t)` (line 1467) resolves the binary;
+  `buildLoop(t)` (line 1498) compiles `jig`.
+- `.github/workflows/ci.yml` — `check` (gofmt, vet, test), `acceptance`
+  (`go test -tags acceptance -run '^TestAcceptance'`), `build` (4-way
+  cross-build matrix). No engine caching; acceptance downloads on demand.
+- `Makefile` — `verify` (gofmt, vet, vet -tags acceptance, build, test,
+  acceptance), `test`, `acceptance`. There is no `schema-fixture` target yet.
+- Existing testdata: `cmd/jig/testdata/` (example.yaml, runpage.js,
+  WORKFLOW.*.md), `internal/rollup/testdata/schema18.sql`.

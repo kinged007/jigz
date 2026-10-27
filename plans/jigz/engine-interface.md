@@ -787,7 +787,7 @@ plan; this section records what is done.
 
 | Phase | Branch | Status | Notes |
 | --- | --- | --- | --- |
-| 0 Documentation fix | `feat/engine-interface` | in progress | README `JIG_MODEL` rows |
+| 0 Documentation fix | `feat/engine-interface` | done | README `JIG_MODEL` rows removed (a7c7d4c) |
 | 1 Config model and loader | | not started | |
 | 2 Hours and offline handling | | not started | |
 | 3 Document generation | | not started | |
@@ -800,9 +800,44 @@ plan; this section records what is done.
 
 - 2026-10-27: integration branch `feat/engine-interface` created from `main`.
   Each phase is built in its own git worktree branch and merged into the
-  integration branch after review and the quality gate (`gofmt`, `go vet`,
-  `go build`, `go test ./...`).
+  integration branch with `--no-ff` after review and the quality gate (`gofmt`,
+  `go vet`, `go build`, `go test ./...`). Phase branches are kept so the work
+  can be split into one pull request per phase, per AGENTS.md.
+- 2026-10-27: phase 0 complete on `feat/engine-interface` (a7c7d4c). The README
+  table of environment variables no longer lists `JIG_MODEL` and
+  `JIG_MODEL_<WORKFLOW>`; the model is configured on the runtime block of the
+  workflow document, as the agent section already states.
+- 2026-10-27: `plans/jigz/engine-interface-notes.md` added as a code map for the
+  implementation phases (file and line references of the current code).
+- 2026-10-27: phase 1 dispatched to a coding-manual agent in a worktree (branch
+  `feat/config-model`). In parallel, a coding-low agent probes the two cached
+  engine binaries for the questions section 2.7 and section 7 leave open
+  (`$VAR` expansion in `agent.command`, per-block `command`, `claude-code.effort`,
+  `max_concurrent_agents: 0`, the `SORTIE_*` override set, registered kinds,
+  rule key behaviour, front-matter keys, log literals, schema tables). The
+  findings feed phases 3 to 5.
+- 2026-10-27: the first phase 1 dispatch died to a provider stall
+  (`stall-watchdog-retry`) before producing output; no worktree was created and
+  no code was written. Re-dispatched the same brief as `phase1-config-2`, with
+  an instruction to keep the tree compiling and work through to the quality
+  gate rather than stopping early. Baseline on `feat/engine-interface` at
+  a7c7d4c is green: `gofmt` empty, `go vet` clean, `go build` clean, all 23
+  packages pass `go test ./...`.
 
 ### 12.3 Deviations from the plan
 
 None so far.
+
+### 12.4 Interpretation recorded during execution
+
+- "The loader still accepts the current keys" (phase 1) is read as: the keys
+  that remain valid in the new model (`repo`, `token`, `github`, `filters`,
+  `labels`, `cleanup`, `sleep`) keep working exactly as before. The keys that
+  the new model replaces (`milestone`, `assignee`, `workflows`) are rejected
+  with a message naming the replacement, as section 4.8 requires. Budgets live
+  under `work.<slug>.budget`.
+- Phase 1 loads and validates the new sections but does not change loop
+  behaviour: loops still start from the shipped `WORKFLOW.*.md` documents and
+  `FilterFor` still supplies the query override. The new `work` entries are
+  bound to the existing document of the same name from phase 2 onward, and
+  generate documents from phase 3 onward.
