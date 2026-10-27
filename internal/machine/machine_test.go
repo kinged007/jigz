@@ -240,14 +240,14 @@ pool:
 func TestPickAndActiveRuntime(t *testing.T) {
 	c := mustLoad(t, poolYAML)
 	now := at(t, "UTC", "2026-10-19 09:00") // Monday, c2 closed
-	st := State{}
+	st := State{Agents: map[string]EntryState{}}
 	if e, ok := c.Pick(st, "claude-code", now); !ok || e.Name != "c1" {
 		t.Fatalf("pick = %v %v", e.Name, ok)
 	}
 	if got := c.ActiveRuntime(st, now); got != "claude-code" {
 		t.Fatalf("active = %q", got)
 	}
-	st["c1"] = EntryState{ExhaustedUntil: now.Add(2 * time.Hour)}
+	st.Agents["c1"] = EntryState{ExhaustedUntil: now.Add(2 * time.Hour)}
 	if _, ok := c.Pick(st, "claude-code", now); ok {
 		t.Fatal("c1 exhausted and c2 closed: nothing available")
 	}
@@ -260,8 +260,8 @@ func TestPickAndActiveRuntime(t *testing.T) {
 	if e, ok := c.Pick(st, "claude-code", now.Add(2*time.Hour)); !ok || e.Name != "c1" {
 		t.Fatalf("exhaustion expiring exactly now must be available, got %v %v", e.Name, ok)
 	}
-	st["p1"] = EntryState{ExhaustedUntil: now.Add(time.Hour)}
-	st["gone"] = EntryState{}
+	st.Agents["p1"] = EntryState{ExhaustedUntil: now.Add(time.Hour)}
+	st.Agents["gone"] = EntryState{}
 	if got := c.ActiveRuntime(st, now); got != "" {
 		t.Fatalf("active = %q, want empty", got)
 	}
@@ -276,7 +276,7 @@ func TestNextChange(t *testing.T) {
 	if got, want := c.NextChange(State{}, now), at(t, "UTC", "2026-10-19 10:00"); !got.Equal(want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
-	st := State{"c1": EntryState{ExhaustedUntil: at(t, "UTC", "2026-10-19 09:30")}}
+	st := State{Agents: map[string]EntryState{"c1": {ExhaustedUntil: at(t, "UTC", "2026-10-19 09:30")}}}
 	if got, want := c.NextChange(st, now), at(t, "UTC", "2026-10-19 09:30"); !got.Equal(want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
@@ -334,12 +334,12 @@ func TestDetectLimit(t *testing.T) {
 
 func TestStateMissingAndUpdate(t *testing.T) {
 	isolate(t)
-	p, err := StatePath()
-	if err != nil || p != filepath.Join(os.Getenv("XDG_STATE_HOME"), "jigz", "pool.json") {
-		t.Fatalf("path %q, %v", p, err)
+	p := StatePath(t.TempDir())
+	if filepath.Base(p) != "state.json" || filepath.Base(filepath.Dir(p)) != "data" {
+		t.Fatalf("path %q", p)
 	}
 	st, err := LoadState(p)
-	if err != nil || len(st) != 0 {
+	if err != nil || len(st.Agents) != 0 {
 		t.Fatalf("missing file: %v %v", st, err)
 	}
 	until := time.Date(2026, 10, 19, 15, 0, 0, 0, time.UTC)
@@ -349,21 +349,51 @@ func TestStateMissingAndUpdate(t *testing.T) {
 	if err := MarkUsed(p, "a", until.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
+	if err := UpdateState(p, func(st *State) {
+		st.Loops["issues"] = LoopState{Agent: "a", OfflineReason: "outside operating hours", ETA: until}
+	}); err != nil {
+		t.Fatal(err)
+	}
 	st, err = LoadState(p)
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := st["a"]
+	e := st.Agents["a"]
 	if !e.ExhaustedUntil.Equal(until) || len(e.Reason) != maxReason || !e.LastUsed.Equal(until.Add(-time.Hour)) {
 		t.Fatalf("unexpected state: %+v", e)
+	}
+	if l := st.Loops["issues"]; l.Agent != "a" || l.OfflineReason != "outside operating hours" || !l.ETA.Equal(until) {
+		t.Fatalf("unexpected loop state: %+v", l)
 	}
 	if fi, _ := os.Stat(p); fi.Mode().Perm() != 0o600 {
 		t.Fatalf("mode %v", fi.Mode())
 	}
 }
 
+func TestStateReadsTheLegacyPoolFile(t *testing.T) {
+	isolate(t)
+	legacy, err := legacyStatePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	until := time.Date(2026, 10, 19, 15, 0, 0, 0, time.UTC)
+	if err := os.WriteFile(legacy, []byte(`{"a":{"exhausted_until":"`+until.Format(time.RFC3339)+`","reason":"limit"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err := LoadState(StatePath(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := st.Agents["a"]; !e.ExhaustedUntil.Equal(until) || e.Reason != "limit" {
+		t.Fatalf("legacy state: %+v", e)
+	}
+}
+
 func TestStateCorrupt(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "pool.json")
+	p := filepath.Join(t.TempDir(), "state.json")
 	os.WriteFile(p, []byte("{"), 0o600)
 	if _, err := LoadState(p); err == nil {
 		t.Fatal("expected error")
@@ -379,10 +409,10 @@ func TestStateConcurrentUpdates(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errs <- UpdateState(p, func(st State) {
-				e := st["a"]
+			errs <- UpdateState(p, func(st *State) {
+				e := st.Agents["a"]
 				e.Reason += "x"
-				st["a"] = e
+				st.Agents["a"] = e
 			})
 		}()
 	}
@@ -394,8 +424,8 @@ func TestStateConcurrentUpdates(t *testing.T) {
 		}
 	}
 	st, err := LoadState(p)
-	if err != nil || len(st["a"].Reason) != n {
-		t.Fatalf("lost updates: %d of %d (%v)", len(st["a"].Reason), n, err)
+	if err != nil || len(st.Agents["a"].Reason) != n {
+		t.Fatalf("lost updates: %d of %d (%v)", len(st.Agents["a"].Reason), n, err)
 	}
 }
 

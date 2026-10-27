@@ -113,8 +113,8 @@ func TestUpstreamEngineSkipsThePRLoop(t *testing.T) {
 	for _, w := range sup.statusDoc("running").Workflows {
 		if w.Name == "prs" {
 			found = true
-			if w.State != "disabled" || w.Hold != why {
-				t.Errorf("prs status = %q, hold %q", w.State, w.Hold)
+			if w.State != "disabled" || w.OfflineReason != why {
+				t.Errorf("prs status = %q, offline reason %q", w.State, w.OfflineReason)
 			}
 		}
 	}

@@ -18,6 +18,7 @@ import (
 
 	"github.com/kinged007/jigz/internal/config"
 	"github.com/kinged007/jigz/internal/engine"
+	"github.com/kinged007/jigz/internal/machine"
 	"github.com/kinged007/jigz/internal/plan"
 	"github.com/kinged007/jigz/internal/rollup"
 )
@@ -191,6 +192,7 @@ func (s *supervisor) childEnv(name string) (envFile string, env []string, runtim
 	// adapter sends a non-empty filter to GitHub search); a filters: entry narrows
 	// further, it does not add to the default.
 	env = append(os.Environ(), cfg.Env()...)
+	env = append(env, "JIG_STATE_PATH="+machine.StatePath(s.root))
 	if filter := cfg.FilterFor(name); filter != "" {
 		env = append(env, "SORTIE_TRACKER_QUERY_FILTER="+filter)
 	}
@@ -653,20 +655,35 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 	}
 	gate := s.gateStatusLocked()
 	doc.Gate = gate
+	in := s.gateInputsLocked()
+	now := s.clock()
+	mv := gateEval(in.machine, in.state, now)
+	loopInfo := func(name string, bs *budgetStatus) loopView {
+		lv := in.loopView(name, mv, now)
+		if bs != nil && bs.Paused {
+			lv.Reason, lv.ETA = "", time.Time{}
+		}
+		return lv
+	}
 	add := func(p *loopProc) {
-		st := "running"
 		bs := s.budgetStatusLocked(p.def.name)
+		lv := loopInfo(p.def.name, bs)
+		st := "running"
 		switch {
 		case bs != nil && bs.Paused:
 			st = "paused"
 		case s.gateHeld[p.def.name] && p.exitCode != nil:
-			st = "held"
+			st = "offline"
 		case s.sleeping:
 			st = "sleeping"
 		case p.exitCode != nil:
 			st = "exited"
+		case p.stopping && p.drain:
+			st = "draining"
 		case p.stopping:
 			st = "stopping"
+		case !lv.Open:
+			st = "draining"
 		}
 		pid := 0
 		if p.cmd != nil && p.cmd.Process != nil {
@@ -677,10 +694,18 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 			PID: pid, State: st, StartedAt: p.since.UTC(),
 			RestartCount: p.restarts, LastExitCode: p.exitCode, ConfigHash: p.configHash,
 			LogPath: childLogPath(s.root, p.def.name), Budget: bs,
-			Hold: gate.holdFor(bs),
+			OfflineReason: lv.Reason, ETA: timePtr(lv.ETA), Agent: lv.Agent,
 		}
 		if p.exitCode == nil {
 			w.Sessions, w.SessionsKnown = p.live.snapshot()
+			// One loop runs one agent at a time: agent changes happen at
+			// idle, so every running session belongs to the current agent.
+			for i := range w.Sessions {
+				w.Sessions[i].Agent = lv.Agent
+				if w.Sessions[i].Agent == "" {
+					w.Sessions[i].Agent = p.runtime
+				}
+			}
 		}
 		doc.Workflows = append(doc.Workflows, w)
 	}
@@ -696,17 +721,18 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 		}
 		wf, _ := os.ReadFile(filepath.Join(s.root, ".jigz", "workflows", def.file))
 		bs := s.budgetStatusLocked(name)
-		st, hold := "paused", gate.holdFor(bs)
+		lv := loopInfo(name, bs)
+		st, offline := "paused", lv.Reason
 		if s.gateHeld[name] && (bs == nil || !bs.Paused) {
-			st = "held"
+			st = "offline"
 		}
 		if why, ok := s.disabled[name]; ok {
-			st, hold = "disabled", why
+			st, offline = "disabled", why
 		}
 		doc.Workflows = append(doc.Workflows, workflowStatus{
 			Name: name, WorkflowFile: def.file, LoopType: loopTypeOf(wf),
 			State: st, StartedAt: s.startedAt.UTC(), LogPath: childLogPath(s.root, name),
-			Budget: bs, Hold: hold,
+			Budget: bs, OfflineReason: offline, ETA: timePtr(lv.ETA), Agent: lv.Agent,
 		})
 	}
 	sort.Slice(doc.Workflows, func(i, j int) bool { return doc.Workflows[i].Name < doc.Workflows[j].Name })

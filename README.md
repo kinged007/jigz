@@ -581,8 +581,11 @@ in time, it prints the last log lines and exits non-zero. Stop the run with
 differs from the shipped one. It never changes an existing workflow file.
 
 `jig status [--json] [repo-root]` reports the run serving the
-repo-root: version, pid, state, and per workflow its state, pid,
-restart count and last exit code. `--json` prints the status document
+repo-root: version, pid, state, and per workflow its state (`running`,
+`draining`, `offline`, `paused`, `sleeping`, `exited`, `stopping` or
+`disabled`), pid, restart count, last exit code, the agent it runs
+with, its running sessions, and, when it is not running, the offline
+reason and the estimated start time. `--json` prints the status document
 with an added `liveness` field: `running` when the pid is alive, `stale`
 when the document says running but the pid is dead, `exited` when the
 run ended. The command reads the document from the repo-root and does not
@@ -758,7 +761,9 @@ variable of the supervising process, `{from_env: NAME}`. A key whose
 name ends in `TOKEN`, `KEY`, `SECRET` or `PASSWORD` (in any case) must
 be a reference; a literal is rejected. An unresolved reference does not
 fail the load; it makes the agent unavailable, and the unresolved names
-are retrievable (`Config.UnresolvedRefs`).
+are retrievable (`Config.UnresolvedRefs`). `max_concurrent_agents`
+counts the running sessions of one work entry; `0` (or omitted) means
+no limit.
 
 ```yaml
 engine: { repo: kinged007/sortie, version: v1.28.1 } # empty fields = engine defaults
@@ -1112,7 +1117,29 @@ only (`chmod 600`); loading warns when it is not.
 `end: finish` makes loops claim nothing new when the window closes and stops
 each loop once it has no running session. `end: stop` stops the loops when the
 window closes; the engine aborts the turn, the issue keeps its in-progress
-label and is dispatched again when the next window opens.
+label and is dispatched again when the next window opens. With several
+running sessions, `finish` waits for all of them and `stop` ends the loop at
+once.
+
+Hours gate every loop on its own. A loop's candidates are the agents of
+its work entry (`work.<slug>.agent`, falling back to the rule's own
+list), evaluated in order together with the operating hours and each
+candidate's own `schedule`: a candidate is available when the operating
+hours and its hours are open, it is not marked exhausted and its
+environment references resolve. The first available candidate is the
+loop's agent, shown by `jig status` and the dashboard. A blocked loop
+goes offline with the reason in the status document — outside
+operating hours, `agent <name> is outside its working hours`, every
+agent is exhausted, every agent has unresolved environment references,
+or no agent runtime is registered on the engine — and an estimated
+start: the earliest of the next working-hours start of its candidates,
+their usage-limit resets and the next operating-hours window; without a
+future input the estimate is empty. A paused loop is never started.
+
+When the gate closes, the end behaviour is the `end` of the
+`operating_hours` block when operating hours closed it, otherwise the
+`schedule.end` of the candidate whose hours closed it, and `finish` in
+every other case.
 
 With a pool, the supervisor starts each loop with the agent command set to
 `jig agent-exec <runtime>`. `agent-exec` runs the CLI of the first
@@ -1120,7 +1147,10 @@ available entry of that runtime (not exhausted and inside its own hours), passes
 stdout through unchanged and exits with the CLI's exit code. When the CLI output
 reports a usage limit, the entry is marked exhausted until the reset time in
 the message, or for `limits.default_reset`. The state is stored in
-`<state dir>/jigz/pool.json`. Without an available entry, `agent-exec`
+`<repo root>/.jigz/data/state.json`, created by `jig setup` and kept out
+of commits by the `.jigz/` gitignore rule. A `pool.json` written by an
+older jig in the per-user state directory is still read and never
+written again. Without an available entry, `agent-exec`
 exits 75. When the active runtime changes, loops are restarted once they have
 no running session.
 
@@ -1182,7 +1212,7 @@ enrollment token is used once and not stored.
 | `~/.local/state/jigz/jigd.log` | daemon log |
 | `~/.local/share/jigz/hub/loops/<owner>/<name>/<workflow>/` | one root per project and workflow: the files served by the hub, the loop's workspaces and its engine database |
 
-`machine.yaml`, `pool.json`, the agent CLIs and their logins stay on the
+`machine.yaml`, the state file, the agent CLIs and their logins stay on the
 machine. The hub receives their status (pool entry names and runtimes,
 working hours), not the credentials.
 

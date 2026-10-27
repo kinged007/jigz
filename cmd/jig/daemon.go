@@ -1148,9 +1148,13 @@ func (d *daemon) status() hubproto.StatusRequest {
 		Time: now.UTC(), Paused: paused, Loops: []hubproto.Loop{}, Accounts: []hubproto.Account{},
 		Capacity: &hubproto.Capacity{}, Hours: &hubproto.Hours{Open: true}, LastError: lastErr,
 	}
+	var root string
 	for _, c := range d.sup.Snapshot() {
 		if retired[c.Key] {
 			continue
+		}
+		if root == "" {
+			root = c.Loop.Root
 		}
 		l := hubproto.Loop{Project: c.Loop.Project, Workflow: c.Loop.Workflow, State: hubproto.LoopStopped, Files: []hubproto.FileHash{}}
 		if files, err := source.AppliedFiles(c.Loop.Root); err == nil && files != nil {
@@ -1179,8 +1183,12 @@ func (d *daemon) status() hubproto.StatusRequest {
 		req.LastError = d.redact("machine config: " + err.Error())
 		return req
 	}
-	statePath, _ := machine.StatePath()
-	st, _ := machine.LoadState(statePath)
+	var st machine.State
+	if root != "" {
+		// The pool is per-machine but the state moved into the repository;
+		// the account view reports one repo's records.
+		st, _ = machine.LoadState(machine.StatePath(root))
+	}
 	req.Hours.Open = cfg.Hours.Open(now)
 	if next := cfg.NextChange(st, now); !next.IsZero() {
 		next = next.UTC()
@@ -1189,7 +1197,7 @@ func (d *daemon) status() hubproto.StatusRequest {
 	for _, e := range cfg.Pool {
 		a := hubproto.Account{Name: e.Name, Runtime: e.Runtime, Available: e.Available(st, now)}
 		if !a.Available {
-			until := st[e.Name].ExhaustedUntil
+			until := st.Agents[e.Name].ExhaustedUntil
 			if !until.After(now) {
 				until = e.Hours.Next(now)
 			}
@@ -1224,11 +1232,11 @@ func (d *daemon) childStatus(root string, l *hubproto.Loop) {
 	}
 	for _, w := range doc.Workflows {
 		switch w.State {
-		case "held", "paused":
-			l.Detail, l.Reason = hubproto.DetailHeld, d.redact(w.Hold)
+		case "offline", "paused":
+			l.Detail, l.Reason = hubproto.DetailHeld, d.redact(w.OfflineReason)
 		case "disabled":
-			l.Detail, l.Reason = hubproto.DetailDisabled, d.redact(w.Hold)
-		case "stopping":
+			l.Detail, l.Reason = hubproto.DetailDisabled, d.redact(w.OfflineReason)
+		case "stopping", "draining":
 			l.Detail = hubproto.DetailStopping
 		}
 		if b := w.Budget; b != nil && b.Cap > 0 {

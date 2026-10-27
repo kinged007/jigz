@@ -49,9 +49,9 @@ func runAgentExec(args []string, stdin io.Reader, stdout, stderr io.Writer) int 
 	if !slices.ContainsFunc(cfg.Pool, func(e machine.Entry) bool { return e.Runtime == runtime }) {
 		return fail(2, "no %s entry in the pool of %s", runtime, cfgPath)
 	}
-	statePath, err := machine.StatePath()
-	if err != nil {
-		return fail(2, "%v", err)
+	statePath := os.Getenv("JIG_STATE_PATH")
+	if statePath == "" {
+		return fail(2, "JIG_STATE_PATH is not set; agent-exec runs through a Jigz loop")
 	}
 	state, err := machine.LoadState(statePath)
 	if err != nil {
