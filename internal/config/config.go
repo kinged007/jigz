@@ -3,13 +3,12 @@
 package config
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,16 +18,13 @@ import (
 	"gopkg.in/yaml.v3"
 
 	fleetconfig "github.com/kinged007/jigz/internal/fleetconfig"
+	"github.com/kinged007/jigz/internal/machine"
 )
 
 // Config holds the resolved runtime settings for one loop run.
 type Config struct {
-	Repo      string `yaml:"repo"`
-	Token     string `yaml:"token"`
-	Milestone string `yaml:"milestone"`
-	// Assignee restricts every loop to items assigned to this user.
-	// Empty = no restriction. Setup writes "@me" (the token owner).
-	Assignee *string `yaml:"assignee"`
+	Repo  string `yaml:"repo"`
+	Token string `yaml:"token"`
 
 	Dir       string // repo root (sortie dir is Dir/.jigz)
 	SortieBin string // resolved sortie binary path
@@ -36,7 +32,8 @@ type Config struct {
 	Tracker   string // tracker project, always == Repo
 	// Filters overrides the default per-loop query filters by loop name
 	// (the WORKFLOW.*.md stem). Unknown loops get defaultFilter; known
-	// loops fall back to their shipped default when unset.
+	// loops fall back to their shipped default when unset. A work
+	// entry's query_filter wins over these.
 	Filters map[string]string `yaml:"filters"`
 	// Labels are the GitHub labels setup ensures exist (create-or-edit;
 	// labels absent here are left alone). Empty = DefaultLabels.
@@ -44,11 +41,23 @@ type Config struct {
 	Workspaces string  // .jigz/workspaces under Dir
 	Cleanup    Cleanup
 	Sleep      Sleep
-	// Budgets are the per-workflow spend caps by loop name. An entry with
-	// MaxTokens 0 is disabled.
-	Budgets map[string]Budget
 	// GitHub is the dashboard's GitHub enrichment and question scanning.
 	GitHub fleetconfig.GitHub
+
+	// Engine is the engine: section. Empty fields mean the engine
+	// defaults (kinged007/sortie v1.28.1).
+	Engine machine.Engine
+	// OperatingHours gates every loop. No windows means 24/7.
+	OperatingHours machine.Hours
+	// TrackerDefaults and Hooks are the defaults every work entry may
+	// override with its tracker: and hooks: blocks.
+	TrackerDefaults Tracker
+	Hooks           Hooks
+	// Agents and Pools are the fleet; both share one name space. Work is
+	// the work: section keyed by slug.
+	Agents map[string]Agent
+	Pools  map[string][]string
+	Work   map[string]Work
 }
 
 // Budget caps the tokens one workflow may use per period.
@@ -77,8 +86,7 @@ const (
 	defaultBudgetTZName = "UTC"
 )
 
-func (f budgetFile) resolve(name string) (Budget, error) {
-	key := "workflows." + name + ".budget."
+func (f budgetFile) resolve(key string) (Budget, error) {
 	b := Budget{
 		Period: f.Period, MaxTokens: f.MaxTokens, WarnPercent: f.WarnPercent,
 		PollInterval: defaultBudgetPoll, MaxUSD: f.MaxUSD,
@@ -126,17 +134,32 @@ func (f budgetFile) resolve(name string) (Budget, error) {
 	return b, nil
 }
 
-// CheckBudgets fails when workflows: names a loop that has no
-// WORKFLOW.<name>.md file.
+// Budgets returns the resolved budget of every work entry that has one,
+// keyed by work slug. An entry with MaxTokens 0 is disabled.
+func (c *Config) Budgets() map[string]Budget {
+	out := map[string]Budget{}
+	for slug, w := range c.Work {
+		if w.Budget != nil {
+			out[slug] = *w.Budget
+		}
+	}
+	return out
+}
+
+// CheckBudgets fails when a work entry with a budget names a slug that
+// has no WORKFLOW.<slug>.md file.
 func (c *Config) CheckBudgets() error {
-	names := make([]string, 0, len(c.Budgets))
-	for n := range c.Budgets {
+	names := make([]string, 0, len(c.Work))
+	for n := range c.Work {
 		names = append(names, n)
 	}
 	sort.Strings(names)
 	for _, n := range names {
+		if c.Work[n].Budget == nil {
+			continue
+		}
 		if _, err := os.Stat(filepath.Join(c.Dir, ".jigz", "workflows", "WORKFLOW."+n+".md")); err != nil {
-			return fmt.Errorf("workflows.%s: no WORKFLOW.%s.md in .jigz/workflows", n, n)
+			return fmt.Errorf("work.%s: no WORKFLOW.%s.md in .jigz/workflows", n, n)
 		}
 	}
 	return nil
@@ -313,26 +336,54 @@ var DefaultLabels = []Label{
 
 // configFile is the document of .jigz/config.yaml.
 type configFile struct {
-	Repo      string            `yaml:"repo"`
-	Token     string            `yaml:"token"`
-	Milestone string            `yaml:"milestone"`
-	Assignee  *string           `yaml:"assignee"`
-	Filters   map[string]string `yaml:"filters"`
-	Labels    []Label           `yaml:"labels"`
-	Cleanup   cleanupFile       `yaml:"cleanup"`
-	Sleep     sleepFile         `yaml:"sleep"`
-	Workflows map[string]struct {
-		Budget budgetFile `yaml:"budget"`
-	} `yaml:"workflows"`
-	GitHub fleetconfig.GitHub `yaml:"github"`
+	Repo    string             `yaml:"repo"`
+	Token   string             `yaml:"token"`
+	Filters map[string]string  `yaml:"filters"`
+	Labels  []Label            `yaml:"labels"`
+	Cleanup cleanupFile        `yaml:"cleanup"`
+	Sleep   sleepFile          `yaml:"sleep"`
+	GitHub  fleetconfig.GitHub `yaml:"github"`
+
+	Engine         machine.Engine      `yaml:"engine"`
+	OperatingHours machine.Hours       `yaml:"operating_hours"`
+	Tracker        Tracker             `yaml:"tracker"`
+	Hooks          Hooks               `yaml:"hooks"`
+	Agents         map[string]Agent    `yaml:"agents"`
+	Pools          map[string][]string `yaml:"pools"`
+	Work           map[string]workFile `yaml:"work"`
 }
 
-// parseFile decodes the config file and rejects unknown keys at every level.
+// removedKeys are the keys the single-file model replaces. The error
+// names the replacement where one exists.
+var removedKeys = map[string]string{
+	"milestone": "milestone is not configurable",
+	"assignee":  "the assignee scope is always assignee:@me",
+	"workflows": "workflows.<name>.budget moves to work.<slug>.budget",
+}
+
+// parseFile decodes the config file and rejects unknown keys at every
+// level, naming the field path of the key.
 func parseFile(raw []byte) (configFile, error) {
+	var root yaml.Node
+	if err := yaml.Unmarshal(raw, &root); err != nil {
+		return configFile{}, fmt.Errorf("parse .jigz/config.yaml: %w", err)
+	}
+	if root.Kind != 0 && len(root.Content) > 0 {
+		doc := root.Content[0]
+		if doc.Kind == yaml.MappingNode {
+			for i := 0; i+1 < len(doc.Content); i += 2 {
+				key := doc.Content[i].Value
+				if repl, ok := removedKeys[key]; ok {
+					return configFile{}, fmt.Errorf("parse .jigz/config.yaml: unknown key %q (%s)", key, repl)
+				}
+			}
+		}
+		if err := checkKeys(doc, reflect.TypeOf(configFile{}), ""); err != nil {
+			return configFile{}, fmt.Errorf("parse .jigz/config.yaml: %w", err)
+		}
+	}
 	var file configFile
-	dec := yaml.NewDecoder(bytes.NewReader(raw))
-	dec.KnownFields(true)
-	if err := dec.Decode(&file); err != nil && !errors.Is(err, io.EOF) {
+	if err := yaml.Unmarshal(raw, &file); err != nil {
 		return configFile{}, fmt.Errorf("parse .jigz/config.yaml: %w", err)
 	}
 	return file, nil
@@ -341,8 +392,8 @@ func parseFile(raw []byte) (configFile, error) {
 // Load reads .jigz/config.yaml under dir (repo root), applies environment
 // overrides, and derives git-based defaults. The config file must exist:
 // a fresh checkout needs `jig setup` first, and running without
-// it would silently fall back to defaults (wrong labels, no milestone)
-// and dispatch on items the operator never scoped.
+// it would silently fall back to defaults (wrong labels, no query
+// scope) and dispatch on items the operator never scoped.
 func Load(dir string) (*Config, error) {
 	c := &Config{Dir: dir, Filters: map[string]string{}, Cleanup: Cleanup{Timeout: defaultCleanupTimeout}}
 	if dir == "" {
@@ -365,8 +416,7 @@ func Load(dir string) (*Config, error) {
 			return nil, err
 		}
 		c.GitHub = file.GitHub
-		c.Repo, c.Token, c.Milestone = file.Repo, file.Token, file.Milestone
-		c.Assignee = file.Assignee
+		c.Repo, c.Token = file.Repo, file.Token
 		c.Filters = file.Filters
 		c.Labels = file.Labels
 		cl, err := file.Cleanup.resolve()
@@ -379,13 +429,22 @@ func Load(dir string) (*Config, error) {
 			return nil, err
 		}
 		c.Sleep = sl
-		c.Budgets = map[string]Budget{}
-		for name, w := range file.Workflows {
-			b, err := w.Budget.resolve(name)
+		c.Engine = file.Engine
+		c.OperatingHours = file.OperatingHours
+		c.TrackerDefaults = file.Tracker
+		c.Hooks = file.Hooks
+		c.Agents = file.Agents
+		c.Pools = file.Pools
+		c.Work = map[string]Work{}
+		for slug, wf := range file.Work {
+			w, err := wf.resolve(slug)
 			if err != nil {
 				return nil, err
 			}
-			c.Budgets[name] = b
+			c.Work[slug] = w
+		}
+		if err := c.validateModel(); err != nil {
+			return nil, err
 		}
 	}
 	if c.Filters == nil {
@@ -394,17 +453,20 @@ func Load(dir string) (*Config, error) {
 	if c.Labels == nil {
 		c.Labels = DefaultLabels
 	}
+	if c.Agents == nil {
+		c.Agents = map[string]Agent{}
+	}
+	if c.Pools == nil {
+		c.Pools = map[string][]string{}
+	}
+	if c.Work == nil {
+		c.Work = map[string]Work{}
+	}
 	if v := os.Getenv("JIG_REPO"); v != "" {
 		c.Repo = v
 	}
 	if v := os.Getenv("JIG_TOKEN"); v != "" {
 		c.Token = v
-	}
-	if v := os.Getenv("JIG_MILESTONE"); v != "" {
-		c.Milestone = v
-	}
-	if v := os.Getenv("GH_MILESTONE"); v != "" && c.Milestone == "" {
-		c.Milestone = v
 	}
 	if c.Repo == "" {
 		slug, err := detectRepo(dir)
@@ -502,36 +564,30 @@ var defaultFilters = map[string]string{
 }
 
 // DefaultLabelFilter returns the shipped query filter for a loop with no
-// milestone or assignee scope. The workflow files carry the same string, and
-// the env override injected at launch replaces it; both must agree or the
-// file would say one thing and the running loop another.
+// query_filter or filters override. The workflow files carry the same
+// string, and the env override injected at launch replaces it; both must
+// agree or the file would say one thing and the running loop another.
 func DefaultLabelFilter(name string) string { return defaultFilters[name] }
 
 const defaultFilter = "-label:needs-human"
 
-// FilterFor returns the query filter for a loop: the filters: override
-// when set, else the shipped default for known loops, else defaultFilter.
-// Milestone and assignee scope apply to every filter including overrides.
-// Default assignee scope is @me (the token owner); empty = no restriction.
+// FilterFor returns the query filter for a loop: the work entry's
+// query_filter when set (it is the complete tracker query), else the
+// filters: override, else the shipped default for known loops, else
+// defaultFilter. Jigz appends the assignee scope at launch, so every
+// filter carries assignee:@me.
 func (c *Config) FilterFor(name string) string {
-	base := c.Filters[name]
+	base := c.Work[name].QueryFilter
+	if base == "" {
+		base = c.Filters[name]
+	}
 	if base == "" {
 		base = defaultFilters[name]
 		if base == "" {
 			base = defaultFilter
 		}
 	}
-	return withScope(withMilestone(base, c.Milestone), c.assignee())
-}
-
-func (c *Config) assignee() string {
-	if v, ok := os.LookupEnv("JIG_ASSIGNEE"); ok {
-		return v
-	}
-	if c.Assignee != nil {
-		return *c.Assignee
-	}
-	return "@me"
+	return base + " assignee:@me"
 }
 
 // Env returns the environment for one engine subprocess.
@@ -554,26 +610,6 @@ func (c *Config) CheckToken() error {
 		return nil
 	}
 	return errors.New("no GitHub token found. Set one of JIG_TOKEN, token: in .jigz/config.yaml, GITHUB_TOKEN, or GH_TOKEN (see the GitHub token section of the README)")
-}
-
-func withScope(base, assignee string) string {
-	if assignee == "" {
-		return base
-	}
-	if base == "" {
-		return "assignee:" + assignee
-	}
-	return base + " assignee:" + assignee
-}
-
-func withMilestone(base, milestone string) string {
-	if milestone == "" {
-		return base
-	}
-	if base == "" {
-		return `milestone:"` + milestone + `"`
-	}
-	return base + ` milestone:"` + milestone + `"`
 }
 
 // detectRepo derives owner/name from the git remote in dir.

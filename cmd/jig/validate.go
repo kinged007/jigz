@@ -51,9 +51,9 @@ func collectValidateChecks(root string) ([]validateCheck, []string, []string) {
 	if err := cfg.CheckToken(); err != nil {
 		warnings = append(warnings, err.Error())
 	}
-	for name, b := range cfg.Budgets {
+	for name, b := range cfg.Budgets() {
 		if b.MaxUSD > 0 {
-			warnings = append(warnings, fmt.Sprintf("workflows.%s.budget.max_usd is ignored: the engine records no cost per run", name))
+			warnings = append(warnings, fmt.Sprintf("work.%s.budget.max_usd is ignored: the engine records no cost per run", name))
 		}
 	}
 

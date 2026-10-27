@@ -243,7 +243,7 @@ func (c *Config) validate() error {
 	if err := c.Dashboard.validate(); err != nil {
 		return err
 	}
-	if err := c.Hours.validate("hours"); err != nil {
+	if err := c.Hours.Validate("hours"); err != nil {
 		return err
 	}
 	switch c.Hours.End {
@@ -273,14 +273,16 @@ func (c *Config) validate() error {
 		if e.Hours.End != "" {
 			return fmt.Errorf("%shours.end: only the machine hours have an end mode", key)
 		}
-		if err := e.Hours.validate(key + "hours"); err != nil {
+		if err := e.Hours.Validate(key + "hours"); err != nil {
 			return err
 		}
 	}
 	return c.Limits.validate()
 }
 
-func (h *Hours) validate(key string) error {
+// Validate resolves the timezone and parses the windows, so Open and
+// Next can be used. Error messages are prefixed with key.
+func (h *Hours) Validate(key string) error {
 	h.loc = time.Local
 	if h.Timezone != "" {
 		loc, err := time.LoadLocation(h.Timezone)

@@ -367,15 +367,15 @@ func (s *supervisor) reload() {
 		s.republish()
 		return
 	}
-	for name, b := range cfg.Budgets {
+	for name, b := range cfg.Budgets() {
 		if b.MaxUSD > 0 {
-			fmt.Fprintf(os.Stderr, "jig: workflows.%s.budget.max_usd is ignored: the engine records no cost per run\n", name)
+			fmt.Fprintf(os.Stderr, "jig: work.%s.budget.max_usd is ignored: the engine records no cost per run\n", name)
 		}
 	}
 	s.mu.Lock()
 	s.sleepCfg = cfg.Sleep
 	s.mu.Unlock()
-	s.reloadBudgets(cfg.Budgets)
+	s.reloadBudgets(cfg.Budgets())
 	s.reloadCleanup(cfg)
 	s.refreshMachine(s.clock(), true)
 	s.republish()

@@ -674,7 +674,7 @@ func TestRepoNameUsesTheConfiguredSlugForANonCheckout(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, ".jigz"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	body := "repo: kinged007/myxon-beta\ntoken: \"\"\nassignee: \"@me\"\n"
+	body := "repo: kinged007/myxon-beta\ntoken: \"\"\n"
 	if err := os.WriteFile(filepath.Join(root, ".jigz", "config.yaml"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}

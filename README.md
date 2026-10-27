@@ -61,11 +61,9 @@ There is no queue and no webhook. Every loop polls GitHub roughly every
    so an item left mid-run by a crashed process is re-picked by the loop
    that started it. The loop's dispatch rules choose the job from the
    trigger label; the first matching rule wins.
-2. **Assignee scope** — by default every query ends in `assignee:@me`,
+2. **Assignee scope** — every query ends in `assignee:@me`,
    meaning only items assigned to the token owner are picked up. This
-   keeps several people (or bots) from fighting over one backlog. Set
-   `assignee: ""` in config for a shared backlog where anyone's issue
-   is fair game.
+   keeps several people (or bots) from fighting over one backlog.
 3. **Escalation guard** — every query excludes `-label:needs-human`,
    so anything an agent flagged for a person stays parked until a
    human removes the label.
@@ -188,7 +186,11 @@ warning on stderr says so. To migrate:
    do not need the run history.
 2. Rerun `jig setup` to install the two new files.
 3. In `.jigz/config.yaml`, rename old loop names to `issues` or `prs` in
-   the `filters:` and `workflows:` (budget) keys.
+   the `filters:` key, and move each `workflows:<name>.budget` block to
+   `work:<name>.budget`. The keys `milestone`, `assignee` and `workflows`
+   are no longer accepted: there is no milestone scope, the assignee
+   scope is always `assignee:@me`, and budgets live under
+   `work.<slug>.budget`.
 4. Existing installs keep their old `prompts/plan.md` and `prompts/build.md`,
    because setup never overwrites a file. Diff them against the shipped
    copies or delete them and rerun `setup`. An old `build.md` that does not
@@ -691,7 +693,7 @@ all. It applies to `jig` and `jig start`. This is how Jigz picks a per-repo work
 
 ```
 .jigz/
-  config.yaml      # repo:, token:, milestone:, cleanup:, sleep:, workflows: (all optional — see below)
+  config.yaml      # repo:, token:, work:, agents:, cleanup:, sleep: (all optional — see below)
   workflows/       # installed by setup from the binary; edit freely, loop runs these
   .env.loop        # generated each run (resolved tracker, token, clone URL; mode 0600)
   workspaces/      # per-item agent checkouts (one subdir per loop)
@@ -711,14 +713,13 @@ replace `.jigz/` with:
 jigz-*.db
 ```
 
-`.jigz/config.yaml`. An unknown key at any level is an error that names the
-file, the line and the key:
+`.jigz/config.yaml`. An unknown key at any level is an error that names
+the field path of the key (for example
+`unknown key "work.issues.rules[0].effort"`):
 
 ```yaml
 repo: ""        # empty = detect from git remote; or pin owner/name
 token: ""       # empty = JIG_TOKEN, then GITHUB_TOKEN / GH_TOKEN env
-milestone: ""   # optional milestone title to restrict all loops to
-assignee: "@me" # token owner only; "" = shared backlog
 # per-loop query-filter overrides, keyed by WORKFLOW.*.md stem
 # (read on every run — no setup re-run needed):
 #filters:
@@ -746,6 +747,63 @@ for l in agent:plan-needed agent:quick agent:pr-fix agent:needs-review \
   gh label delete "$l" --repo owner/name --yes
 done
 ```
+
+### Fleet and work
+
+The same file holds the engine target, the operating hours, the tracker
+and hook defaults, the agent fleet and the work entries
+(`plans/jigz/engine-interface.md` has the design). Secrets are never
+stored in the file: a credential is a reference to an environment
+variable of the supervising process, `{from_env: NAME}`. A key whose
+name ends in `TOKEN`, `KEY`, `SECRET` or `PASSWORD` (in any case) must
+be a reference; a literal is rejected. An unresolved reference does not
+fail the load; it makes the agent unavailable, and the unresolved names
+are retrievable (`Config.UnresolvedRefs`).
+
+```yaml
+engine: { repo: kinged007/sortie, version: v1.28.1 } # empty fields = engine defaults
+operating_hours: {}          # omitted or empty = 24/7; windows use days mon..sun and "HH:MM"
+tracker:                     # defaults for every work entry; work.<slug>.tracker overrides
+  kind: github
+  api_key: { from_env: JIG_TRACKER_TOKEN }  # credential: reference only
+  project: owner/repo                       # a reference or a plain string
+hooks:                       # defaults; work.<slug>.hooks overrides
+  after_create: ./hooks/create.sh
+  before_run: ./hooks/before.sh
+  after_run: ./hooks/after.sh
+  timeout_ms: 60000
+agents:
+  builder:
+    runtime: claude-code     # claude-code | pi
+    model: claude-sonnet-5-5 # passed to the runtime unvalidated
+    schedule:                # omitted = always available
+      timezone: Europe/Madrid
+      end: finish            # finish | stop
+      windows: [{ days: [mon, tue, wed, thu, fri], start: "09:00", end: "18:00" }]
+    env:                     # environment of the agent process
+      ANTHROPIC_OAUTH_TOKEN: { from_env: CLAUDE_SUB_1 }
+pools:
+  build-pool: [builder]      # ordered fallback; agent and pool names share one space
+work:
+  issues:
+    query_filter: "label:agent:build,in-progress -label:needs-human"  # the complete query
+    budget: { period: monthly, max_tokens: 5000000 }
+    agent: builder           # an agent, a pool, or an ordered list of names
+    rules:
+    - { name: build, match: { labels: [agent:build] }, prompt: prompts/build.md }
+```
+
+A work entry's `query_filter` is the complete tracker query and wins over
+the `filters:` override and the shipped defaults; `assignee:@me` is
+appended at launch. `max_concurrent_agents`, `max_turns` and
+`polling_interval_ms` sit next to `budget`. A rule's `agent` may be a
+name, a list of names, or `{use: ..., model: ..., schedule: ...}` to
+override the fleet agent for that rule; `stage` and `next` are the
+engine's stage chaining. Work names are letters, digits and `-`; rule
+names within one entry are unique, and `next` names a later rule of the
+same entry. Loops still run the shipped `WORKFLOW.*.md` documents; the
+supervisor reads `work.<slug>.query_filter` and `work.<slug>.budget` at
+launch and validates and resolves the remaining sections.
 
 ### Workspace cleanup
 
@@ -951,12 +1009,12 @@ until others leave the list.
 
 ### Spend controls
 
-`workflows:` in `.jigz/config.yaml` caps the tokens one workflow may use
-per period. The key is the loop name (the `WORKFLOW.<name>.md` stem); a name
-without a workflow file is an error at startup.
+`work:<slug>.budget` in `.jigz/config.yaml` caps the tokens one loop may
+use per period. The key is the work slug (the `WORKFLOW.<name>.md` stem);
+a name without a workflow file is an error at startup.
 
 ```yaml
-workflows:
+work:
   issues:
     budget:
       period: weekly          # weekly (ISO week, Monday start) or monthly (calendar month)
@@ -991,9 +1049,7 @@ to the status document. Idle sleep does not start paused workflows at wake.
 A manual pause is kept across periods; the override and the warning reset at
 each period.
 
-Env overrides: `JIG_REPO`, `JIG_TOKEN`,
-`JIG_MILESTONE` (plus `GH_MILESTONE` as a legacy alias),
-`JIG_ASSIGNEE` (overrides `assignee:`).
+Env overrides: `JIG_REPO`, `JIG_TOKEN`.
 
 ### Other environment variables
 

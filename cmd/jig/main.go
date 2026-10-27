@@ -318,9 +318,9 @@ func run() (code int) {
 	if err := cfg.CheckBudgets(); err != nil {
 		fatal(err)
 	}
-	for name, b := range cfg.Budgets {
+	for name, b := range cfg.Budgets() {
 		if b.MaxUSD > 0 {
-			fmt.Fprintf(os.Stderr, "jig: workflows.%s.budget.max_usd is ignored: the engine records no cost per run\n", name)
+			fmt.Fprintf(os.Stderr, "jig: work.%s.budget.max_usd is ignored: the engine records no cost per run\n", name)
 		}
 	}
 	bin, err := resolveSortieBin()
@@ -367,7 +367,7 @@ func run() (code int) {
 	}
 	sup.setGate(engine.Detect(bin))
 	sup.sleepCfg = cfg.Sleep
-	sup.initBudget(cfg.Budgets)
+	sup.initBudget(cfg.Budgets())
 	// Ordered rather than deferred in the body: os.Exit would skip a
 	// defer, and the children and the registry entry both have to be
 	// cleaned up on the way out whatever ends the run — including a
