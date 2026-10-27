@@ -1,876 +1,800 @@
-# Jigz: plan for the Jigz-to-engine configuration interface
+# Jigz: plan for the Jigz-to-engine configuration interface (2026-10-27)
 
-Status: draft for discussion (2026-10-27)
-
-Plans how Jigz owns all user-facing configuration and generates the engine's
-workflow files from it. Background: `plans/jigz/vision-and-roadmap.md`
-(sections 4 and 5), `plans/jigz/working-hours-and-pool.md`,
-`plans/jigz/production-readiness.md`. No code changes are part of this
-document. Section 10 lists the decisions the user has to make before
-implementation starts.
+Plans how Jigz owns all user-facing configuration in one repository file and
+generates the engine's workflow documents from it. Background:
+`vision-and-roadmap.md`, `working-hours-and-pool.md`,
+`production-readiness.md`. No code changes are part of this document. Section
+10 lists the decisions, section 11 the open points.
 
 ## 1. Goal and non-goals
 
 ### Goal
 
-A user configures agents, schedules, runtimes, fallbacks and workflows in
-Jigz files only. Jigz translates that configuration into the engine's
-`WORKFLOW.*.md` files and environment. The user does not edit engine files,
-and a new engine release can be adopted by changing Jigz, with automated tests
-showing what breaks.
+A user configures agents, pools, working hours, fallbacks and work in one
+file, `<repo>/.jigz/config.yaml`. Jigz generates the engine's workflow
+documents (`WORKFLOW.*.md`) from it and supervises the loops against the
+agents' availability. A new engine release is adopted by changing the engine
+target in the config and running the tests, which show what breaks.
 
-Five capabilities:
-
-1. A working schedule per agent. One agent works Monday to Friday in business
-   hours, another works all the time.
-2. A runtime per agent (`claude-code`, `pi`).
-3. Fallbacks: another account, model or runtime when the first is unusable.
-4. Several workflows per repository, each with its own prompts and settings.
-5. Automated tests that fail when an engine release changes something Jigz
-   depends on.
+Terms: an **agent** is a named profile of runtime, model, working hours and
+credential mapping. A **pool** is a named ordered list of agents (the fallback
+order). **Work** is a named unit with a query, agents and dispatch rules. A
+**loop** is one engine process running one **engine workflow document**; a work
+entry produces one loop or several (section 4.5). `agents` and `pools` are the
+fleet.
 
 ### Non-goals
 
-- Changing the engine. Every item is built from what the supported engines
-  already accept.
-- Mid-session handoff between agents. A fallback applies when a session
-  starts.
-- A new scheduler for issues. Schedules decide when a loop may run; the
-  engine still decides which issue it runs.
-- Connected mode design. The generator takes a plain Go struct as input so a
-  hub config source can fill it later (`vision-and-roadmap.md` section 5.5);
-  the hub side is not planned here.
-- Changing CI workflows. Section 7.7 lists requests; the user decides.
-- Hosting or accounts for the agents' providers. Provider terms stay the
-  member's responsibility.
+- Changing the engine, mid-session handoff between agents (a change applies
+  when the loop is idle), or a new issue scheduler: availability decides
+  whether a loop runs, the engine decides which item it runs.
+- The hub daemon's storage. The generator takes a plain Go struct so a hub
+  source can fill it later (`vision-and-roadmap.md` section 5.5).
+- Provider accounts and terms, which stay the member's responsibility.
 
 ## 2. Current state
 
 ### 2.1 Configuration homes
 
-| File | Scope | Read by | Contents |
-| --- | --- | --- | --- |
-| `<user config dir>/jigz/machine.yaml` | Machine | `internal/machine` (`machine.Load`) | `hours`, `pool`, `limits`, `engine`, `connected`, `dashboard.hide` |
-| `<repo>/.jigz/config.yaml` | Repository | `internal/config` (`config.Load`, strict keys) | `repo`, `token`, `milestone`, `assignee`, `filters`, `labels`, `cleanup`, `sleep`, `workflows.<name>.budget`, `github` |
-| `<repo>/.jigz/workflows/WORKFLOW.<name>.md` and `prompts/*.md` | Repository | the engine | engine front matter, dispatch rules, prompts |
-| `jigz.yaml` | Fleet | `internal/fleetconfig` (`fleetconfig.Load`) | `repos`, per-repo `workflows`, `agent` knobs, `workflow_overrides` |
+- `<user config dir>/jigz/machine.yaml` (`internal/machine`): `hours`, `pool`,
+  `limits`, `engine`, `connected`, `dashboard.hide`.
+- `<repo>/.jigz/config.yaml` (`internal/config`, strict keys): `repo`, `token`,
+  `milestone`, `assignee`, `filters`, `labels`, `cleanup`, `sleep`,
+  `workflows.<name>.budget`, `github`.
+- `<repo>/.jigz/workflows/WORKFLOW.<name>.md` and `prompts/*.md`: read by the
+  engine.
+- `jigz.yaml` (`internal/fleetconfig`): `repos`, per-repo `workflows`, `agent`
+  knobs, `workflow_overrides`.
+- `<state dir>/jigz/pool.json` (`internal/machine/state.go`): account
+  exhaustion, written under `flock`.
 
-`fleetconfig.Load` has no caller outside tests. `internal/plan` (`Setup`,
-`Validate`, `Apply`, `ApplySettings`) is also used only by its tests. The
-dashboard uses `fleetconfig.Resolved` as a data type only
-(`cmd/jig/projects.go`, `cmd/jig/workflows.go`).
+`fleetconfig.Load` and `internal/plan` (`Setup`, `Validate`, `Apply`,
+`ApplySettings`) have no caller outside tests. The dashboard uses
+`fleetconfig.Resolved` as a data type only (`cmd/jig/projects.go`,
+`cmd/jig/workflows.go`).
 
-### 2.2 What the shipped workflows contain
+### 2.2 What the shipped workflow documents contain
 
 `cmd/jig/workflows/WORKFLOW.issues.md` and `WORKFLOW.prs.md` are complete
-engine files: tracker kind and filters, `active_states`, handoff and terminal
-states, `db_path` (`jigz-issues.db`, `jigz-prs.db`), `workspace.root`,
-`hooks` (clone, branch, push, rebase), an `agent:` block (kind
-`claude-code`, command `claude`, `max_turns: 10`, timeouts), a `pi:` block
-(`model: "sonnet"`), a `claude-code:` block (`model: "claude-haiku-5-5"`),
-and `dispatch.rules` that point at `./prompts/*.md`. The two files differ
-only in tracker kind, filter, labels, hooks, rules and names. Prompts are in
-`cmd/jig/workflows/prompts/` (`plan`, `build`, `docs`, `review`,
-`review-fix`, `merge`).
+engine files: tracker settings, `db_path` (`jigz-issues.db`, relative to the
+repository root), `workspace.root` (`$JIG_WORKSPACES/<name>`, which is
+`.jigz/workspaces/<name>`; `internal/config/config.go` line 428), `hooks`, an
+`agent:` block (`claude-code`, `max_turns: 10`, `max_concurrent_agents: 1`), a
+`pi:` and a `claude-code:` block with a model, and `dispatch.rules`. The
+`plan-build` rule has `next: build-chain`; `build-chain` has
+`stage: stage-build`.
 
-The loop name is the file stem (`listWorkflows` in `cmd/jig/validate.go`).
-The loop type comes from `tracker.kind` (`loopTypeOf` in `cmd/jig/status.go`).
-The query filter is overridden at launch by `SORTIE_TRACKER_QUERY_FILTER`
-from `config.FilterFor` (`cmd/jig/supervise.go` `childEnv`); known loop names
-`issues` and `prs` have default filters, any other name gets
-`-label:needs-human` only (`internal/config/config.go` `defaultFilters`).
+The loop name is the file stem (`listWorkflows`, `cmd/jig/validate.go`) and the
+type comes from `tracker.kind` (`loopTypeOf`, `cmd/jig/status.go`). The query is
+overridden at launch by `SORTIE_TRACKER_QUERY_FILTER` from `config.FilterFor`
+(`childEnv`, `cmd/jig/supervise.go`); `issues` and `prs` have default filters
+(`defaultFilters`). `dbPathFor` (`cmd/jig/unite.go`) reads `db_path` from the
+document, and `internal/loopsrc/discover.go` finds databases by `jigz-*.db`.
 
 ### 2.3 Installation and ownership
 
-`syncWorkflows` (`cmd/jig/embed.go`) writes a missing file and never
-changes an existing one, because installed files are hand-edited. Files
-carry no version stamp, so an upgraded binary does not update them
-(README, "Known limitations"). `legacyWorkflows` blocks the consolidated
-files while the old per-role files exist.
+`syncWorkflows` (`cmd/jig/embed.go`) writes a missing file and never changes an
+existing one; files carry no version stamp, so an upgraded binary does not
+update them (README, "Known limitations").
 
-### 2.4 Hours, pool and runtime
+### 2.4 Hours, pool, runtime and fallback
 
 - `hours:` in `machine.yaml` is one machine-wide gate
-  (`internal/machine/hours.go` `Hours.Open`, `Hours.Next`).
-- `gateEval` and `gateDecide` (`cmd/jig/gate.go`) compute one `gateView` for
-  the machine and apply it to every loop. There is no per-loop or
-  per-workflow schedule. The only per-entry hours are the pool entries'
-  `hours`, which decide whether an account is usable
-  (`internal/machine/pool.go` `Available`).
-- The runtime is one value for all loops: `ActiveRuntime` is the runtime of
-  the first available pool entry. `agentEnv` sets `SORTIE_AGENT_KIND` and
-  `SORTIE_AGENT_COMMAND=<jig> agent-exec <runtime>` when the pool is not
-  empty. A change of runtime recycles each loop when it has no running
-  session (`gateRecycleIdle`).
-- Without a pool, the runtime is `agent.kind` in the workflow file.
-- Model: a literal `model:` line in the runtime block of each workflow file.
+  (`internal/machine/hours.go`). `gateEval` and `gateDecide`
+  (`cmd/jig/gate.go`) compute one `gateView` for every loop; there is no
+  per-loop schedule. Pool entries have `hours` that decide whether an account
+  is usable (`internal/machine/pool.go` `Available`).
+- The runtime is one value for all loops (`ActiveRuntime`). `agentEnv` sets
+  `SORTIE_AGENT_KIND` and `SORTIE_AGENT_COMMAND=<jig> agent-exec <runtime>`,
+  start-time overrides, so a change recycles each loop at idle
+  (`gateRecycleIdle`). The model is a literal line in each document.
+- Only account failover exists: `agent-exec` (`cmd/jig/agentexec.go`) picks the
+  first available entry of the runtime, detects usage-limit text and marks the
+  entry exhausted until the reset time; with none left, `ActiveRuntime` moves
+  to the next runtime in pool order. There is no model fallback.
 
-### 2.5 Fallbacks
+### 2.5 Live sessions and drain
 
-Only account failover exists. `agent-exec` (`cmd/jig/agentexec.go`) picks the
-first available pool entry of the runtime, detects usage-limit text in the
-CLI output, and marks the entry exhausted until the reset time. The engine's
-retry then picks the next entry. When no entry of the active runtime is
-available, `ActiveRuntime` moves to the next runtime in pool order and loops
-are recycled. There is no model fallback. The README states there is no
-fallback agent when the engine lacks an agent kind
-(`internal/engine/gate.go` `Gate.Agent`).
+`liveTracker` (`cmd/jig/livelog.go`) follows one loop's sessions from engine
+log lines, keyed by issue id, so concurrent sessions are represented.
+`tick(running)` records the engine's session count and keeps `unaccounted`.
+`supervisor.noSession` is true when the loop has settled (`drainSettle`), the
+tracker accounts for every session and none is active; `gateStopIdle` and
+`gateRecycleIdle` use it. With `max_concurrent_agents` above 1 a draining loop
+can claim new items until idle (README, known limitation).
 
 ### 2.6 Engine coupling today
 
-| Area | Where | Notes |
-| --- | --- | --- |
-| Pin | `internal/engine/engine.go` `DefaultRepo`, `DefaultTag` | `kinged007/sortie` `v1.28.1`; `machine.yaml` `engine:` or `JIG_ENGINE_*` selects another |
-| Capability probe | `internal/engine/probe.go`, `gate.go` | version from `--version`; tracker and agent kinds read from `registered: [...]` in the `validate` errors for an unknown kind. `MinVersion` 1.27.0 |
-| Database schema | `internal/rollup/schema.go` | `OldestSchema` 18, `EngineReleases` {1.28.1: 38, 1.29.0: 43}, `requiredColumns` for six tables |
-| Live sessions | `cmd/jig/livelog.go` | parses engine log lines by `msg`: `issue dispatched`, `retried issue dispatched`, `turn completed`, `worker exiting`, `worker run failed, scheduling retry`, `tick completed`; fields `issue_id`, `attempt`, `running` |
-| CLI | `cmd/jig/unite.go` (argv `--env-file <file> --port 0 <workflow>`), `validate --format json` | |
-| Acceptance | `cmd/jig/acceptance_test.go` (build tag `acceptance`) | `TestAcceptance` (pinned fork), `TestAcceptanceUpstreamEngine` (upstream v1.29.0, PR loop disabled), `TestAcceptanceConnected`, plus `TestAcceptanceRunningSession` |
+Pin in `internal/engine/engine.go` (fork `kinged007/sortie` `v1.28.1`,
+`MinVersion` 1.27.0); probe in `internal/engine/probe.go`; schema in
+`internal/rollup/schema.go` (`OldestSchema` 18, `EngineReleases` {1.28.1: 38,
+1.29.0: 43}, `requiredColumns`); log lines parsed by `cmd/jig/livelog.go`
+(`issue dispatched`, `retried issue dispatched`, `turn completed`, `worker
+exiting`, `worker run failed, scheduling retry`, `tick completed`); CLI use in
+`cmd/jig/unite.go`; acceptance in `cmd/jig/acceptance_test.go`. Nothing tests
+generated documents across releases, the database layout beyond
+`InspectSchema` on acceptance databases, or log text per release.
 
-Nothing tests the content of generated workflow files across engine
-releases, the engine database layout beyond `InspectSchema` on databases the
-acceptance run produces, or the log-line text per release.
+### 2.7 Engine surface checked in this session
 
-### 2.7 Engine surface observed in this session
-
-Checked by running the cached binaries
-(`~/.local/share/jigz/sortie-kinged007+sortie-1.28.1`,
-`sortie-sortie-ai+sortie-1.29.0`):
+Checked by running the cached binaries (`sortie-kinged007+sortie-1.28.1`,
+`sortie-sortie-ai+sortie-1.29.0` in `~/.local/share/jigz/`) and by extracting
+strings from them.
 
 | Fact | v1.28.1 (fork) | v1.29.0 (upstream) |
 | --- | --- | --- |
-| `--version` | `sortie 1.28.1 (commit e586c71)` | `sortie 1.29.0 (commit c899197)` |
-| Registered tracker kinds | file, gitea, github, github-pr, gitlab, jira, linear | file, gitea, github, gitlab, jira, linear |
-| Registered agent kinds | agent-client-protocol, claude-code, codex, copilot-cli, mock, opencode, pi | agent-client-protocol, claude-code, codex, copilot-cli, mock, opencode |
-| `--help` run options | `--dry-run`, `--env-file`, `--log-level`, `--log-format`, `--host`, `--port` (0 disables) | same `--env-file` and `--port` lines |
-| Shipped `WORKFLOW.issues.md` validates | yes, one warning for the unused `pi:` block | yes, same warning |
-| Unknown top-level key | warning (`unknown_key`) | warning (`unknown_key`) |
+| Tracker kinds | file, gitea, github, github-pr, gitlab, jira, linear | same without github-pr |
+| Agent kinds | agent-client-protocol, claude-code, codex, copilot-cli, mock, opencode, pi | same without pi |
 | `agent.kind: pi` | accepted | error `agent_adapter` |
+| Rule key `agent: <kind>` (string) | accepted | accepted; `pi` gives `unknown agent kind` |
+| Rule `agent:` as list or mapping | error `expected string` | same |
+| Rule keys `model`, `effort` | error `unknown key` | same |
+| `claude-code.effort` in the runtime block | accepted without warning | same |
+
+Strings of v1.28.1 (not documented behaviour): `orchestrator.RuleAgent` shows
+an agent resolved per rule; `run_history`, `retry_entries` and `parked_issues`
+carry `rule_name` and `agent_kind`; `workflow.(*Manager).watch` and `.Reload`
+exist, consistent with the engine re-reading the document while it runs.
 
 Consequences for the generator:
 
-- Neither engine has a front matter key for schedules, so the engine cannot
-  enforce per-agent hours. The key would be ignored with a warning.
-- Only the block named by `agent.kind` is read; the other runtime block is
-  reported as an unknown key. The generator should emit only the block for
-  the runtime in use, which also removes the `dropRuntimeBlockWarnings`
-  workaround in `cmd/jig/validate.go`.
-- The set of `SORTIE_*` override variables differs between releases. A
-  string extraction from the two binaries (not a documented list) suggests
-  that v1.29.0 has cost-cap variables (`SORTIE_AGENT_MAX_COST_USD`, daily and
-  monthly variants), `SORTIE_AGENT_MAX_TOKENS` and a token warning percent,
-  and that v1.28.1 has `SORTIE_AGENT_MAX_SESSIONS` and
-  `SORTIE_PI_MCP_SERVERS`. This is unverified. Each release's accepted keys
-  must be confirmed before the generator emits them (section 7.1).
+- No engine front matter key holds working hours, so Jigz enforces them
+  (section 5).
+- The engine accepts an agent kind per rule inside one loop. Model, effort and
+  command are not per rule: the model is in the runtime block of the kind
+  (`claude-code:`, `pi:`). Section 4.5 states what follows.
+- Only runtime blocks in use are read; others are reported as unknown keys.
+  The generator emits only the blocks in use, which removes the
+  `dropRuntimeBlockWarnings` workaround in `cmd/jig/validate.go`.
+- The `SORTIE_*` override set differs between releases (strings suggest cost
+  variables in v1.29.0 and `SORTIE_AGENT_MAX_SESSIONS` in v1.28.1; unverified).
+  Each release's keys are confirmed before the generator emits them
+  (section 7.8).
+- Unknown, each needing a fixture: whether `$VAR` is expanded in
+  `agent.command`, whether `command` can be set per runtime block, and whether
+  `claude-code.effort` reaches the CLI.
 
-### 2.8 Discrepancy to fix: `JIG_MODEL`
+### 2.8 Discrepancy: `JIG_MODEL`
 
-README (environment variable table, near line 946) states that `jig` sets
-`JIG_MODEL` and `JIG_MODEL_<WORKFLOW>` from the `model` setting of a
-repository in `jigz.yaml`. The code does not do this. `fleetconfig.Resolved.Env`
-and `ModelVar` produce those variables, but no code path outside tests loads
-`jigz.yaml` or calls them. The shipped workflows hold literal model values and
-do not reference `$JIG_MODEL`. The README text describes a feature that does
-not exist. This is a bug in the documentation; section 8 phase 0 fixes it.
-
-### 2.9 Other groundwork
-
-- `internal/config` already has per-workflow settings under
-  `workflows.<name>` (budget), per-workflow `filters`, and `labels`.
-- `plan.ApplySettings` patches knob lines and the model line in workflow
-  front matter by line edits, to keep comments. It also prunes its own
-  model reference when a model is removed. It is unused outside tests.
+README (near line 946) states that `jig` sets `JIG_MODEL` and
+`JIG_MODEL_<WORKFLOW>` from the `model` setting in `jigz.yaml`. No code path
+outside tests loads `jigz.yaml` or calls `fleetconfig.Resolved.Env` and
+`ModelVar`, and documents hold literal models, as generated ones will
+(section 11, item 1).
 
 ## 3. Target configuration model
 
-### 3.1 Concepts
+### 3.1 Location
 
-- **Agent**: a named profile of runtime, model, schedule and fallback chain.
-  An agent drives one or more workflows.
-- **Workflow**: one loop, one engine process, one `WORKFLOW.<name>.md`, one
-  database, one workspace root. A workflow has one agent.
-- **Account**: a pool entry in `machine.yaml`. Accounts hold credentials and
-  stay machine-local.
+All configuration, engine workflow documents and prompts are stored in
+`<repo>/.jigz/`. Nothing is stored under the user's home configuration
+directory. The hub daemon may differ; that is out of scope.
 
-An agent is bound at workflow level, not at dispatch-rule level. The engine
-reads one adapter kind and one model block per process, so two stages that need
-different agents must be two workflows chained by labels (for example
-`planner` triggered by `agent:plan` and `builder` triggered by `agent:build`).
-The shipped `plan-build` chain (`next: build-chain`) runs in one process and
-therefore with one agent.
+- `.jigz/config.yaml`: the single configuration file (`jig setup` writes the
+  first copy only).
+- `.jigz/workflows/WORKFLOW.<loop>.md`: documents, owned by Jigz when
+  `managed: true` and by the user when `managed: false`.
+- `.jigz/workflows/prompts/*.md`: prompts, owned by the user.
+- `.jigz/data/` (databases, state), `.jigz/workspaces/<loop>/` and
+  `.jigz/.env.loop`.
 
-### 3.2 Where each concern lives
+`machine.yaml` settings move into the file: `hours` becomes `operating_hours`,
+`pool` becomes `agents` and `pools`. `dashboard.hide`, `limits` and `connected`
+are open (section 11).
 
-| Concern | Home | Reason |
-| --- | --- | --- |
-| Agent profiles (runtime, model, effort, schedule, fallback) | `.jigz/config.yaml`, key `agents` | Repository policy, can be tracked in git (setup already supports selective tracking with `token: ""`), contains no secrets, and the hub supplies project config in connected mode. `config.Load` already re-reads it at each child start |
-| Workflows (kind, agent, triggers, prompts, filters, budget, polling, turns) | `.jigz/config.yaml`, key `workflows` | `workflows.<name>.budget` already exists there, so the map is extended rather than added |
-| Accounts, credentials, usage-limit patterns | `machine.yaml` `pool`, `limits` | Secrets and logins belong to the person on the machine (`vision-and-roadmap.md` principle 3) |
-| Machine-wide hours | `machine.yaml` `hours` | Stays the outer ceiling on every agent (section 5.2) |
-| Engine repository and version | `machine.yaml` `engine` | Unchanged |
-| Prompts | `.jigz/workflows/prompts/*.md` | User-owned files, referenced by path from the workflow config |
-| Fleet file `jigz.yaml` | none | Not used by any command; see decision 7 |
+### 3.2 Sections of `.jigz/config.yaml`
 
-Strict keys in `internal/config` stay: unknown keys are errors, with the
-field path in the message.
+One file with top-level sections. The repository section is `repo`, `token`,
+`github`, `filters`, `labels`, `cleanup`, `sleep` (existing keys,
+`internal/config`) plus `engine`, `operating_hours`, `tracker` and `hooks`.
+The fleet sections are `agents` and `pools`; the work section is `work`.
+`milestone` and `assignee` are removed: the assignee scope is always `@me`.
 
-### 3.3 Reference shape
+- `engine`: `repo` (default `kinged007/sortie`), `version` (default `v1.28.1`).
+  One engine is supported until upstream supports `pi` and `github-pr`.
+- `operating_hours`: `timezone`, `windows` (syntax of agent hours), `end`
+  (`finish` or `stop`). Omitted means 24/7.
+- `tracker`: defaults for every work entry: `kind`, `api_key` and `project`
+  (references, section 3.3), `active_states`, `in_progress_state`,
+  `handoff_state`. `hooks`: defaults `after_create`, `before_run`, `after_run`,
+  `timeout_ms`.
+
+An unknown key is an error with the field path. An unset engine knob is left
+out of the generated document and the engine applies its default.
+
+### 3.3 Fleet: agents and pools
 
 ```yaml
-# .jigz/config.yaml
 agents:
   <name>:
-    runtime: claude-code        # claude-code | pi
-    model: claude-sonnet-5-5    # passed to the runtime unvalidated
-    # effort: not accepted yet, see section 3.7
-    schedule:                   # omitted = always open
-      timezone: Europe/Madrid   # IANA name; empty = local time
-      end: finish               # finish | stop; default finish
+    runtime: claude-code         # claude-code | pi
+    model: claude-sonnet-5-5     # passed to the runtime unvalidated
+    schedule:                    # omitted = always available
+      timezone: Europe/Madrid    # IANA name; empty = local time
+      end: finish                # finish | stop; default finish
       windows:
         - days: [mon, tue, wed, thu, fri]
           start: "09:00"
-          end: "18:00"          # an end earlier than start wraps past midnight
-    fallback:                   # ordered; tried after the agent's own settings
-      - runtime: claude-code
-        model: claude-haiku-5-5
-      - runtime: pi
-        model: sonnet
-    accounts: []                # optional pool entry names; empty = any entry of the runtime
+          end: "18:00"           # an end earlier than start wraps past midnight
+    env:                         # environment of the agent process
+      CLAUDE_CONFIG_DIR: ~/.claude-work
+      ANTHROPIC_OAUTH_TOKEN: { from_env: CLAUDE_SUB_1 }
 
-workflows:
-  <name>:
-    kind: issues                # issues | prs; selects the shipped skeleton
-    agent: <agent name>
-    triggers: [agent:build]     # labels that start this workflow
-    prompts:                    # rule name -> prompt file, relative to .jigz/workflows
-      build: prompts/build.md
-    filter: ""                  # extra query filter text, appended to the label clauses
-    polling_interval_ms: 60000
-    max_turns: 10
-    max_concurrent_agents: 1
-    budget: { period: monthly, max_tokens: 5000000 }   # existing keys
-    managed: true               # false = Jigz never writes this workflow file
+pools:
+  <name>: [<agent name>, <agent name>]   # order = fallback order
 ```
 
-Schedule syntax reuses `machine.Hours` and `machine.Window`
-(`internal/machine/config.go`) so there is one parser and one validator.
-Rules from `working-hours-and-pool.md` apply unchanged: days `mon` to `sun`,
-a wrapping window belongs to the day it starts, `start` equal to `end` is
-invalid.
+- `effort` is not accepted (section 11, item 2).
+- Secrets are never stored in the file. A credential is a reference to an
+  environment variable of the supervising process, `{ from_env: NAME }`. The
+  validator rejects a plain string for a key ending in `TOKEN`, `KEY`, `SECRET`
+  or `PASSWORD`. An unset variable makes the agent unavailable, with the
+  reason shown. Two agents with one runtime and different token references
+  switch subscriptions.
+- Hours reuse `machine.Hours` and `machine.Window`: days `mon` to `sun`, a
+  wrapping window belongs to the day it starts, `start` equal to `end` is
+  invalid (`working-hours-and-pool.md`).
+- Agents and pools share one name space.
 
-Defaults are not restated in Jigz (`fleetconfig` follows the same rule): an
-unset knob is left out of the generated file and the engine applies its own
-default.
-
-### 3.4 Example 1: business-hours reviewer and 24/7 builder
+### 3.4 Work
 
 ```yaml
-# .jigz/config.yaml
+work:
+  <slug>:
+    managed: true                 # false = Jigz never writes this document
+    query_filter: "..."           # the complete tracker query
+    tracker: { ... }              # optional overrides of the tracker defaults
+    hooks:   { ... }              # optional overrides of the default hooks
+    max_concurrent_agents: 1      # also max_turns, polling_interval_ms
+    budget: { period: monthly, max_tokens: 5000000 }
+    agent: <agent or pool name>   # default for rules without their own agent
+    rules:
+      - name: plan
+        match: { labels: [agent:plan] }
+        prompt: prompts/plan.md
+        agent: <name, a list of names, or { use: <name>, model: ... }>
+        next: build-chain         # engine stage chaining
+      - name: build-chain
+        stage: stage-build
+        prompt: prompts/build.md
+```
+
+- A work entry is a generic unit: a name, a source (`query_filter`), agents
+  and rules. A rule selects a prompt and an agent for the items it matches;
+  the match syntax is the engine's (`match.labels` today).
+- `query_filter` is the complete tracker query. Jigz appends `assignee:@me`
+  through `SORTIE_TRACKER_QUERY_FILTER` at launch. The engine reads the query
+  only at start (section 5.4).
+- `agent` is a name from `agents` or `pools`, or an array of names (ordered
+  fallback). A mapping with `use` overrides `model` or `schedule` of the
+  fleet agent for this entry.
+- `next` and `stage` are the engine's stages feature (section 4.5).
+  `db_path` and `workspace.root` are generated from the slug (section 4.2).
+  Slugs are file stems: letters, digits and `-`.
+
+### 3.5 Example 1: business-hours reviewer and 24/7 builder
+
+```yaml
+repo: owner/repo
+engine: { repo: kinged007/sortie, version: v1.28.1 }
+operating_hours: {}               # omitted or empty = 24/7
+tracker: { kind: github, api_key: { from_env: JIG_TRACKER_TOKEN }, project: owner/repo }
+
 agents:
   reviewer:
-    runtime: claude-code
-    model: claude-sonnet-5-5
-    schedule:
-      timezone: Europe/Madrid
-      end: finish
-      windows:
-        - { days: [mon, tue, wed, thu, fri], start: "09:00", end: "18:00" }
-  builder:
-    runtime: claude-code
-    model: claude-haiku-5-5
+    { runtime: claude-code, model: claude-sonnet-5-5,
+      schedule: { timezone: Europe/Madrid, windows: [ { days: [mon, tue, wed, thu, fri], start: "09:00", end: "18:00" } ] } }
+  builder: { runtime: claude-code, model: claude-haiku-5-5 }
 
-workflows:
+work:
   issues:
-    kind: issues
+    query_filter: "label:agent:build,in-progress -label:needs-human"
     agent: builder
+    rules:
+      - { name: build, match: { labels: [agent:build] }, prompt: prompts/build.md }
   prs:
-    kind: prs
+    tracker: { kind: github-pr }
+    query_filter: "label:agent:review -label:needs-human"
     agent: reviewer
+    rules:
+      - { name: review, match: { labels: [agent:review] }, prompt: prompts/review.md }
 ```
 
-The `prs` loop claims nothing outside Monday to Friday 09:00 to 18:00
-(Europe/Madrid) and stops once its last session ends. The `issues` loop runs
-all the time. `machine.yaml` may add a machine-wide `hours` block; the
-reviewer then works only when both are open.
+The `prs` loop is offline outside Monday to Friday 09:00 to 18:00
+(Europe/Madrid); `jig status` shows the reason and estimated start. The
+`issues` loop runs all the time.
 
-### 3.5 Example 2: two runtimes with a fallback chain
-
-```yaml
-# .jigz/config.yaml
-agents:
-  builder:
-    runtime: claude-code
-    model: claude-sonnet-5-5
-    fallback:
-      - { runtime: claude-code, model: claude-haiku-5-5 }
-      - { runtime: pi, model: sonnet }
-  reviewer:
-    runtime: pi
-    model: sonnet
-    accounts: [pi-api]
-
-workflows:
-  issues: { kind: issues, agent: builder }
-  prs:    { kind: prs,    agent: reviewer }
-```
-
-```yaml
-# machine.yaml
-pool:
-  - { name: claude-work, runtime: claude-code, env: { CLAUDE_CONFIG_DIR: ~/.claude-work } }
-  - { name: claude-spare, runtime: claude-code, env: { CLAUDE_CONFIG_DIR: ~/.claude-spare } }
-  - { name: pi-api, runtime: pi, env: { ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}" } }
-```
-
-The builder uses `claude-sonnet-5-5` on `claude-work`, then on `claude-spare`
-when the first account is exhausted (existing pool behaviour), then the
-cheaper model on either account, then `pi`. The reviewer uses only `pi-api`.
-The `prs` workflow needs the `github-pr` tracker; on the upstream engine it
-is disabled with the existing reason text, whatever the agent is.
-
-### 3.6 Example 3: a second issue workflow with its own prompt
+### 3.6 Example 2: two runtimes with a fallback pool
 
 ```yaml
 agents:
-  builder:  { runtime: claude-code, model: claude-sonnet-5-5 }
-  night-docs:
-    runtime: claude-code
-    model: claude-haiku-5-5
-    schedule:
-      timezone: UTC
-      windows: [ { days: [mon, tue, wed, thu, fri, sat, sun], start: "22:00", end: "06:00" } ]
-
-workflows:
+  claude-main:  { runtime: claude-code, model: claude-sonnet-5-5, env: { ANTHROPIC_OAUTH_TOKEN: { from_env: CLAUDE_SUB_1 } } }
+  claude-spare: { runtime: claude-code, model: claude-sonnet-5-5, env: { ANTHROPIC_OAUTH_TOKEN: { from_env: CLAUDE_SUB_2 } } }
+  pi-api:       { runtime: pi, model: sonnet, env: { ANTHROPIC_API_KEY: { from_env: ANTHROPIC_API_KEY } } }
+pools:
+  build-pool: [claude-main, claude-spare, pi-api]
+work:
   issues:
-    kind: issues
-    agent: builder
-    triggers: [agent:plan, agent:plan-build, agent:build]
-  docs-night:
-    kind: issues
-    agent: night-docs
-    triggers: [agent:docs]
-    prompts:
-      docs: prompts/docs-night.md
+    query_filter: "label:agent:build,in-progress -label:needs-human"
+    agent: build-pool
+    rules:
+      - { name: build, match: { labels: [agent:build] }, prompt: prompts/build.md }
 ```
 
-`docs-night` generates `WORKFLOW.docs-night.md` with its own database
-(`jigz-docs-night.db`) and workspace root. `issues` no longer lists
-`agent:docs`. Validation rejects two workflows of the same kind in one
-repository that share a trigger label (section 4.5).
+The loop starts on `claude-main`, moves to `claude-spare` and then `pi-api` on
+usage limits (when idle), and returns to `claude-main` when it is usable. On
+an engine without the `pi` kind, `pi-api` is skipped with the reason shown.
 
-### 3.7 Unknowns in the model
+### 3.7 Example 3: rules with their own agents, an agent array and stages
 
-- `effort`: no engine front matter key and no Jigz mechanism is known. The
-  `claude` CLI may accept an effort option, and the `pi` CLI may not. The key
-  is not accepted until a runtime-specific delivery mechanism is verified;
-  until then the validator rejects it. Decision 10.
-- How the engine's `claude-code` adapter passes `model:` to `claude`
-  (README says `claude --model`, unvalidated). A model change applies at loop
-  start; whether the engine reloads workflow files on change is not verified,
-  so a change is applied by recycling the loop (section 6.3).
+```yaml
+agents:
+  planner: { runtime: claude-code, model: claude-sonnet-5-5, schedule: { timezone: UTC, windows: [ { days: [mon, tue, wed, thu, fri], start: "08:00", end: "17:00" } ] } }
+  builder-a: { runtime: claude-code, model: claude-sonnet-5-5, env: { ANTHROPIC_OAUTH_TOKEN: { from_env: CLAUDE_SUB_1 } } }
+  builder-b: { runtime: pi, model: sonnet, env: { ANTHROPIC_API_KEY: { from_env: ANTHROPIC_API_KEY } } }
+
+work:
+  delivery:
+    query_filter: "label:agent:plan,agent:plan-build,agent:build,in-progress -label:needs-human"
+    hooks: { timeout_ms: 300000 }   # overrides the default hooks
+    rules:
+      - { name: plan,       match: { labels: [agent:plan] },       prompt: prompts/plan.md,  agent: planner }
+      - { name: build,      match: { labels: [agent:build] },      prompt: prompts/build.md, agent: [builder-a, builder-b] }
+      - { name: plan-build, match: { labels: [agent:plan-build] }, prompt: prompts/plan.md,  agent: planner, next: build-chain }
+      - { name: build-chain, stage: stage-build,                   prompt: prompts/build.md, agent: [builder-a, builder-b] }
+```
+
+Two candidate lists give two loops, `delivery-planner` and `delivery-builder`
+(section 4.5). The `plan-build` chain crosses them, so validation rejects its
+`next`; the prompt for `plan-build` items ends by replacing the label with
+`agent:build`. With one candidate list for all rules the chain is generated as
+written.
 
 ## 4. Generation pipeline
 
 ### 4.1 Overview
 
-```
-inputs: .jigz/config.yaml, machine.yaml (runtime and account checks),
-        embedded skeletons, engine profile
-  -> resolve: one Resolved struct per workflow
-  -> render:  one .jigz/workflows/WORKFLOW.<name>.md per workflow
-  -> check:   sortie validate on the rendered text, then atomic replace
-```
+Jigz resolves `.jigz/config.yaml` and the engine profile into one struct per
+loop, renders `.jigz/workflows/WORKFLOW.<loop>.md` with `text/template` over
+a skeleton taken from today's shipped files, runs `sortie validate` on the
+text, and replaces the file atomically. Line patching (`plan.ApplySettings`)
+is not used: a template makes golden tests exact.
 
-Rendering is `text/template` over embedded skeletons, one per `kind`
-(`issues`, `prs`), taken from today's shipped files. The result is parsed as
-YAML in the test and in `jig validate`, and passed to `sortie validate`
-before it replaces a file. Line patching (`plan.ApplySettings`) is not used:
-a template makes golden tests exact, and comments in generated files belong to
-the skeleton.
+### 4.2 Names and paths
 
-### 4.2 Generated and user-owned files
+Loop name: the work slug, or `<slug>-<group>` when an entry has several loops.
+Document: `.jigz/workflows/WORKFLOW.<loop>.md`. Database:
+`.jigz/data/jigz-<loop>.db`. Workspace: `.jigz/workspaces/<loop>/<issue>`
+(unchanged for `issues` and `prs`). State: `.jigz/data/state.json`.
 
-| File | Owner | Written by |
-| --- | --- | --- |
-| `.jigz/config.yaml` | User | user, `jig setup` for the first copy only |
-| `.jigz/workflows/WORKFLOW.<name>.md` | Jigz, when it has the marker | generator |
-| `.jigz/workflows/WORKFLOW.<name>.md` without marker | User | nobody |
-| `.jigz/workflows/prompts/*.md` | User | `jig setup` writes a missing shipped prompt, never changes an existing one |
-| Env file, `SORTIE_*` environment | Jigz | `writeEnvFile`, `childEnv` (unchanged) |
+The search path of `internal/loopsrc/discover.go` and the `.gitignore` entries
+written by `jig setup` gain `.jigz/data/`. Existing installs keep
+`<repo>/jigz-<name>.db` until migration (section 4.8).
 
-### 4.3 Ownership marker and drift
+### 4.3 Managed and unmanaged documents
 
-The first line inside the front matter of a generated file is a YAML
-comment:
+`managed: true` (default): Jigz generates the document from the config. The
+first line inside the front matter is a comment
+`# jig:generated v1 skeleton=<kind> engine=<repo>@<version> sha256=<hex>`; the
+digest covers the file without that line.
 
-```
----
-# jig:generated v1 skeleton=issues engine-profile=1.28.1 sha256=<hex>
-```
+- Digest matches: Jigz may replace the document when the config changes.
+- Digest differs: the document has a hand edit. `jig validate` and `jig status`
+  report drift with the diff against the generator output. The next generation
+  that must change the document (config change, agent change, setup)
+  overwrites the hand edit and keeps the previous file as `<name>.md.bak`.
+  Hand edits to a managed document are overwritten or reported as drift and
+  are not merged. Section 11, item 4 asks the owner to confirm this.
 
-`sha256` is the digest of the file with the marker line removed. Rules:
-
-- Marker present and digest matches: the file is as generated. Setup and
-  reload may replace it.
-- Marker present and digest differs: the file was edited by hand (drift).
-  Jigz does not overwrite it. `jig validate` reports an error naming the
-  file, with the diff against the generator output; `jig setup --force
-  <name>` overwrites it and keeps a `.bak` copy.
-- No marker: the file is user-owned. Jigz reads its `tracker.kind` for the
-  loop type as it does now and never writes it.
-- Files are written to a temporary name in the same directory and renamed, so
-  a loop never reads a partial file.
+`managed: false`: Jigz neither generates nor overwrites the document. It reads
+`tracker.kind` and the rule agents from it for status and for the manager;
+The manager only starts and stops the loop; agent changes (section 6) are not
+applied to it.
 
 ### 4.4 Commands
 
-- `jig setup`: creates `.jigz/config.yaml` when missing (as now), generates
-  the workflow files, writes missing prompts, syncs labels (labels become the
-  union of the built-in list and every workflow's triggers).
-- `jig validate`: adds checks to the current set (`cmd/jig/validate.go`):
-  config keys and cross references (agent exists, workflow names are valid
-  file stems, triggers do not overlap, accounts exist in the pool), a dry
-  generation compared with the files on disk (drift, outdated), the engine
-  profile check, then the existing `sortie validate` of every file. Output
-  keeps the current JSON shape and adds check names.
-- `jig reload` (`cmd/jig/reload.go`): the supervisor receives the reload
-  signal, regenerates, validates the result with the engine, and replaces the
-  files only when every file validates. A failure keeps the running loops and
-  the old files and is shown as an alert. Changed loops are recycled when they
-  have no running session (the mechanism of `gateRecycleIdle`).
-- `jig start`: runs the same generation before it starts loops; a failure
-  stops the start with the error, as a config error does now.
+- `jig setup`: creates `.jigz/config.yaml` when missing, generates documents,
+  writes missing prompts, syncs labels (built-in list plus rule labels).
+- `jig validate`: config keys and cross references, a dry generation compared
+  with the files on disk (drift), the engine profile check, then `sortie
+  validate` of each document.
+- `jig reload`: regenerates and validates; documents are replaced only when all
+  validate, otherwise running loops stay and an alert is shown. `jig start`
+  generates first. `jig status` shows state, offline reason and estimate, agent
+  and drift per loop.
 
-### 4.5 Validation rules for several workflows
+### 4.5 From work entries to loops
 
-- Workflow names are file stems: letters, digits and `-`; `issues` and `prs`
-  keep their shipped meaning when they have no `kind`.
-- Two workflows of the same `kind` must not share a trigger label.
-  Otherwise both loops claim the same item. The generator derives
-  `query_filter` and `active_states` from `triggers` plus `in-progress`, the
-  same shape as `defaultFilters` in `internal/config/config.go`, so
-  `FilterFor` gets the filter from the resolved workflow rather than the
-  hard-coded map.
-- `db_path` is `jigz-<name>.db`, `workspace.root` is
-  `$JIG_WORKSPACES/<name>`. Both are derived from the name.
-- A `prs` workflow is allowed only when the engine profile lists the
-  `github-pr` tracker; otherwise the workflow is `disabled` with the
-  existing reason (no error).
+The engine takes an agent kind per rule (`agent: <kind>`, section 2.7) and one
+runtime block, with the model, per kind. It does not take a model, effort,
+command or list per rule.
 
-### 4.6 Migration of existing installs
+1. Each rule resolves to an ordered candidate list of agents: the rule's
+   `agent`, else the entry's `agent`; a pool expands to its agents.
+2. Rules with the same candidate list form a group, and a group is one loop
+   named after the slug. Rules with different lists are realised by separate
+   loops named `<slug>-<group>`. This is the baseline because it needs one
+   agent command, model and environment per process, which is verified.
+3. The query of a separate loop is the work `query_filter` combined with the
+   label clauses of its rules, and its `active_states` come from the same
+   labels plus the in-progress state, so loops of one entry do not claim the
+   same item. Whether the engine skips an item that matches the query but no
+   rule of the document is unknown (fixture).
+4. Stages chain rules inside one document. When chained rules fall into
+   different groups, validation rejects `next` and the first rule's prompt hands
+   the item over by changing labels (example 3). Chained rules in one group are
+   generated as written.
+5. Merging rules of different runtimes into one loop through the per-rule kind
+   is possible in principle. It is not generated until a fixture shows that
+   per-kind `command` and environment work (to verify with a fixture).
 
-Installed workflow files have no marker, so they are user-owned and keep
-working. To move them to generated files:
+### 4.6 Agent command and environment
 
-1. A table of the digests of every shipped file version (`WORKFLOW.issues.md`,
-   `WORKFLOW.prs.md`, from git history) is compiled into the binary. A file
-   that equals a known shipped version is adopted automatically at the next
-   `jig setup`: it is regenerated from the default config and receives the
-   marker.
-2. A file that differs is not changed. `jig setup` prints the diff between
-   it and the generator output for the default config, and the list of
-   settings that `jig migrate <name>` could take over (model, `max_turns`,
-   polling interval, timeouts). `jig migrate <name>` writes those values to
-   `.jigz/config.yaml` and regenerates; whatever cannot be expressed (custom
-   hooks, custom dispatch rules) stops the migration and the file stays
-   user-owned with `managed: false`.
-3. `managed: false` is the permanent escape hatch. It is the documented way
-   to run a hand-written workflow, subject to decision 2.
-
-### 4.7 Engine version differences
-
-An engine profile is compiled data, one entry per supported release:
+The generated document holds the kind, command and runtime block of the active
+agent:
 
 ```
-type Profile struct {
-    Repo, Version string
-    Trackers, Agents []string
-    Schema int                // database schema at the end of migrations
-    EnvOverrides map[string]bool   // SORTIE_* names the engine accepts
-    FrontMatter  map[string]bool   // block.key pairs the generator may emit
-}
+agent:
+  kind: claude-code
+  command: /usr/local/bin/jig agent-exec builder-a
+claude-code:
+  model: "claude-sonnet-5-5"
 ```
 
-`rollup.EngineReleases` and `engine.MinVersion` are folded into this table.
-The profile of the running engine comes from the capability probe (version
-line) matched to the table.
+`jig agent-exec <agent>` starts the runtime CLI with the agent's `env` mapping
+resolved from the supervisor's environment and detects usage-limit text
+(section 6.2). Kind and command are in the document, not in `SORTIE_AGENT_*`
+overrides, so an agent change is a document change that the engine re-reads.
+The command uses the absolute path of `jig` at generation time; the digest
+includes it, so moving the binary is drift. If `$VAR` is expanded in
+`agent.command`, `$JIG_BIN` replaces the path (to verify with a fixture). The
+model is a literal line; `JIG_MODEL` is unused.
 
-- Required feature missing (tracker kind or agent kind): the workflow is
-  disabled with the existing reason text (`Gate.TrackerOff`, `Gate.Agent`).
-- Optional key missing: if the user set it, validation fails with a message
-  naming the key and the engine; if only the skeleton uses it, the generator
-  omits it.
-- Engine version not in the table and newer than the newest entry: the
-  newest profile is used, and `validate` and the dashboard show a warning
-  that the release has no contract tests.
-- Engine version older than `MinVersion`: no loop starts (unchanged).
+### 4.7 Engine targets and profiles
 
-## 5. Scheduling design
+The `engine` key selects the repository and release. A profile is compiled data
+per supported release: repository, version, tracker kinds, agent kinds,
+database schema number, accepted `SORTIE_*` names and front matter keys.
+`rollup.EngineReleases` and `engine.MinVersion` are folded into this table, and
+the capability probe matches the running engine to it.
 
-### 5.1 Where it is enforced
+A missing required feature (tracker or agent kind) takes the loop offline with
+the existing reason text (`Gate.TrackerOff`, `Gate.Agent`). A missing optional
+key fails validation when the user set it and is omitted otherwise. A version
+newer than the newest entry uses the newest profile with a warning that the
+release has no contract tests; a version older than `MinVersion` starts no
+loop. Switching `engine` in the config and running all tests shows what
+breaks.
 
-The engine has no schedule key (section 2.7), so enforcement is in the
-supervisor, per loop, in `gateDecide`. The supervisor already stops idle loops
-and starts held loops on each 2-second tick (`gateStep`), recycles loops on a
-runtime change, and reports a `hold` reason per workflow in the status
-document. A per-loop gate adds one input to that path.
+### 4.8 Migration of existing installs
 
-Changes:
+Existing installs have `machine.yaml`, a `.jigz/config.yaml` in the current
+format (the new loader rejects `milestone`, `assignee`, `workflows`),
+documents without markers, and `jigz-<name>.db` in the repository root.
 
-- `gateLoop` gains the loop's agent schedule (`machine.Hours`) and the agent's
-  fallback chain (section 6).
-- `gateEval` takes the loop's inputs: `Open = machineHoursOpen &&
-  scheduleOpen && accountAvailable(chain)`. A new reason `gateSchedule` is
-  reported when only the schedule is closed.
-- `gateDecide` no longer computes one view for all loops; it computes one view
-  per loop (cheap: pure functions of config, pool state and time) and keeps
-  the action table as is.
-- `startable` and `agentEnv` use the per-loop view, so a loop held by its
-  schedule is not started by startup, wake or restart.
-- The status document `gate` object gains per-workflow `schedule_open`,
-  `next_change` and `hold`. The machine-level `gate` object stays for
-  compatibility.
+- The loader names the new key for each old key it rejects.
+- `jig migrate` converts once after backing up `.jigz/config.yaml` and
+  `machine.yaml`: `hours` to `operating_hours`, `pool` to `agents` and one pool,
+  `workflows.<name>.budget` to `work.<name>.budget`, `filters.<name>` to
+  `work.<name>.query_filter`; it moves `jigz-<name>.db` (with `-wal`, `-shm`)
+  to `.jigz/data/` while the loop is stopped (section 11, item 5).
+- A document equal to a known shipped version (digests compiled into the
+  binary) is adopted and regenerated with the marker; a document that differs
+  stays and its work entry gets `managed: false`.
+- `dashboard.hide`, `limits` and `connected` stay in `machine.yaml` until
+  section 11, item 3 is settled.
 
-### 5.2 Interaction with machine-wide hours
+## 5. Scheduling: availability and operating hours
 
-A loop is open only when the machine window and the agent schedule are both
-open. The agent schedule cannot extend work past the machine window.
+### 5.1 The manager
 
-End behaviour:
+The supervisor enforces availability per loop in `gateDecide`
+(`cmd/jig/gate.go`) on the existing 2-second tick (`gateStep`), which already
+stops idle loops, starts held loops and reports a `hold` reason per workflow.
 
-- The reason that closed the gate decides the behaviour. If the machine
-  window closed, `machine.yaml` `hours.end` applies. If only the agent
-  schedule closed, `agents.<name>.schedule.end` applies. If both closed, the
-  machine setting applies.
-- `finish`: the loop is stopped when it has no running session
-  (`gateStopIdle`). `stop`: the loop is stopped at once (`gateStopNow`); the
-  issue keeps its in-progress label and is dispatched again at the next window.
+For each loop, on each tick:
 
-### 5.3 Interaction with the other controls
+1. Take the candidate agents in order (section 4.5).
+2. An agent is available when its working hours and days are open, it is not
+   exhausted by a usage limit (`exhausted_until`), its `from_env` references
+   resolve, and its runtime is registered in the engine.
+3. Operating hours are a second-level constraint intersected with every
+   agent's hours: the loop may run only while operating hours are open and the
+   chosen agent is available.
+4. Pick the first available candidate. If it is the current agent, do nothing;
+   otherwise apply the change (section 6.3).
+5. If none is available, or operating hours are closed, take the loop offline
+   (section 5.2), record the reason and the estimated start time, and show both
+   in `jig status` and on the dashboard.
 
-| Control | Interaction |
-| --- | --- |
-| Pool account hours | Unchanged. An account is usable when it is not exhausted and its own hours are open. A loop needs an open schedule and a usable account in its chain |
-| Pool exhaustion | `gatePool` stays a separate reason. A schedule closed and a pool exhausted show the schedule first |
-| Idle sleep | A held loop has no session and is not busy. When every loop is idle or held the sleep rules stop the children as now. At wake, `startable` evaluates each loop's view, so a loop outside its schedule stays held |
-| Budget pause | `gateLoop.paused` keeps its position: a paused loop is never started by the gate. A closed schedule still stops an up loop |
-| Manual pause (`isPaused`) | Same as budget pause |
-| Wake time | `NextChange` per loop is the earliest of the machine window change, the schedule change and the pool change; it is reported per workflow |
-| `max_concurrent_agents` above 1 | The known limitation stays: a loop can claim new work between the window close and the stop |
+The estimated start time is the earliest of: the next working-hours start of a
+candidate, the earliest usage reset time of a candidate, and the next
+operating-hours start. With no estimate the reason is shown alone.
 
-### 5.4 Edge cases to test
+### 5.2 Operating hours and offline handling
 
-- A window that wraps past midnight and crosses a daylight saving change
-  (`Hours.Next` iterates days with `time.Date`, which resolves skipped hours).
-- A schedule in a different timezone than the machine window.
-- Config reload that removes a schedule while the loop is held: the loop
-  starts at the next tick.
-- A schedule that closes while a retry is pending: the engine persists
-  retries, so the loop resumes after the next window (existing rule for
-  `hours.end: finish`).
+Operating hours default to 24/7, use the syntax of agent hours, and cannot be
+extended by an agent. Outside them every loop goes offline. The reason that
+closed the gate chooses the end behaviour: `operating_hours.end` when operating
+hours closed, the agent's `schedule.end` when only its hours closed and no
+later candidate is available. `finish` stops the loop when it has no running
+session (`gateStopIdle`). `stop` stops it at once (`gateStopNow`); the item
+keeps its in-progress label and is dispatched again when the loop starts.
+
+### 5.3 Concurrent sessions per loop
+
+The engine can run several workers per loop (`max_concurrent_agents`). Every
+decision above is made per loop. With several sessions:
+
+- Idle detection (`noSession`) keeps its meaning, no active session in the
+  loop, and is the condition for every document change and every `finish`
+  stop. A loop under continuous load may not become idle (section 9).
+- `liveTracker` is keyed by issue id, and `tick(running)` with `unaccounted`
+  already handle counts above 1. A loop whose tick reports more sessions than
+  the tracker saw start is not known and is never treated as idle.
+- A session record gains the agent name (from `agent-exec`); one loop has one
+  agent at a time because changes happen at idle.
+- With `finish` the loop can claim new items until idle. To verify with a
+  fixture: whether setting `agent.max_concurrent_agents` to 0 in the
+  re-read document stops new claims while running sessions finish. If it does,
+  the manager sets it when a drain starts and restores it after the change.
+- A usage limit hit by one session marks the agent exhausted; the other
+  sessions of that agent fail on the same limit and the engine retries them.
+- Status per loop: `sessions`, `agent`, `state` (running, draining, offline),
+  `offline_reason`, `eta`, `drift`.
+
+### 5.4 What needs a restart
+
+The engine re-reads the document while it runs (section 2.7; live keys to verify
+with a fixture), so most changes apply without a
+restart. The query filter is read only at start: a change of `query_filter`, of
+the rule labels that form it, or of the assignee scope needs a drain and
+restart, which the manager performs on `jig reload` (stop at idle, start with
+the new environment). Agent changes are also made at idle, which keeps sessions
+and their agent attribution consistent.
+
+### 5.5 Runtime state
+
+`<repo>/.jigz/data/state.json`, under `flock` as `pool.json` is today, holds per
+agent `exhausted_until`, `reason` and `last_used`, and per loop the current
+agent, offline reason and estimated start. The current agent is recomputed
+after a restart.
+
+### 5.6 Other controls and edge cases
+
+A paused loop (budget or manual) is never started by the manager; a closed gate
+still stops a running loop. Idle sleep stops the children when every loop is
+idle or offline. Loops of one work entry are evaluated independently. Tests
+cover windows that wrap midnight across a daylight saving change, agent hours
+and operating hours in different timezones, either closed alone, hours closing
+with a retry pending, several sessions when the gate closes, and every
+no-candidate case of section 5.1.
 
 ## 6. Fallback design
 
 ### 6.1 Terms
 
-A **step** is `{runtime, model, account set}`. An agent has an ordered list of
-steps: the agent's own settings first, then `fallback` entries. Within a
-step, account selection stays in `agent-exec` (first available entry of the
-runtime that is in the step's `accounts` list or, when the list is empty, any
-entry of the runtime).
+The candidate list of a loop is the rule agent array, the pool order, or the
+single agent. The first candidate is the primary; the active agent is the first
+available candidate.
 
 ### 6.2 Triggers
 
-| Trigger | Detection | Scope | In first release |
-| --- | --- | --- | --- |
-| Usage limit | `agent-exec` output matching (existing `limits` patterns) | Account, with reset time | Yes (exists) |
-| All accounts of the step's runtime unavailable | `machine.Config.Pick` returns none | Step | Yes |
-| Runtime not registered in the engine | `Gate.Agent` / `RuntimeOff` | Step, permanent | Yes (skip at plan time) |
-| Model unavailable | CLI error text such as "model not found" | Step, with cooldown | Only after the message formats of both CLIs are captured as fixtures (unknown today) |
-| Repeated agent failure | N consecutive `failed_agent` runs of the loop | Step, cooldown | No; most failures come from the task or the prompt, not the agent. Decision 4 |
+| Trigger | Detection | In first release |
+| --- | --- | --- |
+| Usage limit | `agent-exec` output matching the usage-limit patterns; the agent is exhausted until the reset time | Yes |
+| No usable account | Credential reference unset, or every candidate unavailable | Yes |
+| Runtime not registered in the engine | `Gate.Agent` / `RuntimeOff`; the agent is skipped | Yes |
+| Model unavailable | CLI error text such as "model not found" | After fixtures with the messages of both CLIs exist |
 
-### 6.3 Chain semantics
+Exhaustion is stored per agent in `state.json` (section 5.5).
 
-- The supervisor computes each loop's current step: the first step that is
-  usable (runtime registered, an account available, not in cooldown). It
-  returns to a higher step as soon as that step is usable again.
-- A change of step recycles the loop once it has no running session. This is
-  the existing runtime-change mechanism generalised from "one runtime for all
-  loops" to "one step per loop". It is needed because the engine reads
-  `agent.kind` and the model at process start.
-- The step's runtime and model reach the engine through the loop
-  environment: `SORTIE_AGENT_KIND`, `SORTIE_AGENT_COMMAND=<jig> agent-exec
-  <runtime>` (as now) and a model variable, `JIG_MODEL`, that the generated
-  workflow references as `model: $JIG_MODEL` inside the block of the runtime
-  in use. This makes the README claim about `JIG_MODEL` true for the generated
-  files (section 2.8) and keeps the model out of the file text, so a model
-  fallback does not rewrite files.
-- A session that fails on a usage limit is retried by the engine and
-  `agent-exec` picks the next account of the current step (unchanged). When
-  the step has no account left, the supervisor moves to the next step when the
-  loop is idle; the retry that follows runs in the new step.
-- No usable step: the gate reason is `gatePool` for the loop; nothing starts.
+### 6.3 Semantics
 
-### 6.4 State
+- The change happens when the loop is idle. The manager rewrites `agent.kind`,
+  `agent.command` and the runtime block of a managed document to the new
+  active agent and the engine re-reads it. A restart is needed only when the
+  query changes (section 5.4).
+- The primary returns when usable: the next evaluation finds it first and the
+  same rewrite happens at the next idle moment.
+- A session that fails on a usage limit is retried by the engine. The loop
+  keeps its agent while sessions run; `agent-exec` marks the agent exhausted
+  so the retry fails fast, and the manager changes agent at idle.
+- No available agent: the loop goes offline (section 5.1).
 
-- Account exhaustion stays in `pool.json` (`exhausted_until`, `reason`,
-  `last_used`), written under `flock`.
-- Step cooldown (for the model trigger, when added) is a new top-level map
-  `steps` in the same file keyed by `<runtime>/<model>` with `unhealthy_until`
-  and `reason`, with the same locking. Entries with no matching config are
-  ignored, as for accounts.
-- The current step per loop is computed, not stored. After a restart the same
-  inputs give the same answer, as for the gate today.
+### 6.4 Observability
 
-### 6.5 Observability
-
-- Status document per workflow: `agent`, `step` (index and `runtime/model`),
-  `primary` (bool), and `fallback_reason` (text of the trigger and the time
-  the primary becomes usable again).
-- Dashboard Agents page: each agent with its chain, the current step per
-  workflow, cooldowns and reset times; the Operations page raises one alert
-  while a workflow runs on a non-primary step.
-- Runs already record the adapter and model (`run_history.agent_adapter`,
-  `session_metadata.model_name`), so the Runs pages show which step ran a
-  session. A test checks that a run on a fallback step shows its own model.
-- Log line on every step change, in the form of the gate lines in
-  `gate.go` (`jig: agent "builder" moved to step 2 (claude-code/claude-haiku-5-5): ...`).
+Status per loop: `agent`, `primary`, `fallback_reason` (trigger and time the
+primary is usable again). The Agents page shows each agent, pool and active
+agent per loop; the Operations page alerts while a loop is on a non-primary
+agent or offline. Runs record `run_history.agent_adapter` and
+`session_metadata.model_name`; a test checks that a run after a change shows
+its own model. Each change logs a gate-style line.
 
 ## 7. Engine-compatibility test strategy
 
 ### 7.1 Supported engine matrix
 
 One table in code (the profile list of section 4.7) is the single list of
-supported releases. Every test below iterates over it, so adding a release
-adds it to all tests. Initial entries: `kinged007/sortie` v1.28.1 (default)
-and `sortie-ai/sortie` v1.29.0. Tests that need a binary use the engine
-resolution already in `internal/engine` (`JIG_ENGINE_BIN`, share directory,
-download) and are in two groups:
+supported releases: `kinged007/sortie` v1.28.1 (target) and `sortie-ai/sortie`
+v1.29.0 (target-switch checks). Every test iterates over it. Binaries come from
+`internal/engine` (`JIG_ENGINE_BIN`, share directory, download). Fixture tests
+need no binary and run in `go test ./...`. Binary tests carry the build tag
+`contract` and run each engine (about 30 seconds; `validate`, `--help`,
+`--dry-run`, no agent runs).
 
-- Fixture tests: no engine binary, run in `go test ./...`.
-- Binary tests: build tag `contract`, run each supported engine binary
-  (about 30 seconds in total; `validate`, `--help`, `--dry-run`, no agent
-  runs).
+### 7.2 Golden files of generated documents
 
-### 7.2 Golden files of generated workflows
-
-- `internal/gen/testdata/golden/<profile>/<case>.md`, one set per supported
-  release, for these cases: default `issues`, default `prs`, a schedule only,
-  a `pi` agent, a model override, two workflows in one repository, a custom
-  prompt reference, a disabled `prs` on the upstream profile.
-- The test renders each case with the profile and compares bytes. `go test
-  -update` rewrites the files; a reviewer reads the diff.
-- A `contract` test runs `sortie validate --format json` of every golden file
-  with the matching engine and requires `valid: true`, and requires no
-  `unknown_key` warning (the unused-block warning of section 2.7 disappears
-  because only one runtime block is emitted).
-- A negative golden set: configs that must fail validation (unknown key,
-  trigger overlap, agent not defined, `prs` with no `github-pr`) with the
-  exact error text.
+- `internal/gen/testdata/golden/<profile>/<case>.md`, one set per engine
+  target: default `issues` and `prs`, a pool with fallback, a `pi` agent, rules
+  with an agent array, a work entry split into two loops, a stage chain in one
+  loop, hook and prompt overrides, `managed: false`, `prs` on the upstream
+  profile (offline with reason). `go test -update` rewrites them.
+- A `contract` test runs `sortie validate --format json` on every golden file
+  with the matching engine and requires `valid: true` and no `unknown_key`.
+- A negative set must fail with exact text: unknown key, plain secret,
+  undefined agent, shared label, `next` across loops, `prs` without
+  `github-pr`.
 
 ### 7.3 Database schema contract
 
-- `internal/rollup/testdata/schema/<version>.sql`: the `sqlite_master`
-  statements and `schema_migrations` rows from a database created by that
-  release, recorded by a script (`make schema-fixture ENGINE=<spec>`) that
-  starts the engine with the `mock` agent against `internal/fakegithub`, as
-  the acceptance test does, and dumps the schema without data.
-- The test builds an empty database from each fixture, inserts one row per
-  table Jigz reads using the columns in `requiredColumns`, and runs
-  `InspectSchema` and the collector queries; it requires no notice and the
-  expected rows.
-- A second test checks that a fixture with one required column removed
-  produces the `Missing` entry and that only the dependent view degrades.
-- A test checks that `EngineReleases` equals the set of fixtures, so a
-  release cannot be listed without a fixture.
+`internal/rollup/testdata/schema/<version>.sql` holds the schema of a database
+created by each release, recorded by `make schema-fixture ENGINE=<spec>` (the
+engine with the `mock` agent against `internal/fakegithub`). The test builds a
+database from each fixture, inserts a row per table Jigz reads using
+`requiredColumns` (including `rule_name`, `agent_kind`, `agent_adapter`,
+`configured_model`), and runs `InspectSchema` and the collector queries. A
+fixture with a required column removed yields a `Missing` entry and degrades
+only the dependent view. `EngineReleases` must equal the set of fixtures.
 
 ### 7.4 Log-line contract
 
-- `cmd/jig/testdata/enginelog/<version>.log`: lines recorded from a real run
-  of each release in text log format (the format `livelog.go` parses),
-  covering one session start, a retry start, a turn, a normal end, a failed
-  end with a retry, and a poll tick.
-- The test replays each file into `liveTracker` and asserts the sessions,
-  attempts and the `unaccounted` handling.
-- A `contract` test searches each engine binary for the `msg` literals
-  listed in `livelog.go`, which fails quickly when a release renames one. The
-  log recorded in the acceptance run is the authoritative check (7.6).
-- Message fields (`issue_id`, `attempt`, `running`) are asserted from the
-  recorded files only.
+`cmd/jig/testdata/enginelog/<version>.log` holds lines recorded from a real run
+of each release: a session start, a retry start, two concurrent sessions, a
+turn, a normal end, a failed end with a retry, and a poll tick with `running`
+above 1. The test replays them into `liveTracker` and asserts sessions,
+attempts and `unaccounted`. A `contract` test searches each engine binary for
+the `msg` literals in `livelog.go`. A re-read fixture changes the agent
+command in the document while the engine runs and checks that the next session
+uses it (section 5.4).
 
 ### 7.5 CLI and capability contract
 
-- Flags: for each engine, `--help` output contains `--env-file`, `--port`
-  and the line "0 to disable"; `sortie --dry-run --port 0 --env-file <f>
-  <workflow>` against a golden workflow exits 0 without binding a port.
-- Version line: `engine.Probe` parses the `--version` output of each release.
-- Registered kinds: `Probe` returns the tracker and agent kinds in the
-  matrix for each release (for example the upstream list has no `pi` and no
-  `github-pr`). This also pins the `registered: [...]` message format that
-  `parseRegistered` depends on.
-- `validate --format json`: the shape (`valid`, `errors[]`, `warnings[]`
-  with `check` and `message`) is asserted on a deliberately invalid file.
+For each engine: `--help` contains `--env-file`, `--port` and "0 to disable";
+`--dry-run --port 0 --env-file <f> <document>` on a golden document exits 0;
+`engine.Probe` returns the version and registered kinds (pinning
+`parseRegistered`); `validate --format json` has the documented shape. A
+document with a rule `agent: <kind>` validates on each profile that registers
+the kind and fails with `unknown agent kind` otherwise, which pins the
+behaviour section 4.5 relies on.
 
 ### 7.6 Acceptance matrix
 
-Acceptance stays the end-to-end proof and is not multiplied by the number of
-generated-file variants. One scenario set per engine:
+Acceptance stays the end-to-end proof and is not multiplied by generated
+variants. On the fork v1.28.1: generated issues and prs documents through the
+mock agent; agent hours closing during a session (loop offline with reason and
+estimate, then started); fallback at idle and return to the primary; two
+concurrent sessions with a drain that waits for both; a recorded engine log
+(`-record`). On upstream v1.29.0: the issues scenario, the prs loop offline
+with its reason, and the recorded log. Availability and fallback logic runs on
+the supervisor's fake clock (`gate_test.go`, `supervise_test.go`).
 
-| Scenario | Fork v1.28.1 | Upstream v1.29.0 |
-| --- | --- | --- |
-| Generated issues workflow handed off through the mock agent | yes | yes |
-| Generated prs workflow | yes | disabled with reason |
-| Per-agent schedule closes while a session runs (`finish`) and then reopens, using a controllable clock where the supervisor allows it | yes | no |
-| Fallback: first account exhausted, then step change | yes | no |
-| Recorded engine log written to `testdata` on request (`-record`) | yes | yes |
+### 7.7 CI changes (approved)
 
-Schedule and fallback behaviour is tested against the supervisor's fake
-clock in unit tests (`gate_test.go`, `supervise_test.go`); acceptance covers
-only one end-to-end case of each, on the default engine.
+The owner approved these changes. Each is made in the phase that needs it
+(section 8), as its own pull request touching `.github/workflows`, limited to
+this scope:
 
-### 7.7 CI cost and requests
+1. A `contract` job running `go test -tags contract ./...`, in parallel to
+   `check` and `acceptance`, with both engines cached.
+2. `acceptance` split into two parallel jobs (default engine; upstream engine
+   with `TestAcceptanceUpstreamEngine`).
+3. `paths-ignore` for documentation-only pull requests (`plans/`, `*.md`).
+4. A weekly canary job running the binary contract tests against the newest
+   release of each engine repository (non-blocking, opens an issue on failure).
 
-Acceptance is about 3 minutes by the comment in `.github/workflows/ci.yml`
-and about 8 minutes by `AGENTS.md`; the job timeout is 15 minutes. The two
-numbers differ and the actual time is not measured here (unknown). The new
-tests add:
-
-| Addition | Added time | Where |
-| --- | --- | --- |
-| Fixture tests (golden, schema, log replay) | seconds | `go test ./...` |
-| Binary contract tests | about 30 s plus download time | new job or step |
-| Acceptance scenarios for schedule and fallback | about 1 to 2 minutes | existing job |
-
-Requests (any CI workflow change needs user approval; none is made here):
-
-1. Add a `contract` job running `go test -tags contract ./...` in parallel to
-   `check` and `acceptance`; it downloads both engines (about 25 MB each, as
-   the existing job does) and caches them.
-2. Split `acceptance` into two parallel jobs (default engine, upstream
-   engine) with `-run` selecting `TestAcceptance$` plus the running-session
-   and connected tests on one, `TestAcceptanceUpstreamEngine` on the other,
-   so wall time is the longer job, not the sum.
-3. Skip `acceptance` when a pull request changes only `plans/`, `*.md` or
-   `README.md` (`paths-ignore`), while `check` and `build` stay required.
-4. Add a scheduled weekly job that runs the binary contract tests against the
-   newest release of each engine repository (non-blocking, opens an issue on
-   failure) to learn about a new release before a bump is wanted.
+Acceptance time: about 3 minutes by `ci.yml`, 8 by `AGENTS.md` (unknown).
 
 ### 7.8 Checklist: adding an engine release
 
-1. Download the release; record `--version`, `--help`, registered kinds.
-2. Run `make schema-fixture ENGINE=<repo>@<tag>`; commit the schema fixture
-   and the log recording; add the release to `rollup.EngineReleases` data in
-   the profile table with its schema number.
-3. Confirm the accepted front matter keys and `SORTIE_*` variables from the
-   release notes and by `validate` runs; update the profile's `FrontMatter`
-   and `EnvOverrides`.
-4. Run `go test -update` for the golden set; review each golden diff.
-5. Run the `contract` tests and the acceptance scenarios against the release.
-6. Update README (engine section and the version table) and the default pin
-   if the release becomes the default.
-7. Open one pull request containing only the release addition.
+Record `--version`, `--help` and registered kinds; run `make schema-fixture
+ENGINE=<repo>@<tag>` and commit the fixture and log recording; add the profile;
+confirm accepted keys and `SORTIE_*` variables by `validate`; run `go test
+-update` and review the golden diffs; run the `contract` tests and acceptance;
+set `engine` in a test config to the release, run all tests and list what
+breaks; update README. One pull request contains only the release addition.
 
 ## 8. Phased delivery plan
 
 Each phase is one or more small pull requests that ship without the later
-ones. Every phase includes its tests and README update.
+ones and includes its tests and README update.
 
 | Phase | Scope | Acceptance criteria | Tests |
 | --- | --- | --- | --- |
-| 0 | Documentation fix: correct the README `JIG_MODEL` rows (section 2.8). No behaviour change | README matches the code | Link and text check by review |
-| 1 | Per-agent schedules. `agents.<name>.schedule` and `workflows.<name>.agent` in `.jigz/config.yaml`; per-loop gate in `gateDecide`; per-workflow `hold` and `next_change` in the status document; Agents page row for each agent | A loop outside its schedule starts nothing and stops idle; `end: stop` stops at once; machine hours still bound it; budget pause and sleep behave as in section 5.3. No file generation | Table tests in `gate_test.go` (wrap, DST, machine and agent both closed, end precedence, paused loop, held loop restart); config tests for strict keys and error paths; one acceptance case on the default engine |
-| 2 | Contract test harness without the generator: engine profile table (folding `rollup.EngineReleases` and `MinVersion`), schema fixtures, log fixtures, flag and probe tests under `contract` tag | Adding a fake release to the table without fixtures fails a test; both supported releases pass | The tests of section 7.3 to 7.5; the CI requests 7.7 are made at this point |
-| 3 | Generator for `kind: issues` and `prs` (template, marker, digest, drift check, atomic write), `jig validate` checks, adoption of unmodified shipped files, `managed: false` | The generator output for the default config equals the shipped files except for the marker; golden files pass on both engines; a hand-edited marked file is reported and not overwritten | Golden set (7.2), drift tests, adoption test using the shipped digests, `sortie validate` of each golden file under `contract` |
-| 4 | Per-agent runtime and model: generated files reference `$JIG_MODEL` in the runtime block in use, supervisor sets runtime and model per loop (single step, no fallback); only one runtime block is emitted | Two loops run two runtimes; changing the model in config and running `jig reload` recycles the loop when idle | Unit tests for env per loop; acceptance case with two agents on the default engine |
-| 5 | Several workflows per repository: `kind`, `triggers`, `prompts`, derived `query_filter`, `db_path`, `workspace.root`; `FilterFor` reads the resolved workflow; label sync from triggers; overlap validation; `jig migrate` | Example 3 runs; two workflows with a shared trigger fail validation; `docs-night` has its own database and workspace | Golden cases (two workflows, custom prompt), validation negatives, status document and Workflows page tests |
-| 6 | Fallback chains (limit and no-account triggers): steps, per-loop step selection, recycle on step change, status and dashboard fields, alert while on a fallback step | Example 2 behaves as section 3.5 describes; the primary returns when usable | Supervisor tests on the fake clock and pool state; `agent-exec` tests with the account list; one acceptance case |
-| 7 | Optional triggers, after fixtures exist: model unavailable (needs captured CLI messages), repeated failure (if accepted in decision 4) | As decision 4 settles | Fixture tests of the messages |
-| 8 | Remove unused code per decision 7 | `go build`, vet and tests pass; no package imports the removed code | Existing suite |
+| 0 | Documentation fix: correct the README `JIG_MODEL` rows (section 2.8), subject to section 11, item 1. No behaviour change | README matches the code | Review |
+| 1 | Single-file config model and loader: `engine`, `operating_hours`, `tracker`, `hooks`, `agents`, `pools`, `work` in `internal/config`; strict keys; cross-reference validation; `from_env` handling and rejection of plain secrets; `jig validate` reports config errors. The loader still accepts the current keys, and loops still use the shipped documents | A valid file loads into one resolved struct; invalid files fail with field paths | Config tests for strict keys, error paths, name resolution, the three examples of section 3 |
+| 2 | Agent hours, operating hours and offline handling: per-loop evaluation in `gateDecide`, estimated start time, `jig status` and dashboard fields, state in `.jigz/data/state.json`, concurrency changes of section 5.3 (no document generation; a work entry is bound to the existing document of the same name) | A loop outside agent or operating hours is offline with reason and estimate; `finish` and `stop` behave as in section 5.2; several sessions are handled | Table tests in `gate_test.go` (wrap, DST, both closed, end precedence, paused, several sessions, no candidate); one acceptance case |
+| 3 | Generation of engine documents: templates, names and paths, marker and digest, drift, `managed: false`, loop splitting, atomic write, `jig setup`/`validate`/`reload`/`start` integration, query-change drain and restart, golden files for both engine targets | Output for the default config equals the shipped files except for the marker and paths; a hand edit in a managed document is reported as drift | Golden set (7.2), drift tests, adoption test using the shipped digests |
+| 4 | Fallback: candidate lists, rule agent arrays, document rewrite at idle, return to the primary, status and dashboard fields, alert, stages across split loops | Example 2 and 3 behave as section 3 describes | Supervisor tests on the fake clock and state; one acceptance case |
+| 5 | Contract tests and CI: engine profile table folding `rollup.EngineReleases` and `MinVersion`, schema fixtures, log fixtures, flag and probe tests under the `contract` tag, re-read fixture; the four approved CI changes (7.7), each in its own pull request | Adding a release to the table without fixtures fails a test; both profiles pass; switching `engine` in a test config reports breakage | Sections 7.3 to 7.5 |
+| 6 | Cleanup and migration: `jig migrate`, adoption of unmodified shipped documents, move of databases, removal of `fleetconfig.Load`, `plan.Setup/Validate/Apply`, `ApplySettings`, the model-reference pruning and the `jigz.yaml` README text; machine-level reads of `machine.yaml` for hours and pool removed | `go build`, vet and tests pass; no package imports the removed code; old installs convert with a backup | Migration tests on fixture repositories; existing suite |
+| 7 | Model-unavailable trigger after fixtures exist | As the fixtures show | Fixture tests of the messages |
 
-Phase 1 is first because it needs no generation and no engine change: only
-the supervisor and the config reader change, and it answers the first
-request directly.
+Phase 2 needs the loader but no generation. Phase 3 carries the golden files;
+the contract job and the other fixtures wait for phase 5.
 
 ## 9. Risks
 
 | Risk | Effect | Mitigation |
 | --- | --- | --- |
-| Generated files hide an engine option a user needs | Users ask to edit the file | `managed: false`; a `raw` passthrough block is not planned (KISS, decision 2) |
-| Two workflows claim the same item | Duplicate work | Trigger overlap validation (4.5); assignee scope stays in the filter |
-| Engine renames a log message or a column | Live view or history stops working | Sections 7.3 and 7.4; degraded notices already exist in `rollup` |
-| Unverified engine key lists (section 2.7) | Generator emits a key an engine rejects | Profile step 3 of the checklist; `validate` of every golden file on that engine |
-| `effort` and model-unavailable detection depend on CLI behaviour that is not captured | Features ship wrong | Not accepted until fixtures exist (3.7, 6.2) |
-| Subscription terms for unattended use and for fallbacks between accounts | Account restrictions | Documentation stays; the member is responsible |
-| A step change recycles loops often if limits flap | Repeated restarts | Recycle only when idle; cooldown on a step before returning to a higher one |
-| Hub config in connected mode needs the same model | Two sources drift | Single resolved struct used by the generator; hub source fills it later |
-| CI time | Slower merges | Section 7.7 requests; fixture tests are the bulk of new coverage |
-| Shipped prompts change in a new Jigz release but user prompts do not | Users run stale prompts | Prompts are user-owned (4.2); a later `jig prompts diff` is not planned here |
-| Large rewrite of an existing config path | Regressions in `childEnv` | Phases 3 to 5 keep `childEnv` output byte-identical for default configs; a test asserts it |
+| A loop under continuous load never becomes idle | Agent changes and `finish` are delayed | Measure in acceptance; if needed a bounded wait, then a drain |
+| Claims between close and stop with several workers | Work starts after the gate closed | The `max_concurrent_agents: 0` fixture (section 5.3) |
+| The engine's re-read scope is not proven | A live document change is ignored | The re-read fixture (7.4); restart the loop when a change is not applied |
+| Per-kind commands unverified | Rules cannot share a loop | Separate loops (section 4.5) |
+| Hand edits to a managed document are overwritten | Lost edits | `.bak` copy, drift report, `managed: false` |
+| Two loops claim one item | Duplicate work | Label overlap validation, combined queries (section 4.5) |
+| Engine renames a log message or a column | Live view or history breaks | Sections 7.3 and 7.4; degraded notices in `rollup` |
+| Strict keys reject old files | Installs fail to load | `jig migrate`, clear errors (4.8) |
+| Agent changes flap when limits flap | Repeated rewrites | Changes only at idle; cooldown before returning |
 
-## 10. Open decisions for the user
+## 10. Decisions
 
-1. **Config home.** Where do agent profiles and workflow settings live?
-   - A: `.jigz/config.yaml` for agents and workflows; `machine.yaml` for
-     accounts, machine hours and engine pin (section 3.2).
-   - B: everything in `machine.yaml`.
-   - C: the fleet file `jigz.yaml`.
-   - Recommendation: A. It reuses the strict repository config that the
-     supervisor already reloads, keeps secrets out of tracked files, and
-     matches how connected mode supplies project config.
-2. **Hand-editing generated workflows.**
-   - A: a file with the marker is not edited by hand; drift is an error;
-     `managed: false` per workflow is the supported opt-out.
-   - B: hand edits stay supported and Jigz merges around them.
-   - C: no opt-out; all workflows are generated.
-   - Recommendation: A. B needs a merge of YAML and comments that cannot be
-     tested exhaustively; C blocks custom hooks.
-3. **Engine targets.**
-   - A: support the fork v1.28.1 and upstream v1.29.0 through one profile
-     table, adding a profile per release; keep at most the two newest per
-     repository.
-   - B: upstream only, after it has the `pi` adapter and `github-pr`.
-   - C: fork only.
-   - Recommendation: A. It matches the current acceptance tests, and the
-     profile table makes B or C a deletion later.
-4. **Fallback semantics.**
-   - A: triggers are usage limit and no usable account; step change when the
-     loop is idle; the primary step returns when usable.
-   - B: A plus repeated-failure trigger.
-   - C: A plus handing a running session to the next step.
-   - Recommendation: A first. Add model-unavailable after fixtures exist.
-     B hides prompt and task failures behind agent changes; C needs engine
-     support.
-5. **Agent granularity.**
-   - A: one agent per workflow; different agents per stage mean separate
-     workflows chained by labels.
-   - B: ask the engine for per-dispatch-rule agents.
-   - Recommendation: A. The engine runs one adapter per process.
-6. **Schedule and machine hours.**
-   - A: intersection; the agent schedule cannot extend the machine window.
-   - B: an agent schedule overrides the machine window.
-   - Recommendation: A. The machine window is the person's limit for the
-     computer.
-7. **The unused `jigz.yaml` loader and `internal/plan`.**
-   - A: delete `fleetconfig.Load`, `plan.Setup/Validate/Apply`,
-     `ApplySettings` and the model-reference pruning in phase 8, keeping
-     `fleetconfig.Resolved` only if the dashboard still needs it.
-   - B: build the new model on them.
-   - C: leave them.
-   - Recommendation: A. They target a fleet file nothing reads, patch
-     workflow files by line edits that the template generator replaces, and
-     keep a README claim alive that is not true (section 2.8).
-8. **The `JIG_MODEL` README claim.**
-   - A: correct the README now (phase 0); the variable becomes real in
-     phase 4 for generated files.
-   - B: leave it until phase 4.
-   - Recommendation: A.
-9. **CI changes (requests, section 7.7).** Approve adding a `contract` job,
-   splitting `acceptance` into two parallel jobs, `paths-ignore` for
-   documentation-only pull requests, and a weekly canary job against new
-   engine releases?
-   - Recommendation: approve 1 and 2 with phase 2; 3 and 4 optional.
-10. **Effort setting.**
-    - A: leave `effort` out until a delivery mechanism per runtime is
-      verified.
-    - B: accept it now and pass it to `agent-exec` as a CLI argument.
-    - Recommendation: A.
+Decided by the owner and applied throughout this document.
+
+1. **Location.** Configuration, workflows and prompts are stored in
+   `<repo>/.jigz/` only; nothing under `~/.config/jigz`. Operating hours, the
+   agent pool and the engine target are repository configuration. The hub
+   daemon may differ and is out of scope.
+2. **One file.** `.jigz/config.yaml` holds the repository section, the fleet
+   (`agents`, `pools`) and `work` (section 3). Assignee is always `@me`;
+   milestone is not configurable. The engine target is the fork
+   `kinged007/sortie` v1.28.1 until upstream supports `pi` and `github-pr`.
+   `effort` is left out. Secrets are environment variable references.
+3. **Manager.** First available agent per loop; offline with reason and
+   estimated start when none; document rewrite to a backup agent at idle;
+   drain and restart on a query filter change (section 5).
+4. **Hand edits.** `managed: false` stops generation and overwriting
+   (section 4.3).
+5. **Fallback.** Triggers are usage limit and no usable account; the change
+   happens at idle; the primary returns when usable. Model-unavailable comes
+   later.
+6. **Agent granularity.** Agents are assigned per rule, including arrays;
+   separate loops realise differing agents (section 4.5).
+7. **Hours.** General operating hours (default 24/7) plus per-agent hours.
+8. **Old code.** The `fleetconfig` loader and `internal/plan` settings
+   patching are removed in phase 6.
+9. **CI changes are approved** (section 7.7), each its own pull request.
+
+## 11. Still open
+
+Each item has options and a recommendation. The owner has not decided them.
+
+1. **README `JIG_MODEL` claim.** Options: A, correct the README now (phase 0);
+   B, leave it. Recommendation: A. The variable has no use in the target model.
+2. **`effort` key.** The engine accepts `claude-code.effort` without warning
+   and records `configured_effort`, but delivery to each CLI is not verified.
+   Options: A, leave `effort` out until delivery per runtime is verified; B,
+   accept it now. Recommendation: A.
+3. **Where the dashboard hide setting and the account secret references
+   live.** `dashboard.hide` is in `~/.config/jigz/machine.yaml` because one
+   dashboard can span several repositories (`--unite`). The usage-limit
+   patterns (`limits`) and `connected` are also in that file. The `from_env`
+   variables are read from the supervising process's environment, so their
+   storage (shell profile, service unit, env file) is outside the repository.
+   Options: A, keep machine-wide dashboard settings in the user directory and
+   leave everything else in the repository; B, add `dashboard.hide` to the
+   repository file and merge the settings when several repositories are
+   united; C, a repository `.jigz/` env file for the references. The owner
+   chooses.
+4. **Conflicting edits of a managed document.** The inferred behaviour
+   (section 4.3): `jig validate` reports drift; the next generation that must
+   change the document overwrites the hand edit and keeps a `.bak`. Options:
+   A, as stated; B, never overwrite a drifted document and refuse to apply the
+   change until the owner resolves it; C, merge. Recommendation: A, because C
+   cannot be tested exhaustively and B can leave a loop on a stale agent.
+5. **Migration of existing users.** Existing `machine.yaml` hours and pool
+   entries and existing `.jigz/config.yaml` files fail strict-key loading in
+   the new format. Options: A, a one-time `jig migrate` the user runs; B,
+   automatic conversion at first load with a backup. Recommendation: B with a
+   backup and a printed summary, with `jig migrate` available to run the same
+   conversion explicitly.
