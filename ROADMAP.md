@@ -118,7 +118,7 @@ Phase names from `plans/jigz/vision-and-roadmap.md` section 6.
 | --- | --- |
 | 0 Finish and fix (united dashboard, no auth, `--host`, acceptance harness) | done |
 | 1 Working hours and agent account pool | done |
-| 2 Engine independence | done, except the upstream PRs (external, see 3.7) |
+| 2 Engine independence | done, except the upstream PRs (external, see 3.9) |
 | Rename to Jigz | done |
 | 3 Questions | done |
 | 4 Connected mode | done |
@@ -129,10 +129,11 @@ Phase names from `plans/jigz/vision-and-roadmap.md` section 6.
 ## 3. Roadmap
 
 Ordered by practical build sequence: finish work in flight first (it changes
-the config model everything else sits on), then reliability fixes that
-affect every run, then small independent improvements, then the remaining
-features of the phase plan. Reorder freely; only item 1 has real
-sequencing constraints (its phases share one branch and one config model).
+the config model everything else sits on), then the scheduled-work extension
+that builds on that model (item 2), then reliability fixes that affect
+every run, then small independent improvements, then the remaining features
+of the phase plan. Reorder freely; only item 1 has real sequencing
+constraints (its phases share one branch and one config model).
 
 ### 1. Configuration interface — in progress
 
@@ -153,24 +154,53 @@ open.
 - [ ] Phase 6: cleanup (remove legacy config paths and patching)
 - [ ] Phase 7: model-unavailable trigger
 
-### 2. Reliability: loop crash containment
+### 2. Scheduled work
+
+Design: `plans/jigz/scheduled-work.md`. Extends the `work:` model from
+item 1 with clock-driven runs: a schedule, a cheap shell `check` gate,
+and an optional agent invocation. External transport and area/workflow
+schemes stay out — the user wires their own tools and labels; Jigz
+provides schedules, gates, and permissions.
+
+- [ ] Scheduled work entries: `schedule:` (cron, timezone) on a work
+  entry; `check:` shell command as the gate (non-zero exit records a
+  skipped tick, no agent spawned); shell-only entries allowed; inline
+  prompt or template file reference; overlap guard; `scheduled`/`skipped`
+  run reasons in run history and dashboard
+- [ ] Issue-free runs: scheduled runs execute without a claimed issue;
+  probe the engine `file` tracker as the carrier first, direct
+  `agent-exec` invocation as fallback; no checkout unless the prompt
+  needs one
+- [ ] Tracker-write runs: prompts whose output is tracker state
+  (create/relabel/assign/close) instead of a PR; recorded outcome is the
+  tracker writes
+- [ ] Approval policy per work entry: `approvals:` naming side effects
+  and who may grant them (human now, named agent later); the gated step
+  refuses to run without a recorded approval
+- [ ] Tool permissions per work entry: allow-list of capabilities
+  (`read_email` without `send_email`); deny by default
+- [ ] Label conventions for managed dispatch: document and validate a
+  scheme so lead/worker and multi-area setups do not collide; validation
+  in `jig validate`
+
+### 3. Reliability: loop crash containment
 
 - [ ] Restart a loop that exits instead of ending the run. Today one
   crashed loop stops every other loop (README "Known limitations").
 
-### 3. Upgrade UX: workflow file versioning
+### 4. Upgrade UX: workflow file versioning
 
 - [ ] Stamp workflow files with the binary version that wrote them, so an
   upgrade can offer a new version of a file the user has not edited (README
   "Known limitations").
 
-### 4. Prompt quality
+### 5. Prompt quality
 
 - [ ] PR reviews from a maintainer's stance: the review prompt should ask
   whether a maintainer of the repo would approve the PR (code style,
   conventions, fit) — `plans/NOTES.md`.
 
-### 5. Previews (phase 5)
+### 6. Previews (phase 5)
 
 Plan: `plans/jigz/vision-and-roadmap.md` section 5.4. The hub protocol's
 preview endpoints are reserved and answered `unsupported` until this lands.
@@ -182,11 +212,14 @@ preview endpoints are reserved and answered `unsupported` until this lands.
 - [ ] Register previews with the hub when connected; remove on expiry
   (`POST previews`, `DELETE previews/{id}` in `plans/system/hub-protocol.md`)
 
-### 6. Agent session host (phase 6)
+### 7. Agent session host (phase 6)
 
 Plan: `plans/jigz/vision-and-roadmap.md` section 5.6. Internal to the hub;
 not documented in the user docs. Protocol commands `session.*` and
-`task.run` are reserved and answered `unsupported` until this lands.
+`session.*` and
+`task.run` are reserved and answered `unsupported` until this lands. The
+standalone scheduler (item 2) is the local counterpart; the session host
+is the hub-connected version.
 
 - [ ] Conversations: agent sessions in a checkout of the project, headless
   turns with session resume; one session per (agent, project); idle timeout
@@ -195,7 +228,7 @@ not documented in the user docs. Protocol commands `session.*` and
 - [ ] Same account pool and working hours as the loops; sessions never push
   to protected branches
 
-### 7. Hardening backlog
+### 8. Hardening backlog
 
 Known gaps recorded in `plans/jigz/handoff.md` section 6. Not scheduled;
 pick up opportunistically.
@@ -219,7 +252,7 @@ pick up opportunistically.
   running; temp files after SIGKILL; status write failures only reaching
   stderr; `--repo` ignored by `status`, `stop`, `restart`
 
-### 8. Blocked on external work
+### 9. Blocked on external work
 
 - [ ] Upstream releases carry the `pi` agent adapter and the `github-pr`
   tracker (upstream PRs in progress, owned by the user). Until both are
@@ -232,7 +265,7 @@ pick up opportunistically.
 - [ ] Stricter, configurable author filter for question answers (issue
   #20). Waiting on a decision.
 
-### 9. Optional and deferred
+### 10. Optional and deferred
 
 - [ ] Windows support (parity work L12, `plans/jigz/enhancements.md`;
   optional, ~60% of commands are file-based already; the engine releases a

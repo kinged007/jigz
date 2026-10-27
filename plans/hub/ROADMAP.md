@@ -27,10 +27,10 @@ public write-up (`vision-and-roadmap.md` section 5).
 - [ ] Phase 4: agents and sessions — agent entity and role presets,
   assigned runner, chat, hub MCP server with `send_message`, proposals →
   specs → work items (needs the agent session host in `../../ROADMAP.md`,
-  item 3.6)
+  item 3.7)
 - [ ] Phase 5: tasks, triggers, governed actions — scheduled and event
   tasks, `task.run`, approval-gated actions, CI failure handling (needs
-  the agent session host in `../../ROADMAP.md`, item 3.6)
+  the agent session host in `../../ROADMAP.md`, item 3.7)
 - [ ] Phase 6: gateway and guests — channel connectors (Slack first),
   threads to agents, digests and announcements, guests
 - [ ] Phase 7: planning and governance — triage, milestones, sprints,
