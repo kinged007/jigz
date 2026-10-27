@@ -19,16 +19,39 @@
 .ev.bad { background: color-mix(in srgb, var(--err) 12%, transparent); }
 .ev.bad .eic { color: var(--err); }
 .ev summary { cursor: pointer; color: var(--mut); overflow-wrap: anywhere; }
+.ev .cut { margin-top: .2rem; font-size: .92em; }
+.ev .cut button { padding-block: 0; margin-left: .3rem; }
 .pane { max-height: 36rem; overflow: auto; }
+.logbar label.f { white-space: nowrap; }
+.logbar :is(input, button) { box-sizing: border-box; height: 1.9rem; padding-block: 0; }
+.md { overflow-wrap: anywhere; margin-top: .2rem; max-height: 24rem; overflow: auto; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p, .md ul, .md ol, .md blockquote, .md .mdcode, .md .mdtw, .md .mdh { margin: .35rem 0; }
+.md ul, .md ol { padding-left: 1.4rem; }
+.md .mdh { font-weight: 700; }
+.md .mdh1 { font-size: 1.2em; } .md .mdh2 { font-size: 1.1em; }
+.md blockquote { padding-left: .6rem; border-left: 3px solid var(--line); color: var(--mut); }
+.md code { background: #8881; padding: 0 .25rem; border-radius: 3px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; }
+.md .mdcode .lang { display: block; font-size: .8em; color: var(--mut); }
+.md .mdcode pre { max-height: 14rem; white-space: pre; word-break: normal; margin: 0; }
+.md .mdcode pre code { background: none; padding: 0; }
+.md .mdtw { overflow-x: auto; }
+.md table { border-collapse: collapse; }
+.md th, .md td { border: 1px solid var(--line); padding: .15rem .45rem; text-align: left; }
+.md hr { border: 0; border-top: 1px solid var(--line); margin: .5rem 0; }
 .tabs { display: flex; gap: .4rem; margin-bottom: .5rem; }
 .tabs button[aria-selected="true"] { background: var(--acc); color: var(--bg); border-color: var(--acc); font-weight: 700; }
 code.resume { overflow-wrap: anywhere; }
 {{end}}
 
-{{define "run-agentlog"}}{{if .AgentWhy}}<p class="muted">{{.AgentWhy}}.</p>{{end}}{{if .Agent}}<p class="muted">The last {{len .Agent}} events, read from the {{.AgentFrom}}.</p>
-<ol class="alog">{{range .Agent}}<li class="ev k-{{.Kind}}{{if .Failed}} bad{{end}}"><span class="eic">{{template "event-icon" .}}</span>
+{{define "evtext"}}<pre class="t" data-md="{{mdmode .Kind}}">{{.Text}}</pre>{{end}}
+
+{{define "run-agentlog"}}<div class="ahead">{{if .AgentWhy}}<p class="muted">{{.AgentWhy}}.</p>{{end}}{{if .Agent}}<p class="muted">The last {{len .Agent}} events, read from the {{.AgentFrom}}.</p>{{else if not .AgentWhy}}<p class="muted">No events yet.</p>{{end}}</div>{{if .Agent}}
+<ol class="alog">{{range .Agent}}<li class="ev k-{{.Kind}}{{if .Failed}} bad{{end}}" data-ref="{{.Ref}}" data-sig="{{len .Text}}.{{.More}}"><span class="eic">{{template "event-icon" .}}</span>
   <div class="evb"><div><b>{{.Title}}</b>{{if .Failed}} <span class="chip s-failed">failed</span>{{end}} <span class="muted">{{evtime .Time}}</span></div>
-  {{if .Text}}{{if or (gt (len .Text) 300) (eq .Kind "thinking")}}<details data-k="{{.Time}}|{{.Kind}}|{{.Title}}"><summary>{{trunc .Text 120}}</summary><pre>{{.Text}}</pre></details>{{else}}<pre>{{.Text}}</pre>{{end}}{{if .Truncated}}<span class="muted">cut at 4000 bytes</span>{{end}}{{end}}</div></li>{{end}}</ol>{{else if not .AgentWhy}}<p class="muted">No events yet.</p>{{end}}{{end}}
+  {{if .Text}}{{if or (gt (len .Text) 300) (eq .Kind "thinking")}}<details data-k="{{.Ref}}"><summary>{{trunc .Text 120}}</summary>{{template "evtext" .}}</details>{{else}}{{template "evtext" .}}{{end}}{{end}}
+  {{if .More}}<div class="cut muted"><span class="n">{{commas .More}} more characters not shown.</span><button type="button" class="xp" data-ref="{{.Ref}}">Show full</button></div>{{else if .EngineCut}}<div class="cut muted">Truncated by the engine.</div>{{end}}</div></li>{{end}}</ol>{{end}}{{end}}
 
 {{define "run-timeline"}}{{if .Timeline}}<div class="tw maxh"><table>
   <thead><tr><th>Time (UTC)</th><th>Source</th><th>Kind</th><th>Event</th></tr></thead>
@@ -84,13 +107,15 @@ code.resume { overflow-wrap: anywhere; }
   {{if $agent}}<div id="pane-agent" class="pane" role="tabpanel" data-url="{{.Logs.AgentURL}}">{{template "run-agentlog" .Parts}}</div>{{end}}
   {{if $engine}}<div id="pane-engine" role="tabpanel" data-url="{{.Logs.Engine.URL}}"{{if $agent}} hidden{{end}}>
     {{if .Logs.Engine.Why}}<p><button type="button" disabled>Load engine log</button> <span class="muted">{{.Logs.Engine.Why}}</span></p>
-    {{else}}<p class="muted">Lines of the workflow log that name this issue{{if not .Logs.Running}}, within the time of this run{{end}}.</p>
-    <p class="row"><button type="button" id="logload">Load engine log</button>
-      <label class="f">Find in log <input type="search" id="logq" placeholder="text"></label>
-      <span class="muted" id="logcount" aria-live="polite"></span></p>
-    <div id="logbox" class="muted">Not loaded. The log is read only when you ask.</div>{{end}}
+    {{else}}<p class="muted">Lines of the workflow log that name this issue{{if not .Logs.Running}}, within the time of this run{{end}}. The log loads when this tab opens.</p>
+    <div class="row logbar"><label class="f h">Find in log <input type="search" id="logq" placeholder="text"></label>
+      <button type="button" id="logload">Reload</button>
+      <span class="muted" id="logcount" aria-live="polite"></span></div>
+    <div id="logbox" class="muted">Not loaded yet.</div>{{end}}
   </div>{{end}}
 </div>{{end}}{{end}}
+
+
 
 {{define "run-js"}}<script>
 (function () {
@@ -115,35 +140,266 @@ code.resume { overflow-wrap: anywhere; }
     setTimeout(function () { b.textContent = was; }, 1500);
   });
 
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) { n.className = cls; }
+    if (text !== undefined) { n.textContent = text; }
+    return n;
+  }
+  function link(href, parent) {
+    var a = el('a');
+    a.setAttribute('href', href); a.setAttribute('rel', 'noopener noreferrer'); a.setAttribute('target', '_blank');
+    parent.appendChild(a);
+    return a;
+  }
+
+  var safeURL = /^(https?:\/\/|mailto:)[^\s"<>]+$/i;
+  var inlineRe = /(`+)([\s\S]*?[^`])\1(?!`)|\[([^\]\n]+)\]\(([^)\s]+)(?:\s+"[^"\n]*")?\)|(\*\*|__)(?=\S)([\s\S]*?\S)\5|(\*|_)(?=\S)([\s\S]*?\S)\7|(https?:\/\/[^\s<>)\]]+)/g;
+  var wordChar = /\w/;
+
+  function inline(src, parent, noLink) {
+    var re = new RegExp(inlineRe.source, 'g'), pos = 0, m;
+    function text(t) {
+      t.split('\n').forEach(function (p, i) {
+        if (i) { parent.appendChild(el('br')); }
+        if (p) { parent.appendChild(document.createTextNode(p)); }
+      });
+    }
+    while ((m = re.exec(src))) {
+      var intraword = (m[5] === '__' || m[7] === '_') && (wordChar.test(src.charAt(m.index - 1)) || wordChar.test(src.charAt(m.index + m[0].length)));
+      if (intraword) { re.lastIndex = m.index + 1; continue; }
+      text(src.slice(pos, m.index));
+      pos = m.index + m[0].length;
+      if (m[1]) {
+        parent.appendChild(el('code', '', m[2].replace(/^ (.*) $/, '$1')));
+      } else if (m[3] !== undefined) {
+        if (!noLink && safeURL.test(m[4])) {
+          inline(m[3], link(m[4], parent), true);
+        } else {
+          text(m[0]);
+        }
+      } else if (m[5]) {
+        var strong = el('strong'); inline(m[6], strong, noLink); parent.appendChild(strong);
+      } else if (m[7]) {
+        var em = el('em'); inline(m[8], em, noLink); parent.appendChild(em);
+      } else {
+        var url = m[9].replace(/[.,;:!?]+$/, '');
+        pos -= m[9].length - url.length;
+        re.lastIndex = pos;
+        if (noLink) { text(url); } else { link(url, parent).textContent = url; }
+      }
+    }
+    text(src.slice(pos));
+  }
+
+  var reFence = /^ {0,3}(`{3,}|~{3,})\s*([^\s`]*)/, reHead = /^ {0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/;
+  var reRule = /^ {0,3}([-*_])(?:\s*\1){2,}\s*$/, reQuote = /^ {0,3}>/, reItem = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
+  var reSep = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+
+  function cells(line) {
+    return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(function (c) { return c.trim(); });
+  }
+  function startsBlock(line) {
+    return reFence.test(line) || reHead.test(line) || reRule.test(line) || reQuote.test(line) || reItem.test(line);
+  }
+  function closesFence(line, mark) {
+    var t = line.trim();
+    return t.length >= mark.length && t.split('').every(function (c) { return c === mark.charAt(0); });
+  }
+
+  function list(lines, parent) {
+    var top = lines[0].match(reItem)[1].length, cur = null, ul = null, made = [];
+    lines.forEach(function (ln) {
+      var m = ln.match(reItem);
+      if (m && m[1].length <= top + 1) {
+        var ordered = /\d/.test(m[2].charAt(0));
+        if (!ul || ul._ordered !== ordered) {
+          ul = el(ordered ? 'ol' : 'ul'); ul._ordered = ordered; parent.appendChild(ul);
+        }
+        cur = el('li'); cur._text = m[3]; cur._sub = null; ul.appendChild(cur); made.push(cur);
+      } else if (m && cur) {
+        if (!cur._sub) { cur._sub = { ordered: /\d/.test(m[2].charAt(0)), items: [] }; }
+        cur._sub.items.push(m[3]);
+      } else if (cur) {
+        if (cur._sub) { cur._sub.items[cur._sub.items.length - 1] += ' ' + ln.trim(); } else { cur._text += '\n' + ln.trim(); }
+      }
+    });
+    made.forEach(function (li) {
+      inline(li._text, li);
+      if (li._sub) {
+        var n = el(li._sub.ordered ? 'ol' : 'ul');
+        li._sub.items.forEach(function (t) { var s = el('li'); inline(t, s); n.appendChild(s); });
+        li.appendChild(n);
+      }
+    });
+  }
+
+  function md(src) {
+    var out = document.createDocumentFragment();
+    var lines = String(src).replace(/\r\n?/g, '\n').split('\n'), i = 0, m;
+    while (i < lines.length) {
+      var ln = lines[i];
+      if (!ln.trim()) { i++; continue; }
+      if ((m = ln.match(reFence))) {
+        var mark = m[1], body = [];
+        i++;
+        while (i < lines.length && !closesFence(lines[i], mark)) { body.push(lines[i]); i++; }
+        i++;
+        var box = el('div', 'mdcode');
+        if (m[2]) { box.appendChild(el('span', 'lang', m[2])); }
+        var pre = el('pre'); pre.appendChild(el('code', '', body.join('\n')));
+        box.appendChild(pre); out.appendChild(box);
+      } else if ((m = ln.match(reHead))) {
+        var h = el('div', 'mdh mdh' + m[1].length); h.setAttribute('role', 'heading'); h.setAttribute('aria-level', m[1].length);
+        inline(m[2], h); out.appendChild(h); i++;
+      } else if (reRule.test(ln)) {
+        out.appendChild(el('hr')); i++;
+      } else if (reQuote.test(ln)) {
+        var q = [];
+        while (i < lines.length && reQuote.test(lines[i])) { q.push(lines[i].replace(/^ {0,3}> ?/, '')); i++; }
+        var bq = el('blockquote'); bq.appendChild(md(q.join('\n'))); out.appendChild(bq);
+      } else if (reItem.test(ln)) {
+        var items = [];
+        while (i < lines.length) {
+          if (!lines[i].trim()) {
+            var j = i + 1;
+            while (j < lines.length && !lines[j].trim()) { j++; }
+            if (j < lines.length && reItem.test(lines[j])) { i = j; continue; }
+            break;
+          }
+          if (!reItem.test(lines[i]) && !/^\s+\S/.test(lines[i])) { break; }
+          items.push(lines[i]); i++;
+        }
+        list(items, out);
+      } else if (ln.indexOf('|') >= 0 && i + 1 < lines.length && lines[i + 1].indexOf('|') >= 0 && reSep.test(lines[i + 1])) {
+        var wrap = el('div', 'mdtw'), t = el('table'), thead = el('thead'), tr = el('tr'), tb = el('tbody');
+        cells(ln).forEach(function (c) { inline(c, tr.appendChild(el('th'))); });
+        thead.appendChild(tr); t.appendChild(thead);
+        i += 2;
+        while (i < lines.length && lines[i].trim() && lines[i].indexOf('|') >= 0) {
+          var r = el('tr');
+          cells(lines[i]).forEach(function (c) { inline(c, r.appendChild(el('td'))); });
+          tb.appendChild(r); i++;
+        }
+        t.appendChild(tb); wrap.appendChild(t); out.appendChild(wrap);
+      } else {
+        var para = [];
+        while (i < lines.length && lines[i].trim() && (!para.length || !startsBlock(lines[i]))) { para.push(lines[i]); i++; }
+        var p = el('p'); inline(para.join('\n'), p); out.appendChild(p);
+      }
+    }
+    return out;
+  }
+
+  function looksMarkdown(t) {
+    return /^ {0,3}(```|~~~)/m.test(t) || /\*\*[^*\n]+\*\*/.test(t) || /\]\(https?:/.test(t) || (t.match(/^#{1,6}\s/gm) || []).length > 1;
+  }
+
+  function paint(li, text) {
+    var old = li.querySelector('.t');
+    if (!old) { return; }
+    var node;
+    if (li._mode === '1' || (li._mode === 'auto' && looksMarkdown(text))) {
+      node = el('div', 'md t');
+      node.appendChild(md(text));
+    } else {
+      node = el('pre', 't', text);
+    }
+    old.replaceWith(node);
+  }
+
+  function enhance(li) {
+    var t = li.querySelector('pre.t');
+    if (!t) { return; }
+    li._mode = t.dataset.md; li._short = t.textContent;
+    if (li._mode) { paint(li, li._short); }
+  }
+
   var card = document.getElementById('logcard');
   if (!card) { return; }
   var running = card.dataset.running === 'true', every = parseInt(card.dataset.poll, 10) || 4000;
   var agent = document.getElementById('pane-agent'), engine = document.getElementById('pane-engine');
-  function bottom(el) { return el.scrollHeight - el.scrollTop - el.clientHeight < 24; }
+  function bottom(box) { return box.scrollHeight - box.scrollTop - box.clientHeight < 24; }
 
+  var onEngineOpen = function () {};
   card.querySelectorAll('[data-tab]').forEach(function (b) {
     b.addEventListener('click', function () {
       card.querySelectorAll('[data-tab]').forEach(function (o) { o.setAttribute('aria-selected', o === b); });
       if (agent) { agent.hidden = b.dataset.tab !== 'agent'; }
       if (engine) { engine.hidden = b.dataset.tab !== 'engine'; }
+      if (b.dataset.tab === 'engine') { onEngineOpen(); }
     });
   });
 
+  if (agent) {
+    agent.addEventListener('click', function (e) {
+      var b = e.target.closest('button.xp');
+      if (!b) { return; }
+      var li = b.closest('li.ev'), note = li.querySelector('.cut .n');
+      if (li._note === undefined) { li._note = note.textContent; }
+      if (li._shown) {
+        li._shown = false; paint(li, li._short);
+        note.textContent = li._note; b.textContent = 'Show full';
+        return;
+      }
+      function expand() {
+        li._shown = true; paint(li, li._full);
+        note.textContent = li._extra; b.textContent = 'Show less';
+      }
+      if (li._full !== undefined) { expand(); return; }
+      b.disabled = true;
+      fetch(agent.dataset.url + '/event?ref=' + encodeURIComponent(b.dataset.ref)).then(function (r) {
+        if (!r.ok) { throw new Error('status ' + r.status); }
+        return r.json();
+      }).then(function (d) {
+        li._full = d.text;
+        li._extra = d.more ? 'Cut at ' + Math.round(d.limit / 1024) + ' KiB, ' + d.more.toLocaleString('en-US') + ' more characters not shown.' : '';
+        expand();
+      }).catch(function () { note.textContent = 'Could not load the full text.'; }).then(function () { b.disabled = false; });
+    });
+    agent.querySelectorAll('li.ev').forEach(enhance);
+  }
+
+  function syncAgent(html) {
+    var tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    var head = agent.querySelector('.ahead'), nh = tpl.content.querySelector('.ahead');
+    if (head && nh) { head.replaceChildren.apply(head, Array.prototype.slice.call(nh.childNodes)); }
+    var ol = agent.querySelector('ol.alog'), no = tpl.content.querySelector('ol.alog');
+    if (!no) { if (ol) { ol.remove(); } return; }
+    if (!ol) {
+      agent.appendChild(no);
+      no.querySelectorAll('li.ev').forEach(enhance);
+      return;
+    }
+    var fresh = Array.prototype.slice.call(no.children), keep = {}, have = {};
+    fresh.forEach(function (n) { keep[n.dataset.ref] = true; });
+    Array.prototype.slice.call(ol.children).forEach(function (li) {
+      if (keep[li.dataset.ref]) { have[li.dataset.ref] = li; } else { li.remove(); }
+    });
+    var prev = null;
+    fresh.forEach(function (n) {
+      var ex = have[n.dataset.ref];
+      if (ex && ex.dataset.sig === n.dataset.sig) { prev = ex; return; }
+      if (ex) { ex.replaceWith(n); } else if (prev) { prev.after(n); } else { ol.prepend(n); }
+      enhance(n);
+      prev = n;
+    });
+  }
+
+  var agentTimer;
   function refreshAgent() {
-    fetch(agent.dataset.url).then(function (r) {
+    return fetch(agent.dataset.url).then(function (r) {
       if (!r.ok) { location.reload(); return null; }
       return r.json();
     }).then(function (d) {
       if (!d) { return; }
-      var stick = bottom(agent), top = agent.scrollTop, open = {};
-      agent.querySelectorAll('details[open]').forEach(function (x) { open[x.dataset.k] = true; });
-      agent.innerHTML = d.html;
-      agent.querySelectorAll('details').forEach(function (x) { if (open[x.dataset.k]) { x.open = true; } });
+      var stick = bottom(agent), top = agent.scrollTop;
+      syncAgent(d.html);
       agent.scrollTop = stick ? agent.scrollHeight : top;
       if (!d.running) { clearInterval(agentTimer); }
     }).catch(function () {});
   }
-  var agentTimer;
   if (agent) {
     agent.scrollTop = agent.scrollHeight;
     if (running) { agentTimer = setInterval(refreshAgent, every); }
@@ -151,7 +407,7 @@ code.resume { overflow-wrap: anywhere; }
 
   var load = document.getElementById('logload');
   if (!engine || !load) { return; }
-  var box = document.getElementById('logbox'), q = document.getElementById('logq'), count = document.getElementById('logcount'), lines = [], loaded = false;
+  var box = document.getElementById('logbox'), q = document.getElementById('logq'), count = document.getElementById('logcount'), lines = [], loaded = false, loading = false;
   function show() {
     var term = q.value.trim().toLowerCase();
     var shown = term ? lines.filter(function (l) { return l.toLowerCase().indexOf(term) >= 0; }) : lines;
@@ -164,17 +420,20 @@ code.resume { overflow-wrap: anywhere; }
     count.textContent = shown.length + ' of ' + lines.length + ' lines';
   }
   function fetchEngine() {
-    load.disabled = true;
+    if (loading) { return; }
+    loading = true; load.disabled = true;
+    if (!loaded) { box.textContent = 'Loading the log.'; }
     fetch(engine.dataset.url).then(function (r) { return r.json(); }).then(function (d) {
       lines = d.lines || [];
       if (d.message) { box.textContent = d.message; count.textContent = ''; } else { show(); loaded = true; }
-    }).catch(function () { box.textContent = 'Could not read the log.'; }).then(function () { load.disabled = false; });
+    }).catch(function () { box.textContent = 'Could not read the log.'; }).then(function () { loading = false; load.disabled = false; });
   }
+  onEngineOpen = function () { if (!loaded) { fetchEngine(); } };
   load.addEventListener('click', fetchEngine);
   q.addEventListener('input', function () { if (lines.length) { show(); } });
+  if (!engine.hidden) { fetchEngine(); }
   if (running) {
-    fetchEngine();
-    setInterval(function () { if (!engine.hidden) { fetchEngine(); } }, every);
+    setInterval(function () { if (!engine.hidden && loaded) { fetchEngine(); } }, every);
   }
 })();
 </script>{{end}}

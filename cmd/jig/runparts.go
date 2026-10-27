@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kinged007/jigz/internal/loopsrc"
@@ -127,6 +129,44 @@ func prURL(d runlive.Delivery) string {
 	return "https://github.com/" + d.Owner + "/" + d.Repo + "/pull/" + strconv.Itoa(d.PR)
 }
 
+// runFiles is where the files of one run are and what the engine recorded
+// about it.
+type runFiles struct {
+	paths      runPaths
+	meta       runlive.RunMeta
+	live       runlive.LiveSession
+	haveLive   bool
+	lines      []string
+	workspace  string
+	kind       string
+	sessionID  string
+	transcript string
+}
+
+// locate finds the files of a run.
+func (a *app) locate(in runInput, paths runPaths) runFiles {
+	f := runFiles{paths: paths}
+	if paths.db != "" {
+		if in.Running {
+			f.live, f.haveLive, _ = runlive.ReadLive(paths.db, in.IssueID)
+		} else {
+			f.meta, _ = runlive.ReadRun(paths.db, in.RunID)
+		}
+	}
+	from, to := in.Started.Add(-5*time.Second), time.Time{}
+	if !in.Ended.IsZero() {
+		to = in.Ended.Add(5 * time.Second)
+	}
+	f.lines = runlive.IssueLines(a.engineLines(in.Project, in.Workflow), in.IssueID, from, to)
+	f.workspace = runlive.Locate(paths.base, in.Workflow, in.IssueID, f.meta.Workspace)
+	f.kind = runlive.AgentKind(in.Adapter)
+	id := firstNonEmpty(in.SessionID, f.meta.SessionID, f.live.SessionID, runlive.LogSession(f.lines))
+	var found string
+	f.transcript, found = runlive.FindTranscript(paths.home, f.kind, f.workspace, id, in.Started.Add(-time.Minute))
+	f.sessionID = firstNonEmpty(id, found)
+	return f
+}
+
 // runParts reads the files of a run. A section the dashboard hides is not
 // read.
 func (a *app) runParts(in runInput) runParts {
@@ -138,28 +178,9 @@ func (a *app) runParts(in runInput) runParts {
 		p.Why = paths.why
 		return p
 	}
-	var meta runlive.RunMeta
-	var live runlive.LiveSession
-	var haveLive bool
-	if paths.db != "" {
-		if in.Running {
-			live, haveLive, _ = runlive.ReadLive(paths.db, in.IssueID)
-		} else {
-			meta, _ = runlive.ReadRun(paths.db, in.RunID)
-		}
-	}
-	from, to := in.Started.Add(-5*time.Second), time.Time{}
-	if !in.Ended.IsZero() {
-		to = in.Ended.Add(5 * time.Second)
-	}
-	lines := runlive.IssueLines(a.engineLines(in.Project, in.Workflow), in.IssueID, from, to)
-	ws := runlive.Locate(paths.base, in.Workflow, in.IssueID, meta.Workspace)
-	kind := runlive.AgentKind(in.Adapter)
-	id := firstNonEmpty(in.SessionID, meta.SessionID, live.SessionID, runlive.LogSession(lines))
-	transcript, found := runlive.FindTranscript(paths.home, kind, ws, id, in.Started.Add(-time.Minute))
-	id = firstNonEmpty(id, found)
-
-	if haveLive {
+	f := a.locate(in, paths)
+	if f.haveLive {
+		live := f.live
 		p.Tokens = liveTokens{
 			Measured: live.Total > 0, Model: live.Model,
 			Input: commas(live.Input), Output: commas(live.Output), Cache: commas(live.CacheRead), Total: commas(live.Total),
@@ -167,18 +188,18 @@ func (a *app) runParts(in runInput) runParts {
 			CacheWrite: commas(live.CacheWrite), UpdatedAt: live.UpdatedAt, SessionStarted: true,
 		}
 	}
-	d := runlive.ReadDelivery(paths.base, ws)
+	d := runlive.ReadDelivery(paths.base, f.workspace)
 	p.Delivery = deliveryView{Delivery: d, PRURL: prURL(d)}
 
 	if !hide.HidesSection("session") {
-		p.Session = sessionView{ID: id, Adapter: in.Adapter, Workspace: ws, Resume: runlive.ResumeCommand(kind, ws, id)}
-		_, err := os.Stat(ws)
+		p.Session = sessionView{ID: f.sessionID, Adapter: in.Adapter, Workspace: f.workspace, Resume: runlive.ResumeCommand(f.kind, f.workspace, f.sessionID)}
+		_, err := os.Stat(f.workspace)
 		p.Session.WorkspaceMissing = err != nil
 	}
 	if !hide.HidesSection("agent_log") {
-		p.Agent, p.AgentFrom, p.AgentWhy = a.agentEvents(paths, in, meta, transcript, kind)
+		p.Agent, p.AgentFrom, p.AgentWhy = a.agentEvents(paths, in, f.meta, f.transcript, f.kind)
 	}
-	p.Timeline = timeline(p.Agent, lines, hide)
+	p.Timeline = timeline(p.Agent, f.lines, hide)
 	return p
 }
 
@@ -263,6 +284,63 @@ func (a *app) runAgentLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"running": in.Running, "html": renderPart("run-agentlog", a.runParts(in))})
+}
+
+// runAgentEvent returns the full text of one agent log event. The event is
+// named by the ref of the event list, so no path comes from the request.
+func (a *app) runAgentEvent(w http.ResponseWriter, r *http.Request) {
+	in, ok := a.runInputFor(r)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	paths := a.runPaths(in.Project, in.Workflow)
+	if paths.base == "" {
+		http.NotFound(w, r)
+		return
+	}
+	f := a.locate(in, paths)
+	ref := r.URL.Query().Get("ref")
+	var text string
+	var more int
+	var err error
+	switch {
+	case strings.HasPrefix(ref, "d") && !in.Running && paths.db != "":
+		seq, perr := strconv.ParseInt(ref[1:], 10, 64)
+		if perr != nil || f.meta.DispatchID == "" {
+			http.NotFound(w, r)
+			return
+		}
+		text, more, err = runlive.ReadRowText(paths.db, f.meta.DispatchID, seq)
+	case strings.HasPrefix(ref, "t") && f.transcript != "" && f.kind != "":
+		off, sub, perr := parseTranscriptRef(ref)
+		if perr != nil {
+			http.NotFound(w, r)
+			return
+		}
+		text, more, err = runlive.EventText(f.transcript, f.kind, off, sub)
+	default:
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"text": text, "more": more, "limit": runlive.MaxFullText})
+}
+
+func parseTranscriptRef(ref string) (int64, int, error) {
+	o, s, ok := strings.Cut(ref[1:], ".")
+	if !ok {
+		return 0, 0, errors.New("bad ref")
+	}
+	off, err := strconv.ParseInt(o, 10, 64)
+	if err != nil {
+		return 0, 0, err
+	}
+	sub, err := strconv.Atoi(s)
+	return off, sub, err
 }
 
 // runInputFor finds the run a request names, stored or in flight.

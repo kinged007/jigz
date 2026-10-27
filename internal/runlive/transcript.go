@@ -1,6 +1,7 @@
 package runlive
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -159,19 +160,76 @@ func TailEvents(path, kind string, limit int) ([]Event, error) {
 			buf = nil
 		}
 	}
-	parse := map[string]func(line []byte, names map[string]string) []Event{Pi: parsePi, Claude: parseClaude}[kind]
+	parse := parser(kind)
 	if parse == nil {
 		return nil, fmt.Errorf("no transcript format for %q", kind)
 	}
 	var out []Event
 	names := map[string]string{}
+	pos := off
 	for _, line := range bytes.Split(buf, []byte("\n")) {
+		at := pos
+		pos += int64(len(line)) + 1
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
-		out = append(out, parse(line, names)...)
+		for i, e := range parse(line, names, MaxText) {
+			e.Ref = TranscriptRef(at, i)
+			out = append(out, e)
+		}
 	}
 	return out[max(len(out)-max(limit, 1), 0):], nil
+}
+
+func parser(kind string) func(line []byte, names map[string]string, max int) []Event {
+	switch kind {
+	case Pi:
+		return parsePi
+	case Claude:
+		return parseClaude
+	}
+	return nil
+}
+
+// maxLineBytes is the longest transcript line EventText reads.
+const maxLineBytes = 8 << 20
+
+// ErrNoEvent says that a reference does not name an event of the
+// transcript.
+var ErrNoEvent = errors.New("no such event")
+
+// EventText returns the text of the sub-th event of the transcript line
+// that starts at off, cut at MaxFullText bytes, and the number of
+// characters cut. off must be the start of a line.
+func EventText(path, kind string, off int64, sub int) (string, int, error) {
+	parse := parser(kind)
+	f, err := os.Open(path)
+	if err != nil {
+		return "", 0, err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return "", 0, err
+	}
+	if !fi.Mode().IsRegular() || parse == nil || off < 0 || sub < 0 || off >= fi.Size() {
+		return "", 0, ErrNoEvent
+	}
+	if off > 0 {
+		var prev [1]byte
+		if _, err := f.ReadAt(prev[:], off-1); err != nil || prev[0] != '\n' {
+			return "", 0, ErrNoEvent
+		}
+	}
+	line, err := bufio.NewReaderSize(io.NewSectionReader(f, off, maxLineBytes+1), 64<<10).ReadBytes('\n')
+	if err != nil && err != io.EOF || len(line) > maxLineBytes {
+		return "", 0, ErrNoEvent
+	}
+	evs := parse(bytes.TrimRight(line, "\r\n"), map[string]string{}, MaxFullText)
+	if sub >= len(evs) {
+		return "", 0, ErrNoEvent
+	}
+	return evs[sub].Text, evs[sub].More, nil
 }
 
 type block struct {
@@ -250,7 +308,10 @@ type piLine struct {
 	} `json:"message"`
 }
 
-func parsePi(line []byte, _ map[string]string) []Event {
+func parsePi(line []byte, _ map[string]string, max int) []Event {
+	newEvent := func(at, kind, title, text, tool string, failed bool) Event {
+		return newEventMax(max, at, kind, title, text, tool, failed)
+	}
 	var l piLine
 	if json.Unmarshal(line, &l) != nil {
 		return nil
@@ -301,7 +362,10 @@ type claudeLine struct {
 	} `json:"message"`
 }
 
-func parseClaude(line []byte, names map[string]string) []Event {
+func parseClaude(line []byte, names map[string]string, max int) []Event {
+	newEvent := func(at, kind, title, text, tool string, failed bool) Event {
+		return newEventMax(max, at, kind, title, text, tool, failed)
+	}
 	var l claudeLine
 	if json.Unmarshal(line, &l) != nil || (l.Type != "user" && l.Type != "assistant") {
 		return nil

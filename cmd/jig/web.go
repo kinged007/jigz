@@ -16,6 +16,7 @@ import (
 
 	machine "github.com/kinged007/jigz/internal/host"
 	"github.com/kinged007/jigz/internal/rollup"
+	"github.com/kinged007/jigz/internal/runlive"
 	"github.com/kinged007/jigz/internal/supervise"
 )
 
@@ -41,6 +42,20 @@ var funcs = template.FuncMap{
 	"utc":      utc,
 	"evtime":   eventTime,
 	"trunc":    trunc,
+	"mdmode":   mdMode,
+}
+
+// mdMode says how the page script renders the text of an event: "1" as
+// markdown, "auto" as markdown when it looks like markdown, else as plain
+// text.
+func mdMode(kind string) string {
+	switch kind {
+	case runlive.KindMessage, runlive.KindNotification, runlive.KindThinking, runlive.KindTurn:
+		return "1"
+	case runlive.KindToolResult:
+		return "auto"
+	}
+	return ""
 }
 
 // size renders a directory size in whichever unit keeps it readable.

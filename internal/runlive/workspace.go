@@ -113,7 +113,7 @@ func ReadDelivery(base, workspace string) Delivery {
 
 func oneLine(s string) string {
 	s, _, _ = strings.Cut(strings.TrimSpace(s), "\n")
-	s, _ = clip(s)
+	s, _ = clip(s, MaxText)
 	return s
 }
 

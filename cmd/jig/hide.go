@@ -40,6 +40,7 @@ func init() {
 		{"GET /runs/{owner}/{name}/{workflow}/log", "runs", "log_tail", (*app).runLog},
 		{"GET /runs/{owner}/{name}/{workflow}/{id}/live", "runs", "", (*app).runLiveFragment},
 		{"GET /runs/{owner}/{name}/{workflow}/{id}/agent-log", "runs", "agent_log", (*app).runAgentLog},
+		{"GET /runs/{owner}/{name}/{workflow}/{id}/agent-log/event", "runs", "agent_log", (*app).runAgentEvent},
 		{"GET /logs/{owner}/{name}/{workflow}", "logs", "", (*app).loopLog},
 		{"GET /workflows", "workflows", "", (*app).workflows},
 		{"GET /projects", "projects", "", (*app).projectsPage},
