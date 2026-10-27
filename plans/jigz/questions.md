@@ -11,7 +11,11 @@ and a lane other than the builder reviews each package.
 
 Agents ask questions in `agent-question` blocks and read answers from
 `agent-answer` blocks (`plans/system/hub-protocol.md` section 4): HTML
-comment markers inside an issue or PR comment (sample: kinged007/jigz#14).
+comment markers inside an issue or PR comment or in the issue or PR
+description (sample: kinged007/jigz#14). Agents post one comment per
+escalation; a question in the description needs no second comment.
+Answers are read from comments only: an `agent-answer` block in a
+description is ignored.
 
 `jig` monitors and orchestrates agents; people work on GitHub. A person
 answers a question by posting an `agent-answer` comment on GitHub, or
@@ -20,8 +24,8 @@ GitHub token. The dashboard has no authentication, so it writes nothing
 to GitHub: its Questions page is read-only (2.6). The question scanner
 (2.1) resumes a parked item once its questions are answered (2.4).
 
-Phase 3 reads issue and PR conversation comments only (section 5,
-"Later"). Engine behaviour follows the pinned engines: `kinged007/sortie`
+Phase 3 reads the description and the conversation comments of issues and
+PRs (section 5, "Later" lists what is not read). Engine behaviour follows the pinned engines: `kinged007/sortie`
 v1.28.1 and, in the upstream acceptance test, `sortie-ai/sortie` v1.29.0
 (2.8).
 
@@ -80,7 +84,10 @@ One pass per project:
    reads its labels and assignees.
 3. For each candidate: `GET /repos/<slug>/issues/<n>/comments?per_page=100`
    with the stored ETag. PR conversation comments use the same route.
-   Review comments and review bodies are not read.
+   Review comments and review bodies are not read. The description comes
+   from the issue object of step 1 or 2 (search result, or the issue route
+   with its stored ETag) and is cached in `question_items`; a changed
+   description makes the item be read in full again.
 4. For each candidate that meets the first three conditions of rule 2:
    the events check and the resume of 2.4.
 
@@ -103,7 +110,14 @@ and the hub). Every write is idempotent (2.4), so they do not conflict.
 
 A pure package, `internal/questions` (`parse.go`), takes a comment list
 (id, author, author association, body, created, URL) and returns
-questions, answers and problems. Rules:
+questions, answers and problems. The scanner passes the item's description
+as the first entry, flagged as a description, with the item's author, the
+author's `author_association` and the item's `created_at` as its time. It
+is subject to every rule below, with one exception: its `agent-answer`
+blocks are skipped without a problem. Because the time is `created_at`,
+an edit of the description does not move the question forward in time;
+an answer posted before the edit still answers a question the edit
+added. Rules:
 
 - Blocks run from `<!-- agent-question ... -->` to
   `<!-- /agent-question -->`, and likewise for `agent-answer`. Attributes
@@ -129,7 +143,8 @@ The parser returns every answer with its author and author association.
 The scanner keeps only answers from authorized authors: the token
 account, the repository owner, authors with association `OWNER`, `MEMBER`
 or `COLLABORATOR`, and the item's assignees. The author is the GitHub
-account that posted the comment; the `by` attribute is not checked. Other
+account that posted the comment, or for the description the account that
+opened the item; the `by` attribute is not checked. Other
 answers do not answer a question; the page shows each as "ignored:
 <author>". The filter is in one function (`authorized`) so it can become
 configurable. The prompts apply the same set of authors to the comments
@@ -142,11 +157,14 @@ Tables in `internal/store/store.go`, access code in
 `internal/store/questions.go`:
 
 - `question_items`: project, number, is_pr, title, url, labels,
-  assignees, issue_etag, comments_etag, scanned_at, problems (JSON). One
-  row per scanned item. The column `first_labels` is not read or written;
+  assignees, issue_etag, comments_etag, scanned_at, problems (JSON), and
+  the description with its author, author association and creation time
+  (body, author, author_association, created_at). One row per scanned
+  item. The column `first_labels` is not read or written;
   it stays because SQLite drops a column only by rebuilding the table.
 - `questions`: project, number, qid, audience, blocking, resume, question,
-  suggested, asked_comment_url, asked_at, asked_count, answer, answered_by,
+  suggested, asked_comment_url, asked_comment_id (0 when the question is
+  in the description; then asked_comment_url is the item URL), asked_at, asked_count, answer, answered_by,
   answer_comment_url, answered_at, ignored_answers (JSON list of author
   and comment URL). Primary key (project, number, qid).
 

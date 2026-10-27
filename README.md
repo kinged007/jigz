@@ -744,8 +744,8 @@ slug, that sets `enrich: true`; `questions` is read per project.
 
 ### Questions
 
-An agent asks in an issue or PR comment, in an HTML comment block around
-the question text:
+An agent asks in an issue or PR comment, or in the issue or PR
+description, in an HTML comment block around the question text:
 
 ```
 <!-- agent-question id="q-1" audience="project" blocking="true" resume="agent:plan" -->
@@ -761,6 +761,12 @@ answered, any `agent:` label except `agent:done`, and is required on a
 blocking question. A blocking question parks the item with `needs-human`;
 a non-blocking question does not stop the work. Markers inside fenced
 code blocks are ignored.
+
+A question in the description follows the same rules as one in a comment.
+It counts as asked at the time the item was created, and its author is the
+account that opened the item, who must be authorized (see the resume
+rule). Editing the description does not change that time. Answers are read
+from comments only; an `agent-answer` block in a description is ignored.
 
 The Questions page lists the questions of every project with
 `github.questions` on. The dashboard is read-only: the page has links to
@@ -815,7 +821,7 @@ hand then.
 Authorized authors are the token account, the repository owner, authors
 whose association with the repository is `OWNER`, `MEMBER` or
 `COLLABORATOR`, and the item's assignees. An answer from anyone else does
-not count; the page shows it as "ignored: <author>". Prompts tell agents
+not count, and a question from anyone else is not listed; the page shows it as "ignored: <author>". Prompts tell agents
 to consider only comments from the same authors.
 
 The scanner reads up to 100 parked items per project per pass, which is

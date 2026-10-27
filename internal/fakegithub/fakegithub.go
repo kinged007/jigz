@@ -36,18 +36,22 @@ type Comment struct {
 // Item is an issue or, when PR is set, a pull request. Both share one
 // number sequence per repository, as on GitHub.
 type Item struct {
-	Repo      string
-	Number    int
-	Title     string
-	Body      string
-	State     string
-	PR        bool
-	Labels    []string
-	Assignees []string
-	Milestone string
-	Comments  []Comment
-	Created   time.Time
-	Updated   time.Time
+	Repo   string
+	Number int
+	Title  string
+	Body   string
+	// Author and Association are the login and author_association of the
+	// item's author; empty Association means NONE.
+	Author      string
+	Association string
+	State       string
+	PR          bool
+	Labels      []string
+	Assignees   []string
+	Milestone   string
+	Comments    []Comment
+	Created     time.Time
+	Updated     time.Time
 
 	version        int
 	commentVersion int
@@ -255,6 +259,18 @@ func (s *Server) SetAssignees(slug string, n int, assignees ...string) {
 		panic(fmt.Sprintf("fakegithub: no item %s#%d", slug, n))
 	}
 	it.Assignees = slices.Clone(assignees)
+	it.touch()
+}
+
+// SetBody replaces the description of a seeded issue or pull request.
+func (s *Server) SetBody(slug string, n int, body string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	it := s.item(slug, n)
+	if it == nil {
+		panic(fmt.Sprintf("fakegithub: no item %s#%d", slug, n))
+	}
+	it.Body = body
 	it.touch()
 }
 
@@ -472,6 +488,14 @@ func itemJSON(it *Item) map[string]any {
 		"assignees":  assignees,
 		"created_at": it.Created.Format(time.RFC3339),
 		"updated_at": it.Updated.Format(time.RFC3339),
+	}
+	if it.Author != "" {
+		assoc := it.Association
+		if assoc == "" {
+			assoc = "NONE"
+		}
+		m["user"] = map[string]string{"login": it.Author}
+		m["author_association"] = assoc
 	}
 	if it.PR {
 		m["pull_request"] = map[string]any{}

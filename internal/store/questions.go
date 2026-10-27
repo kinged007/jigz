@@ -18,6 +18,12 @@ type QuestionItem struct {
 	CommentsETag string
 	ScannedAt    string
 	Problems     []string
+	// Body is the item's description, with its author, the author's
+	// association and the creation time (RFC 3339).
+	Body              string
+	Author            string
+	AuthorAssociation string
+	CreatedAt         string
 }
 
 // IgnoredAnswer is one answer kept out of a question.
@@ -29,15 +35,18 @@ type IgnoredAnswer struct {
 // Question is one question found on an item, the questions row. Project and
 // Number come from the item the question was found on.
 type Question struct {
-	Project          string
-	Number           int
-	QID              string
-	Audience         string
-	Blocking         bool
-	Resume           string
-	Question         string
-	Suggested        string
-	AskedCommentURL  string
+	Project         string
+	Number          int
+	QID             string
+	Audience        string
+	Blocking        bool
+	Resume          string
+	Question        string
+	Suggested       string
+	AskedCommentURL string
+	// AskedCommentID is the ID of the comment with the question, 0 when it
+	// is in the item's description.
+	AskedCommentID   int64
 	AskedAt          string
 	AskedCount       int
 	Answer           string
@@ -71,14 +80,15 @@ func boolInt(b bool) int {
 	return 0
 }
 
-const questionItemColumns = `project, number, is_pr, title, url, labels, assignees, issue_etag, comments_etag, scanned_at, problems`
+const questionItemColumns = `project, number, is_pr, title, url, labels, assignees, issue_etag, comments_etag, scanned_at, problems, body, author, author_association, created_at`
 
 func scanQuestionItem(row interface{ Scan(...any) error }) (QuestionItem, error) {
 	var it QuestionItem
 	var isPR int
 	var labels, assignees, problems string
 	err := row.Scan(&it.Project, &it.Number, &isPR, &it.Title, &it.URL,
-		&labels, &assignees, &it.IssueETag, &it.CommentsETag, &it.ScannedAt, &problems)
+		&labels, &assignees, &it.IssueETag, &it.CommentsETag, &it.ScannedAt, &problems,
+		&it.Body, &it.Author, &it.AuthorAssociation, &it.CreatedAt)
 	if err != nil {
 		return QuestionItem{}, err
 	}
@@ -103,15 +113,18 @@ func (s *Store) ReplaceQuestions(item QuestionItem, qs []Question) error {
 	}
 	defer tx.Rollback()
 	if _, err := tx.Exec(`INSERT INTO question_items (`+questionItemColumns+`)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT (project, number) DO UPDATE SET
 		is_pr=excluded.is_pr, title=excluded.title, url=excluded.url, labels=excluded.labels,
 		assignees=excluded.assignees,
 		issue_etag=excluded.issue_etag, comments_etag=excluded.comments_etag,
-		scanned_at=excluded.scanned_at, problems=excluded.problems`,
+		scanned_at=excluded.scanned_at, problems=excluded.problems,
+		body=excluded.body, author=excluded.author, author_association=excluded.author_association,
+		created_at=excluded.created_at`,
 		item.Project, item.Number, boolInt(item.IsPR), item.Title, item.URL,
 		jsonList(item.Labels), jsonList(item.Assignees),
-		item.IssueETag, item.CommentsETag, item.ScannedAt, jsonList(item.Problems)); err != nil {
+		item.IssueETag, item.CommentsETag, item.ScannedAt, jsonList(item.Problems),
+		item.Body, item.Author, item.AuthorAssociation, item.CreatedAt); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`DELETE FROM questions WHERE project = ? AND number = ?`, item.Project, item.Number); err != nil {
@@ -119,10 +132,10 @@ func (s *Store) ReplaceQuestions(item QuestionItem, qs []Question) error {
 	}
 	for _, q := range lastPerQID(qs) {
 		if _, err := tx.Exec(`INSERT INTO questions (project, number, qid, audience, blocking, resume, question,
-			suggested, asked_comment_url, asked_at, asked_count, answer, answered_by, answer_comment_url, answered_at, ignored_answers)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			suggested, asked_comment_url, asked_comment_id, asked_at, asked_count, answer, answered_by, answer_comment_url, answered_at, ignored_answers)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			item.Project, item.Number, q.QID, q.Audience, boolInt(q.Blocking), q.Resume, q.Question,
-			q.Suggested, q.AskedCommentURL, q.AskedAt, q.AskedCount, q.Answer, q.AnsweredBy,
+			q.Suggested, q.AskedCommentURL, q.AskedCommentID, q.AskedAt, q.AskedCount, q.Answer, q.AnsweredBy,
 			q.AnswerCommentURL, q.AnsweredAt, jsonList(q.IgnoredAnswers)); err != nil {
 			return err
 		}
@@ -202,7 +215,7 @@ func (f QuestionFilter) where() (string, []any) {
 func (s *Store) Questions(f QuestionFilter) ([]Question, error) {
 	w, args := f.where()
 	rows, err := s.db.Query(`SELECT project, number, qid, audience, blocking, resume, question, suggested,
-		asked_comment_url, asked_at, asked_count, answer, answered_by, answer_comment_url, answered_at, ignored_answers
+		asked_comment_url, asked_comment_id, asked_at, asked_count, answer, answered_by, answer_comment_url, answered_at, ignored_answers
 		FROM questions`+w+` ORDER BY project, number, qid`, args...)
 	if err != nil {
 		return nil, err
@@ -214,7 +227,7 @@ func (s *Store) Questions(f QuestionFilter) ([]Question, error) {
 		var blocking int
 		var ignored string
 		if err := rows.Scan(&q.Project, &q.Number, &q.QID, &q.Audience, &blocking, &q.Resume, &q.Question,
-			&q.Suggested, &q.AskedCommentURL, &q.AskedAt, &q.AskedCount, &q.Answer, &q.AnsweredBy,
+			&q.Suggested, &q.AskedCommentURL, &q.AskedCommentID, &q.AskedAt, &q.AskedCount, &q.Answer, &q.AnsweredBy,
 			&q.AnswerCommentURL, &q.AnsweredAt, &ignored); err != nil {
 			return nil, err
 		}

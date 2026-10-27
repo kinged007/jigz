@@ -13,9 +13,12 @@ import (
 	"time"
 )
 
-// Comment is one issue or pull request conversation comment.
+// Comment is one issue or pull request conversation comment, or the
+// item's description when IsBody is set. A description is read for question
+// blocks only; its answer blocks are ignored.
 type Comment struct {
 	ID                int64
+	IsBody            bool
 	Author            string
 	AuthorAssociation string
 	URL               string
@@ -33,6 +36,9 @@ type Question struct {
 	Text       string
 	Suggested  string
 	CommentURL string
+	// CommentID is the ID of the comment with the latest block, 0 for the
+	// item's description.
+	CommentID  int64
 	Asked      time.Time
 	AskedCount int
 	// Answers holds the authorized answers posted after the latest
@@ -140,6 +146,9 @@ func Parse(comments []Comment, authorized func(Comment) bool) Result {
 		ok := authorized(c)
 		for _, b := range bs {
 			seq++
+			if b.kind == "answer" && c.IsBody {
+				continue
+			}
 			if b.err != "" {
 				res.Problems = append(res.Problems, b.problem(c, ok))
 				continue
@@ -293,7 +302,7 @@ func parseAttrs(kind, s string) (map[string]string, string) {
 }
 
 func questionOf(b block, c Comment) (Question, string) {
-	q := Question{ID: b.attrs["id"], Audience: b.attrs["audience"], Resume: b.attrs["resume"], CommentURL: c.URL, Asked: c.Created}
+	q := Question{ID: b.attrs["id"], Audience: b.attrs["audience"], Resume: b.attrs["resume"], CommentURL: c.URL, CommentID: c.ID, Asked: c.Created}
 	if !idRe.MatchString(q.ID) {
 		return q, fmt.Sprintf("bad id %q", q.ID)
 	}
