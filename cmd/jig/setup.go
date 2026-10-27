@@ -64,6 +64,9 @@ func runSetup(dir, repo string, asJSON bool) {
 		fmt.Println("warning: engine not installed:", err)
 	}
 	repo = configRepo(abs, repo)
+	if err := os.MkdirAll(filepath.Join(abs, ".jigz", "data"), 0o755); err != nil {
+		fatal(err)
+	}
 	ensureGitignore(abs)
 	// Labels come from the config file so custom loops can add their own:
 	// list entries under `labels:`, re-run setup, and they are created.
@@ -263,6 +266,10 @@ func runSetupJSON(dir, repo string) {
 	}
 	repo = configRepo(abs, repo)
 	// Gitignore.
+	if err := os.MkdirAll(filepath.Join(abs, ".jigz", "data"), 0o755); err != nil {
+		printSetupJSONAndFatal(res, err)
+		return
+	}
 	ensureGitignoreJSON(abs, res)
 	// Config.
 	cfg, err := config.Load(abs)

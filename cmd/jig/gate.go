@@ -9,18 +9,29 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kinged007/jigz/internal/config"
 	"github.com/kinged007/jigz/internal/engine"
 	"github.com/kinged007/jigz/internal/machine"
 )
 
-// poolReadEvery is how often pool.json is read again. The agent-exec
+// stateReadEvery is how often state.json is read again. The agent-exec
 // processes of the loops write it, and a limit hit only needs to reach
 // the gate within a retry interval.
-const poolReadEvery = 10 * time.Second
+const stateReadEvery = 10 * time.Second
 
 const (
 	gateHours = "hours"
 	gatePool  = "pool"
+)
+
+// Offline reasons of the work-entry gate. The machine gate keeps its own
+// texts through gateView.hold.
+const (
+	reasonOperatingHours = "outside operating hours"
+	reasonExhausted      = "every agent is exhausted"
+	reasonUnresolved     = "every agent has unresolved environment references"
+	reasonUnregistered   = "no agent runtime is registered on the engine"
+	reasonNoCandidate    = "no candidate agent is available"
 )
 
 type gateAction int
@@ -47,6 +58,23 @@ type gateView struct {
 	Reason string
 }
 
+// loopView is one loop's availability at one moment: the work entry's
+// operating hours and candidate agents, intersected with the machine
+// gate.
+type loopView struct {
+	// Open is false while the loop must not run.
+	Open bool
+	// Agent is the first available candidate, empty while the gate is
+	// closed or no work entry binds the loop.
+	Agent string
+	// Reason is why the loop is offline, empty while it may run.
+	Reason string
+	// ETA is the estimated start, zero when there is no estimate.
+	ETA time.Time
+	// End is the end mode the offline reason selects: finish or stop.
+	End string
+}
+
 // gateLoop is what the gate needs to know about one loop.
 type gateLoop struct {
 	name string
@@ -64,6 +92,20 @@ type gateAct struct {
 	action gateAction
 }
 
+// gateInputs are the settings the gate decision reads.
+type gateInputs struct {
+	machine *machine.Config
+	state   machine.State
+	// work holds the resolved work entries by loop name. A loop without
+	// an entry has no candidate agents.
+	work map[string]config.Resolved
+	// agents is the fleet; refs the unresolved from_env references.
+	agents    map[string]config.Agent
+	refs      config.RefStatus
+	operating machine.Hours
+	engine    engine.Gate
+}
+
 func gateEval(cfg *machine.Config, st machine.State, now time.Time) gateView {
 	v := gateView{HoursOpen: cfg.Hours.Open(now), Next: cfg.NextChange(st, now)}
 	if len(cfg.Pool) > 0 {
@@ -79,33 +121,216 @@ func gateEval(cfg *machine.Config, st machine.State, now time.Time) gateView {
 	return v
 }
 
-// gateDecide returns the actions that bring the loops in line with the
-// machine settings. Stopping when idle and recycling are left to the
-// caller to carry out once the loop has no running session.
-func gateDecide(cfg *machine.Config, st machine.State, now time.Time, loops []gateLoop) (gateView, []gateAct) {
-	v := gateEval(cfg, st, now)
+// gateDecide returns the machine gate view, the per-loop decisions and
+// the actions that bring the loops in line with the settings. Stopping
+// when idle and recycling are left to the caller to carry out once the
+// loop has no running session.
+func gateDecide(in gateInputs, now time.Time, loops []gateLoop) (gateView, map[string]loopView, []gateAct) {
+	mv := gateEval(in.machine, in.state, now)
+	views := map[string]loopView{}
 	var acts []gateAct
 	for _, l := range loops {
+		lv := in.loopView(l.name, mv, now)
+		views[l.name] = lv
 		a := gateNone
 		switch {
-		case !v.Open:
+		case !lv.Open:
 			if l.up {
 				a = gateStopIdle
-				if v.Reason == gateHours && cfg.Hours.End == machine.EndStop {
+				if lv.End == machine.EndStop {
 					a = gateStopNow
 				}
 			}
 		case l.paused:
 		case l.held && !l.up:
 			a = gateStart
-		case l.up && l.runtime != v.Runtime:
+		case l.up && l.runtime != mv.Runtime:
 			a = gateRecycleIdle
 		}
 		if a != gateNone {
 			acts = append(acts, gateAct{l.name, a})
 		}
 	}
-	return v, acts
+	return mv, views, acts
+}
+
+// loopView evaluates one loop: its work entry first, then the machine
+// gate. A closed work gate decides the end behaviour (section 5.2); the
+// machine gate decides only while the work gate is open.
+func (in gateInputs) loopView(name string, mv gateView, now time.Time) loopView {
+	wv := in.workView(in.work[name], now)
+	switch {
+	case !wv.Open:
+		return wv
+	case !mv.Open:
+		end := machine.EndFinish
+		if mv.Reason == gateHours && in.machine.Hours.End == machine.EndStop {
+			end = machine.EndStop
+		}
+		return loopView{Reason: mv.hold(), ETA: mv.Next, End: end}
+	}
+	return wv
+}
+
+// workView evaluates a loop's work entry: operating hours first, then
+// the ordered candidate agents. No candidates means no per-loop
+// constraint.
+func (in gateInputs) workView(res config.Resolved, now time.Time) loopView {
+	names, over := candidates(res)
+	if !in.operating.Open(now) {
+		v := loopView{Reason: reasonOperatingHours, End: endOrFinish(in.operating.End)}
+		if len(names) > 0 {
+			v.Agent = names[0]
+		}
+		v.estimate(res, in, now)
+		return v
+	}
+	for _, name := range names {
+		if in.block(name, over, now) == "" {
+			return loopView{Open: true, Agent: name}
+		}
+	}
+	if len(names) == 0 {
+		return loopView{Open: true}
+	}
+	v := loopView{Agent: names[0], End: machine.EndFinish}
+	// The reason that closed the gate chooses the end behaviour: the
+	// first candidate whose only block is closed hours gives its
+	// schedule.end; every other closure ends with finish.
+	for _, name := range names {
+		b := in.blockOf(name, over, now)
+		if b.hours && !b.exhausted && !b.refs && !b.runtime {
+			v.Reason = "agent " + name + " is outside its working hours"
+			v.End = endOrFinish(in.schedule(name, over).End)
+			break
+		}
+	}
+	if v.Reason == "" {
+		all := blockAll{exhausted: true, refs: true, runtime: true}
+		for _, name := range names {
+			b := in.blockOf(name, over, now)
+			all.exhausted = all.exhausted && b.exhausted
+			all.refs = all.refs && b.refs
+			all.runtime = all.runtime && b.runtime
+		}
+		switch {
+		case all.exhausted:
+			v.Reason = reasonExhausted
+		case all.refs:
+			v.Reason = reasonUnresolved
+		case all.runtime:
+			v.Reason = reasonUnregistered
+		default:
+			v.Reason = reasonNoCandidate
+		}
+	}
+	v.estimate(res, in, now)
+	return v
+}
+
+// estimate fills the estimated start: the earliest of the next working
+// hours start of a candidate, the earliest exhaustion of a candidate and
+// the next operating hours start. No future input leaves the estimate
+// zero and the reason shows alone.
+func (v *loopView) estimate(res config.Resolved, in gateInputs, now time.Time) {
+	consider := func(t time.Time) {
+		if t.After(now) && (v.ETA.IsZero() || t.Before(v.ETA)) {
+			v.ETA = t
+		}
+	}
+	names, over := candidates(res)
+	for _, name := range names {
+		sched := in.schedule(name, over)
+		if !sched.Open(now) {
+			consider(sched.Next(now))
+		}
+		consider(in.state.Agents[name].ExhaustedUntil)
+	}
+	if !in.operating.Open(now) {
+		consider(in.operating.Next(now))
+	}
+}
+
+// candidates returns the loop's ordered candidate agent names and the
+// schedule overrides of the rules that select an agent: the entry's
+// list when set, else the rules' lists in rule order.
+func candidates(res config.Resolved) ([]string, map[string]machine.Hours) {
+	names := res.Agents
+	over := map[string]machine.Hours{}
+	if len(names) == 0 {
+		seen := map[string]bool{}
+		for _, r := range res.Rules {
+			for _, n := range r.Agents {
+				if !seen[n] {
+					seen[n] = true
+					names = append(names, n)
+				}
+			}
+		}
+	}
+	for _, r := range res.Rules {
+		if r.Schedule != nil {
+			for _, n := range r.Agents {
+				if _, ok := over[n]; !ok {
+					over[n] = *r.Schedule
+				}
+			}
+		}
+	}
+	return names, over
+}
+
+// schedule is the agent's effective working hours: the rule override
+// when a rule selects the agent with one, else the fleet agent's
+// schedule.
+func (in gateInputs) schedule(name string, over map[string]machine.Hours) machine.Hours {
+	if h, ok := over[name]; ok {
+		return h
+	}
+	return in.agents[name].Schedule
+}
+
+// blockAll reports which blocks hold for every candidate.
+type blockAll struct {
+	exhausted, refs, runtime bool
+}
+
+// agentBlock is why one candidate cannot serve now.
+type agentBlock struct {
+	hours, exhausted, refs, runtime bool
+}
+
+func (in gateInputs) blockOf(name string, over map[string]machine.Hours, now time.Time) agentBlock {
+	a, ok := in.agents[name]
+	return agentBlock{
+		hours:     !ok || !in.schedule(name, over).Open(now),
+		exhausted: now.Before(in.state.Agents[name].ExhaustedUntil),
+		refs:      len(in.refs.Agents[name]) > 0,
+		runtime:   ok && in.engine.RuntimeOff(a.Runtime) != "",
+	}
+}
+
+// block is why one candidate cannot serve now, "" when it can.
+func (in gateInputs) block(name string, over map[string]machine.Hours, now time.Time) string {
+	b := in.blockOf(name, over, now)
+	switch {
+	case b.hours:
+		return "agent " + name + " is outside its working hours"
+	case b.exhausted:
+		return "agent " + name + " is exhausted"
+	case b.refs:
+		return "agent " + name + " has unresolved environment references"
+	case b.runtime:
+		return "agent " + name + " has no runtime registered on the engine"
+	}
+	return ""
+}
+
+func endOrFinish(end string) string {
+	if end == "" {
+		return machine.EndFinish
+	}
+	return end
 }
 
 func (v gateView) hold() string {
@@ -130,10 +355,9 @@ func (v gateView) hold() string {
 //	next_change  the next time the window or an account changes
 //	hold         why the gate is closed, empty when open
 //
-// A workflow has `hold` set to the same text while the gate is closed,
-// unless a budget pause holds it. A workflow the gate stopped has state
-// "held". A workflow that capability detection disabled has state
-// "disabled" and its `hold` is the reason.
+// Each workflow carries its own offline_reason and eta from the
+// per-loop decision. A workflow the gate stopped has state "offline";
+// one that capability detection disabled has state "disabled".
 type gateStatus struct {
 	Open       bool       `json:"open"`
 	HoursOpen  bool       `json:"hours_open"`
@@ -142,41 +366,41 @@ type gateStatus struct {
 	Hold       string     `json:"hold"`
 }
 
-// holdFor is the hold text of a workflow.
-func (g *gateStatus) holdFor(bs *budgetStatus) string {
-	if g == nil || (bs != nil && bs.Paused) {
-		return ""
-	}
-	return g.Hold
-}
-
-// machineState is the supervisor's view of machine.yaml and pool.json.
-// The gate state is in memory: after a restart it is recomputed from the
-// files and the clock, which gives the same answer.
+// machineState is the supervisor's view of machine.yaml, the work
+// config and state.json. The gate state is in memory: after a restart it
+// is recomputed from the files and the clock, which gives the same
+// answer.
 type machineState struct {
 	machinePath string
-	poolPath    string
+	statePath   string
 	machine     *machine.Config
 	stamp       string
 	bootErr     error
-	poolState   machine.State
-	poolRead    time.Time
-	poolErr     string
+	agentState  machine.State
+	stateRead   time.Time
+	stateErr    string
+	workStamp   string
+	work        map[string]config.Resolved
+	agents      map[string]config.Agent
+	refs        config.RefStatus
+	operating   machine.Hours
 	gateHeld    map[string]bool
 	gateSeen    bool
 	gateLast    gateView
+	recorded    map[string]machine.LoopState
 }
 
 func (s *supervisor) initMachine() {
 	s.machinePath, _ = machine.DefaultPath()
-	s.poolPath, _ = machine.StatePath()
+	s.statePath = machine.StatePath(s.root)
 	s.gateHeld = map[string]bool{}
+	s.recorded = map[string]machine.LoopState{}
 	s.machine, _ = machine.Load("")
 	s.bootErr = s.refreshMachine(s.clock(), true)
 }
 
-// setGate replaces the engine's gate, and with it the runtimes the pool may
-// pick.
+// setGate replaces the engine's gate, and with it the runtimes the pool
+// and the fleet may pick.
 func (s *supervisor) setGate(g engine.Gate) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -217,13 +441,14 @@ func fileStamp(path string) string {
 	return fmt.Sprintf("%d/%d", fi.ModTime().UnixNano(), fi.Size())
 }
 
-// refreshMachine reads machine.yaml when it changed (or force is set) and
-// pool.json when it is stale. A machine.yaml that does not load keeps the
-// previous settings and its error is returned.
+// refreshMachine reads machine.yaml when it changed (or force is set),
+// the work config when its file changed, and state.json when it is
+// stale. A machine.yaml that does not load keeps the previous settings
+// and its error is returned.
 func (s *supervisor) refreshMachine(now time.Time, force bool) (loadErr error) {
 	s.mu.Lock()
-	path, poolPath, old := s.machinePath, s.poolPath, s.stamp
-	loaded := s.machine
+	path, statePath, old := s.machinePath, s.statePath, s.stamp
+	workOld := s.workStamp
 	s.mu.Unlock()
 
 	stamp := fileStamp(path)
@@ -240,32 +465,64 @@ func (s *supervisor) refreshMachine(now time.Time, force bool) (loadErr error) {
 			}
 			s.machine, s.bootErr = cfg, nil
 			s.machine.Unsupported = unsupportedRuntimes(s.gate)
-			s.poolRead = time.Time{}
-			loaded = cfg
+			s.stateRead = time.Time{}
 		}
 		s.mu.Unlock()
 	}
 
+	workStamp := fileStamp(filepath.Join(s.root, ".jigz", "config.yaml"))
+	if force || workStamp != workOld {
+		s.refreshWork(workStamp)
+	}
+
 	s.mu.Lock()
-	stale := len(loaded.Pool) > 0 && now.Sub(s.poolRead) >= poolReadEvery
+	stale := now.Sub(s.stateRead) >= stateReadEvery
 	s.mu.Unlock()
 	if !stale {
 		return loadErr
 	}
-	st, err := machine.LoadState(poolPath)
+	st, err := machine.LoadState(statePath)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.poolRead = now
+	s.stateRead = now
 	if err != nil {
-		if s.poolErr != err.Error() {
-			s.poolErr = err.Error()
-			fmt.Fprintln(os.Stderr, "jig: pool state:", err)
+		if s.stateErr != err.Error() {
+			s.stateErr = err.Error()
+			fmt.Fprintln(os.Stderr, "jig: state:", err)
 		}
 		return loadErr
 	}
-	s.poolErr = ""
-	s.poolState = st
+	s.stateErr = ""
+	s.agentState = st
 	return loadErr
+}
+
+// refreshWork re-reads .jigz/config.yaml and resolves the work entries
+// the gate evaluates. A config that does not load keeps the previous
+// resolution; the load fails the start, so this only guards a bad edit
+// during a run.
+func (s *supervisor) refreshWork(stamp string) {
+	cfg, err := config.Load(s.root)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.workStamp = stamp
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "jig: work config:", err)
+		return
+	}
+	s.work = cfg.Resolve()
+	s.agents = cfg.Agents
+	s.refs = cfg.UnresolvedRefs()
+	s.operating = cfg.OperatingHours
+}
+
+// gateInputsLocked assembles the gate decision inputs. The caller holds
+// s.mu.
+func (s *supervisor) gateInputsLocked() gateInputs {
+	return gateInputs{
+		machine: s.machine, state: s.agentState, work: s.work,
+		agents: s.agents, refs: s.refs, operating: s.operating, engine: s.gate,
+	}
 }
 
 // startable reports whether a loop may start now. A loop that the gate
@@ -279,7 +536,8 @@ func (s *supervisor) startable(name string) bool {
 	s.refreshMachine(now, false)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !gateEval(s.machine, s.poolState, now).Open {
+	in := s.gateInputsLocked()
+	if lv := in.loopView(name, gateEval(in.machine, in.state, now), now); !lv.Open {
 		s.gateHeld[name] = true
 		return false
 	}
@@ -306,7 +564,7 @@ func (s *supervisor) agentEnv() (env []string, runtime string, err error) {
 	s.refreshMachine(now, false)
 	s.mu.Lock()
 	pool := len(s.machine.Pool) > 0
-	runtime = gateEval(s.machine, s.poolState, now).Runtime
+	runtime = gateEval(s.machine, s.agentState, now).Runtime
 	s.mu.Unlock()
 	if !pool {
 		return nil, "", nil
@@ -332,26 +590,30 @@ func (s *supervisor) gateStatusLocked() *gateStatus {
 	if len(cfg.Hours.Windows) == 0 && len(cfg.Pool) == 0 {
 		return nil
 	}
-	v := gateEval(cfg, s.poolState, s.clock())
+	v := gateEval(cfg, s.agentState, s.clock())
 	return &gateStatus{
 		Open: v.Open, HoursOpen: v.HoursOpen, Runtime: v.Runtime,
 		NextChange: timePtr(v.Next), Hold: v.hold(),
 	}
 }
 
-// gateStep runs on every tick. It applies the machine settings to the
-// loops and logs each change of the gate once.
+// gateStep runs on every tick. It applies the machine settings and the
+// work entries to the loops and logs each change of the gate once.
 func (s *supervisor) gateStep() (int, bool) {
 	now := s.clock()
 	s.refreshMachine(now, false)
 	s.mu.Lock()
-	cfg, st := s.machine, s.poolState
+	in := s.gateInputsLocked()
 	loops := s.gateLoopsLocked()
 	idle := !s.sleeping && !s.exitWhenEmpty
 	s.mu.Unlock()
 
-	view, acts := gateDecide(cfg, st, now, loops)
-	if s.noteGate(view, cfg) {
+	mv, views, acts := gateDecide(in, now, loops)
+	changed := s.recordLoops(in, now, views)
+	if s.noteGate(mv, in.machine) {
+		changed = true
+	}
+	if changed {
 		s.republish()
 	}
 	if !idle {
@@ -368,12 +630,51 @@ func (s *supervisor) gateStep() (int, bool) {
 		case gateStopNow:
 			s.gateStop(a.name, false)
 		case gateStopIdle, gateRecycleIdle:
+			// A draining loop keeps claiming new items until it goes
+			// idle: max_concurrent_agents 0 means no limit, not "claim
+			// nothing", so no document value stops new claims while
+			// running sessions finish. Drain is finish semantics only.
 			if s.noSession(a.name) {
 				s.gateStop(a.name, a.action == gateRecycleIdle)
 			}
 		}
 	}
 	return 0, false
+}
+
+// recordLoops writes the per-loop decisions that changed to the state
+// file, logs each agent change with its reason once, and reports whether
+// anything changed.
+func (s *supervisor) recordLoops(in gateInputs, now time.Time, views map[string]loopView) bool {
+	s.mu.Lock()
+	updates := map[string]machine.LoopState{}
+	for name, v := range views {
+		rec := machine.LoopState{Agent: v.Agent, OfflineReason: v.Reason, ETA: v.ETA}
+		prev := s.recorded[name]
+		if rec == prev {
+			continue
+		}
+		updates[name] = rec
+		s.recorded[name] = rec
+		if prev.Agent != "" && rec.Agent != "" && prev.Agent != rec.Agent {
+			_, over := candidates(in.work[name])
+			fmt.Fprintf(os.Stderr, "jig: %s: agent changed from %q to %q: %s\n",
+				name, prev.Agent, rec.Agent, in.block(prev.Agent, over, now))
+		}
+	}
+	path := s.statePath
+	s.mu.Unlock()
+	if len(updates) == 0 {
+		return false
+	}
+	if err := machine.UpdateState(path, func(st *machine.State) {
+		for n, rec := range updates {
+			st.Loops[n] = rec
+		}
+	}); err != nil {
+		fmt.Fprintln(os.Stderr, "jig: state:", err)
+	}
+	return true
 }
 
 func (s *supervisor) gateLoopsLocked() []gateLoop {

@@ -78,7 +78,7 @@ func (a *app) agents(w http.ResponseWriter, r *http.Request) {
 			v.Rows = append(v.Rows, row)
 		}
 	}
-	v.Machine = loadMachineView(time.Now())
+	v.Machine = loadMachineView(time.Now(), firstProjectDir(a.projects()))
 	g := a.gate()
 	for i, row := range v.Machine.Pool {
 		if off := g.RuntimeOff(row.Runtime); off != "" {
@@ -88,7 +88,16 @@ func (a *app) agents(w http.ResponseWriter, r *http.Request) {
 	execPage(w, "agents", v)
 }
 
-func loadMachineView(now time.Time) machineView {
+// firstProjectDir is the repo root of the first project, empty without
+// one. The machine view reads the per-repo state of that project.
+func firstProjectDir(ps []fleetconfig.Resolved) string {
+	if len(ps) == 0 {
+		return ""
+	}
+	return ps[0].Dir
+}
+
+func loadMachineView(now time.Time, root string) machineView {
 	var mv machineView
 	path, err := machine.DefaultPath()
 	if err != nil {
@@ -105,10 +114,12 @@ func loadMachineView(now time.Time) machineView {
 		return mv
 	}
 	var state machine.State
-	if sp, err := machine.StatePath(); err == nil {
-		if state, err = machine.LoadState(sp); err != nil {
-			mv.Err = err.Error()
-		}
+	sp := ""
+	if root != "" {
+		sp = machine.StatePath(root)
+	}
+	if state, err = machine.LoadState(sp); err != nil {
+		mv.Err = err.Error()
 	}
 	mv.Present, mv.Warnings = true, cfg.Warnings
 	mv.Timezone = cfg.Hours.Timezone
@@ -137,7 +148,7 @@ func loadMachineView(now time.Time) machineView {
 		if w := windowTexts(e.Hours); len(w) > 0 {
 			row.Hours = strings.Join(w, "; ")
 		}
-		es := state[e.Name]
+		es := state.Agents[e.Name]
 		switch {
 		case now.Before(es.ExhaustedUntil):
 			row.State, row.Class = "exhausted until "+localText(es.ExhaustedUntil), "failed"

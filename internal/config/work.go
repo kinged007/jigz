@@ -496,6 +496,7 @@ func (c *Config) validateModel() error {
 		if err := a.Schedule.Validate(key + ".schedule"); err != nil {
 			return err
 		}
+		c.Agents[name] = a
 		if err := validateEnd(a.Schedule.End, key+".schedule"); err != nil {
 			return err
 		}

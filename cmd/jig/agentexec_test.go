@@ -20,6 +20,7 @@ func agentExecEnv(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+	t.Setenv("JIG_STATE_PATH", filepath.Join(home, "state.json"))
 }
 
 func writeAgentScript(t *testing.T, body string) string {
@@ -51,12 +52,11 @@ func agentPoolEntry(name, runtime, cmd string) string {
 
 func agentExhaustedUntil(t *testing.T, name string) time.Time {
 	t.Helper()
-	p, _ := machine.StatePath()
-	st, err := machine.LoadState(p)
+	st, err := machine.LoadState(os.Getenv("JIG_STATE_PATH"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return st[name].ExhaustedUntil
+	return st.Agents[name].ExhaustedUntil
 }
 
 func execAgentExec(args ...string) (int, string, string) {
@@ -169,7 +169,7 @@ func TestAgentExecAllExhausted(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "ran")
 	script := writeAgentScript(t, "touch "+marker+"\n")
 	writeAgentMachine(t, "pool:\n"+agentPoolEntry("a", "pi", script))
-	p, _ := machine.StatePath()
+	p := os.Getenv("JIG_STATE_PATH")
 	until := time.Now().Add(time.Hour).Truncate(time.Second)
 	if err := machine.MarkExhausted(p, "a", until, "test"); err != nil {
 		t.Fatal(err)

@@ -356,11 +356,11 @@ func TestAcceptance(t *testing.T) {
 		writeMachine(window(now.Add(12*time.Hour), now.Add(12*time.Hour+time.Minute)))
 		waitFor("the gate to hold the loop outside the window", 60*time.Second, func() bool {
 			doc := status()
-			return doc.Gate != nil && !doc.Gate.HoursOpen && len(doc.Workflows) == 1 && doc.Workflows[0].State == "held"
+			return doc.Gate != nil && !doc.Gate.HoursOpen && len(doc.Workflows) == 1 && doc.Workflows[0].State == "offline"
 		})
 		doc := status()
-		if doc.Gate.Open || doc.Gate.Hold != "outside working hours" || doc.Workflows[0].Hold != doc.Gate.Hold {
-			t.Errorf("gate %+v, workflow hold %q, want closed with hold %q", *doc.Gate, doc.Workflows[0].Hold, "outside working hours")
+		if doc.Gate.Open || doc.Gate.Hold != "outside working hours" || doc.Workflows[0].OfflineReason != doc.Gate.Hold {
+			t.Errorf("gate %+v, workflow offline reason %q, want closed with reason %q", *doc.Gate, doc.Workflows[0].OfflineReason, "outside working hours")
 		}
 
 		held := gh.Add(fakegithub.Item{Repo: slug, Title: "Outside hours", Body: "Wait for the window.",
@@ -382,6 +382,74 @@ func TestAcceptance(t *testing.T) {
 			t.Errorf("gate %+v after the window opened, want open", doc.Gate)
 		}
 		t.Logf("scenario d: %s", time.Since(t0).Round(time.Millisecond))
+	})
+
+	t.Run("d2_offline_reason_and_estimate", func(t *testing.T) {
+		t0 := time.Now()
+		now := time.Now().UTC()
+		cfgFile := filepath.Join(repoDir, ".jigz", "config.yaml")
+		base, err := os.ReadFile(cfgFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if werr := os.WriteFile(cfgFile, base, 0o644); werr != nil {
+				t.Errorf("restore config: %v", werr)
+			}
+		}()
+		writeConfig := func(from, to time.Time) {
+			t.Helper()
+			body := fmt.Sprintf(`%sagents:
+  a:
+    runtime: pi
+    schedule:
+      timezone: UTC
+      windows:
+        - {days: [mon, tue, wed, thu, fri, sat, sun], start: %q, end: %q}
+work:
+  issues:
+    agent: a
+`, base, from.Format("15:04"), to.Format("15:04"))
+			if err := os.WriteFile(cfgFile+".tmp", []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(cfgFile+".tmp", cfgFile); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// A one-minute window twelve hours away is closed for the whole
+		// test. The machine hours stay open: only the work entry closes.
+		writeConfig(now.Add(12*time.Hour), now.Add(12*time.Hour+time.Minute))
+		waitFor("the work entry to go offline outside the window", 60*time.Second, func() bool {
+			doc := status()
+			return len(doc.Workflows) == 1 && doc.Workflows[0].State == "offline"
+		})
+		doc := status()
+		w := doc.Workflows[0]
+		if w.OfflineReason != "agent a is outside its working hours" || w.Agent != "a" {
+			t.Errorf("workflow %+v, want agent a offline outside its working hours", w)
+		}
+		if w.ETA == nil {
+			t.Errorf("workflow %+v has no estimated start", w)
+		} else if d := time.Until(*w.ETA); d < 11*time.Hour || d > 13*time.Hour {
+			t.Errorf("estimated start %v, want about 12h from now", *w.ETA)
+		}
+
+		held := gh.Add(fakegithub.Item{Repo: slug, Title: "Offline", Body: "Wait for the window.",
+			Labels: []string{"agent:plan"}, Assignees: []string{owner}})
+		run.focus = held
+		time.Sleep(5 * time.Second)
+		it, _ := gh.Get(slug, held)
+		if ev := labelLog(gh, slug, held); len(ev) != 0 || slices.Contains(it.Labels, "in-progress") {
+			t.Errorf("issue #%d was claimed while the work entry was offline: events %v, labels %v", held, ev, it.Labels)
+		}
+
+		writeConfig(now.Add(-time.Hour), now.Add(time.Hour))
+		assertHandedOff(t, held, 90*time.Second)
+		if doc := status(); len(doc.Workflows) != 1 || doc.Workflows[0].State != "running" || doc.Workflows[0].OfflineReason != "" {
+			t.Errorf("workflow %+v after the window opened, want running", doc.Workflows)
+		}
+		t.Logf("scenario d2: %s", time.Since(t0).Round(time.Millisecond))
 	})
 
 	t.Run("e_usage_limit_moves_to_the_next_pool_entry", func(t *testing.T) {
@@ -427,11 +495,11 @@ func TestAcceptance(t *testing.T) {
 		if len(got) < 2 || got[0] != "claude-a" || slices.Contains(got[1:], "claude-a") {
 			t.Errorf("fake claude calls %v, want one claude-a call and then only claude-b", got)
 		}
-		st, err := machine.LoadState(filepath.Join(home, ".local", "state", "jigz", "pool.json"))
+		st, err := machine.LoadState(machine.StatePath(repoDir))
 		if err != nil {
 			t.Fatal(err)
 		}
-		sa, sb := st["claude-a"], st["claude-b"]
+		sa, sb := st.Agents["claude-a"], st.Agents["claude-b"]
 		if !sa.ExhaustedUntil.Equal(reset) || !strings.Contains(sa.Reason, "usage limit reached") || sa.LastUsed.IsZero() {
 			t.Errorf("claude-a state %+v, want exhausted until %s with the limit message and last_used set", sa, reset)
 		}
@@ -871,7 +939,7 @@ func TestAcceptanceUpstreamEngine(t *testing.T) {
 		if w := states["issues"]; w.State != "running" {
 			t.Errorf("issues loop state %q, want running: %+v", w.State, doc.Workflows)
 		}
-		if w := states["prs"]; w.State != "disabled" || w.Hold != wantOff || w.PID != 0 {
+		if w := states["prs"]; w.State != "disabled" || w.OfflineReason != wantOff || w.PID != 0 {
 			t.Errorf("PR loop %+v, want state disabled, pid 0, hold %q (workflows %+v)", w, wantOff, doc.Workflows)
 		}
 		for _, r := range gh.Requests() {

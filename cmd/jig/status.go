@@ -54,7 +54,14 @@ type workflowStatus struct {
 	ConfigHash   string        `json:"config_hash"`
 	LogPath      string        `json:"log_path"`
 	Budget       *budgetStatus `json:"budget,omitempty"`
-	Hold         string        `json:"hold,omitempty"`
+	// OfflineReason is why the gate keeps this loop down, empty while it
+	// may run. ETA is its estimated start, absent without an estimate.
+	// Agent is the agent the manager selected. Drift is the document
+	// drift report; phase 3 fills it.
+	OfflineReason string     `json:"offline_reason,omitempty"`
+	ETA           *time.Time `json:"eta,omitempty"`
+	Agent         string     `json:"agent,omitempty"`
+	Drift         string     `json:"drift,omitempty"`
 	// Sessions are the agent sessions running now. SessionsKnown is false
 	// while the supervisor cannot account for every session of the engine.
 	Sessions      []rollup.Session `json:"sessions"`

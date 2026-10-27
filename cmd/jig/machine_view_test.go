@@ -112,7 +112,7 @@ func TestOperationsRowShowsHold(t *testing.T) {
 	doc := statusDoc{
 		SchemaVersion: statusSchemaVersion, PID: os.Getpid(), Repo: root, RepoName: "owner/repo",
 		StartedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(), State: "running",
-		Workflows: []workflowStatus{{Name: "build", PID: os.Getpid(), State: "running", Hold: "outside working hours"}},
+		Workflows: []workflowStatus{{Name: "build", PID: os.Getpid(), State: "running", OfflineReason: "outside working hours"}},
 		Gate:      &gateStatus{Hold: "outside working hours", Runtime: "claude-code"},
 	}
 	raw, _ = json.Marshal(doc)
@@ -122,7 +122,7 @@ func TestOperationsRowShowsHold(t *testing.T) {
 	a.sup = &fleetSupervisor{}
 	a.source = loopsrc.StatusDoc{Reader: rollup.Reader{}, Roots: a.projectRoots, Dir: filepath.Join(dir, "status")}
 	body := getPage(t, a, "/live")
-	for _, want := range []string{"held: outside working hours", "claude-code"} {
+	for _, want := range []string{"offline: outside working hours", "claude-code"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("operations page lacks %q", want)
 		}
