@@ -128,3 +128,45 @@ func TestOperationsRowShowsHold(t *testing.T) {
 		}
 	}
 }
+
+func TestLivePageShowsTheAgentKindOfARunningSession(t *testing.T) {
+	_, _, cache := isolateDirs(t)
+	root := t.TempDir()
+	dir := filepath.Join(cache, "jigz")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	reg := registry{Entries: map[string]registryEntry{root: {
+		RepoName: "owner/repo", UpdatedAt: time.Now(), PID: os.Getpid(),
+		Loops: []loopEndpoint{{Repo: root, RepoName: "owner/repo", Loop: "build"}},
+	}}}
+	raw, _ := json.Marshal(reg)
+	mustWrite(t, filepath.Join(dir, "registry.json"), string(raw))
+	path, err := statusPath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	doc := statusDoc{
+		SchemaVersion: statusSchemaVersion, PID: os.Getpid(), Repo: root, RepoName: "owner/repo",
+		StartedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(), State: "running",
+		Workflows: []workflowStatus{{Name: "build", PID: os.Getpid(), State: "running", SessionsKnown: true, Sessions: []rollup.Session{{
+			IssueID: "20", Identifier: "owner/repo#20", Attempt: 1, StartedAt: time.Now().UTC(),
+			AgentKind: "pi", RuleName: "plan", Model: "9router/coding-manual",
+		}}}},
+	}
+	raw, _ = json.Marshal(doc)
+	mustWrite(t, path, string(raw))
+
+	a := &app{sizes: newRepoSizes(), stateDir: dir}
+	a.sup = &fleetSupervisor{}
+	a.source = loopsrc.StatusDoc{Reader: rollup.Reader{}, Roots: a.projectRoots, Dir: filepath.Join(dir, "status")}
+	body := getPage(t, a, "/live")
+	for _, want := range []string{"Pi &middot; 9router/coding-manual"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("operations page lacks %q", want)
+		}
+	}
+}

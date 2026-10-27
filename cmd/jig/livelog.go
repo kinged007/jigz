@@ -133,7 +133,11 @@ func (t *liveTracker) start(line string, attempt int) bool {
 	if _, seen := t.sessions[id]; !seen && t.unaccounted > 0 {
 		t.unaccounted--
 	}
-	t.sessions[id] = &rollup.Session{IssueID: id, Identifier: ident, Attempt: attempt, StartedAt: t.now()}
+	t.sessions[id] = &rollup.Session{
+		IssueID: id, Identifier: ident, Attempt: attempt, StartedAt: t.now(),
+		AgentKind: fieldOr(line, "agent_kind"), RuleName: fieldOr(line, "rule_name"),
+		Model: fieldOr(line, "model"), Effort: fieldOr(line, "effort"),
+	}
 	return true
 }
 

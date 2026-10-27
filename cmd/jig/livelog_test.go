@@ -254,3 +254,23 @@ func TestStartedLoopRunsWithPortZeroAndIsTracked(t *testing.T) {
 		t.Errorf("status workflows = %+v, want the tracked session as owner/name#7", doc.Workflows)
 	}
 }
+
+func TestTrackerKeepsTheDispatchFields(t *testing.T) {
+	tr := fedTracker(tickIdle, `time=2026-10-27T08:00:00.000Z level=INFO msg="issue dispatched" issue_id=20 issue_identifier=20 agent_kind=pi rule_name=plan model=9router/coding-manual effort=""`)
+	s, _ := tr.snapshot()
+	if len(s) != 1 || s[0].AgentKind != "pi" || s[0].RuleName != "plan" || s[0].Model != "9router/coding-manual" || s[0].Effort != "" {
+		t.Errorf("session = %+v, want pi, plan, 9router/coding-manual", s)
+	}
+	tr.line(`time=2026-10-27T08:00:05.000Z level=INFO msg="retried issue dispatched" issue_id=20 issue_identifier=20 attempt=1 agent_kind=pi rule_name=plan model=m effort=high`)
+	if s, _ := tr.snapshot(); s[0].Effort != "high" || s[0].Model != "m" {
+		t.Errorf("retry session = %+v, want effort high and model m", s)
+	}
+}
+
+func TestTrackerAcceptsADispatchWithoutAgentKind(t *testing.T) {
+	tr := fedTracker(tickIdle, `time=2026-10-27T08:00:00.000Z level=INFO msg="issue dispatched" issue_id=20 issue_identifier=20`)
+	s, _ := tr.snapshot()
+	if len(s) != 1 || s[0].AgentKind != "" || s[0].Model != "" {
+		t.Errorf("session = %+v, want one session with no kind or model", s)
+	}
+}
