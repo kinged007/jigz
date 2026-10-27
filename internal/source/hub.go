@@ -148,7 +148,7 @@ func (h *Hub) Sync(cfg hubproto.ConfigResponse) (Report, error) {
 				continue
 			}
 			want[root] = true
-			d, err := h.desired(cfg.Member.Login, p, wf, files)
+			d, err := h.desired(p, wf, files)
 			if err != nil {
 				bad(err)
 				continue
@@ -283,8 +283,9 @@ type loopFiles map[string][]byte
 func (d loopFiles) hash() string { return hashFiles(d) }
 
 // desired builds the files of one loop: the hub config's files except the
-// other workflows' WORKFLOW.*.md, and a config.yaml with no token.
-func (h *Hub) desired(login string, p hubproto.ConfigProject, wf string, files map[string][]byte) (loopFiles, error) {
+// other workflows' WORKFLOW.*.md, and a config.yaml with no token. The
+// assignee scope is always @me, so no assignee is written.
+func (h *Hub) desired(p hubproto.ConfigProject, wf string, files map[string][]byte) (loopFiles, error) {
 	own := WorkflowFile(wf)
 	text, ok := files[own]
 	if !ok {
@@ -306,11 +307,10 @@ func (h *Hub) desired(login string, p hubproto.ConfigProject, wf string, files m
 		WakeInterval string `yaml:"wake_interval"`
 	}
 	cfg, err := yaml.Marshal(struct {
-		Repo     string            `yaml:"repo"`
-		Assignee string            `yaml:"assignee"`
-		Filters  map[string]string `yaml:"filters"`
-		Sleep    sleep             `yaml:"sleep"`
-	}{p.Repo, login, map[string]string{wf: strings.Join(terms, " ")}, sleep{true, h.idle.String(), wakeInterval}})
+		Repo    string            `yaml:"repo"`
+		Filters map[string]string `yaml:"filters"`
+		Sleep   sleep             `yaml:"sleep"`
+	}{p.Repo, map[string]string{wf: strings.Join(terms, " ")}, sleep{true, h.idle.String(), wakeInterval}})
 	if err != nil {
 		return nil, err
 	}

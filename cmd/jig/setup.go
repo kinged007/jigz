@@ -40,45 +40,7 @@ func runSetup(dir, repo string, asJSON bool) {
 		if repo == "" {
 			repo = guessRepo(abs)
 		}
-		body := "# Repo id (owner/name). Empty = detect from git remote at runtime.\n" +
-			"repo: " + repo + "\n" +
-			"# Token for the tracker. Empty = GITHUB_TOKEN/GH_TOKEN env.\n" +
-			"token: \"\"\n" +
-			"# Optional milestone title to restrict all loops to (empty = off).\n" +
-			"milestone: \"\"\n" +
-			"# Assignee scope for all loops (@me = the token owner; only\n" +
-			"# items assigned to that user are picked up). Set to \"\"\n" +
-			"# to disable (shared backlog).\n" +
-			"assignee: \"@me\"\n" +
-			"# Per-loop query-filter overrides, keyed by WORKFLOW.*.md stem.\n" +
-			"# New loops start on the default filter; narrow them here, e.g.:\n" +
-			"#filters:\n" +
-			"#  triage: \"label:agent:triage -label:needs-human\"\n" +
-			"# Workspace cleanup: runs command every interval. max_age_days must be\n" +
-			"# less than workspace.retention_days in every workflow. dry_run passes\n" +
-			"# JIG_CLEANUP_DRY_RUN=1; timeout defaults to 10m.\n" +
-			"#cleanup:\n" +
-			"#  enabled: true\n" +
-			"#  interval: 6h\n" +
-			"#  command: ./scripts/cleanup.sh\n" +
-			"#  max_age_days: 14\n" +
-			"#  dry_run: false\n" +
-			"#  timeout: 10m\n" +
-			"# Idle sleep: stop the engine children after idle_timeout with no running\n" +
-			"# or retrying work, start them again after wake_interval or on\n" +
-			"# `jig wake`. idle_timeout should exceed the workflows' polling\n" +
-			"# interval. New issues wait while sleeping.\n" +
-			"#sleep:\n" +
-			"#  enabled: true\n" +
-			"#  idle_timeout: 15m\n" +
-			"#  wake_interval: 1h\n"
-		labelsBody := ""
-		for _, l := range config.DefaultLabels {
-			labelsBody += fmt.Sprintf("- {name: %q, color: %q, description: %q}\n", l.Name, l.Color, l.Description)
-		}
-		body += "# GitHub labels setup ensures exist (create-or-edit; others left alone).\n" +
-			"# Add a custom loop's labels here, then re-run setup.\n" +
-			"labels:\n" + labelsBody
+		body := configTemplateBody(repo)
 		if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
 			fatal(err)
 		}
@@ -178,6 +140,46 @@ type setupResult struct {
 	Error        *string            `json:"error,omitempty"`
 }
 
+// configTemplateBody builds the first .jigz/config.yaml `jig setup`
+// writes. It carries the keys the loader accepts today: the repository
+// section plus commented examples; the fleet and work sections the owner
+// adds after setup are documented in the README.
+func configTemplateBody(repo string) string {
+	body := "# Repo id (owner/name). Empty = detect from git remote at runtime.\n" +
+		"repo: " + repo + "\n" +
+		"# Token for the tracker. Empty = GITHUB_TOKEN/GH_TOKEN env.\n" +
+		"token: \"\"\n" +
+		"# Per-loop query-filter overrides, keyed by WORKFLOW.*.md stem.\n" +
+		"# New loops start on the default filter; narrow them here, e.g.:\n" +
+		"#filters:\n" +
+		"#  triage: \"label:agent:triage -label:needs-human\"\n" +
+		"# Workspace cleanup: runs command every interval. max_age_days must be\n" +
+		"# less than workspace.retention_days in every workflow. dry_run passes\n" +
+		"# JIG_CLEANUP_DRY_RUN=1; timeout defaults to 10m.\n" +
+		"#cleanup:\n" +
+		"#  enabled: true\n" +
+		"#  interval: 6h\n" +
+		"#  command: ./scripts/cleanup.sh\n" +
+		"#  max_age_days: 14\n" +
+		"#  dry_run: false\n" +
+		"#  timeout: 10m\n" +
+		"# Idle sleep: stop the engine children after idle_timeout with no running\n" +
+		"# or retrying work, start them again after wake_interval or on\n" +
+		"# `jig wake`. idle_timeout should exceed the workflows' polling\n" +
+		"# interval. New issues wait while sleeping.\n" +
+		"#sleep:\n" +
+		"#  enabled: true\n" +
+		"#  idle_timeout: 15m\n" +
+		"#  wake_interval: 1h\n"
+	labelsBody := ""
+	for _, l := range config.DefaultLabels {
+		labelsBody += fmt.Sprintf("- {name: %q, color: %q, description: %q}\n", l.Name, l.Color, l.Description)
+	}
+	return body + "# GitHub labels setup ensures exist (create-or-edit; others left alone).\n" +
+		"# Add a custom loop's labels here, then re-run setup.\n" +
+		"labels:\n" + labelsBody
+}
+
 func runSetupJSON(dir, repo string) {
 	if dir == "" {
 		dir = "."
@@ -206,45 +208,7 @@ func runSetupJSON(dir, repo string) {
 		if repo == "" {
 			repo = guessRepo(abs)
 		}
-		body := "# Repo id (owner/name). Empty = detect from git remote at runtime.\n" +
-			"repo: " + repo + "\n" +
-			"# Token for the tracker. Empty = GITHUB_TOKEN/GH_TOKEN env.\n" +
-			"token: \"\"\n" +
-			"# Optional milestone title to restrict all loops to (empty = off).\n" +
-			"milestone: \"\"\n" +
-			"# Assignee scope for all loops (@me = the token owner; only\n" +
-			"# items assigned to that user are picked up). Set to \"\"\n" +
-			"# to disable (shared backlog).\n" +
-			"assignee: \"@me\"\n" +
-			"# Per-loop query-filter overrides, keyed by WORKFLOW.*.md stem.\n" +
-			"# New loops start on the default filter; narrow them here, e.g.:\n" +
-			"#filters:\n" +
-			"#  triage: \"label:agent:triage -label:needs-human\"\n" +
-			"# Workspace cleanup: runs command every interval. max_age_days must be\n" +
-			"# less than workspace.retention_days in every workflow. dry_run passes\n" +
-			"# JIG_CLEANUP_DRY_RUN=1; timeout defaults to 10m.\n" +
-			"#cleanup:\n" +
-			"#  enabled: true\n" +
-			"#  interval: 6h\n" +
-			"#  command: ./scripts/cleanup.sh\n" +
-			"#  max_age_days: 14\n" +
-			"#  dry_run: false\n" +
-			"#  timeout: 10m\n" +
-			"# Idle sleep: stop the engine children after idle_timeout with no running\n" +
-			"# or retrying work, start them again after wake_interval or on\n" +
-			"# `jig wake`. idle_timeout should exceed the workflows' polling\n" +
-			"# interval. New issues wait while sleeping.\n" +
-			"#sleep:\n" +
-			"#  enabled: true\n" +
-			"#  idle_timeout: 15m\n" +
-			"#  wake_interval: 1h\n"
-		labelsBody := ""
-		for _, l := range config.DefaultLabels {
-			labelsBody += fmt.Sprintf("- {name: %q, color: %q, description: %q}\n", l.Name, l.Color, l.Description)
-		}
-		body += "# GitHub labels setup ensures exist (create-or-edit; others left alone).\n" +
-			"# Add a custom loop's labels here, then re-run setup.\n" +
-			"labels:\n" + labelsBody
+		body := configTemplateBody(repo)
 		if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
 			printSetupJSONAndFatal(res, err)
 			return

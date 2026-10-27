@@ -376,21 +376,16 @@ func (a *app) configRows(res fleetconfig.Resolved) []cfgRow {
 	if err != nil {
 		return append(rows, cfgRow{"config", err.Error(), ""})
 	}
-	rows = append(rows,
-		cfgRow{"tracker", cfg.Tracker, ""},
-		cfgRow{"milestone", cfg.Milestone, ""},
-	)
-	if cfg.Assignee != nil {
-		rows = append(rows, cfgRow{"assignee", *cfg.Assignee, ""})
-	}
+	rows = append(rows, cfgRow{"tracker", cfg.Tracker, ""})
 	if cfg.Sleep.Enabled {
 		rows = append(rows, cfgRow{"sleep idle", cfg.Sleep.IdleTimeout.String(), ""})
 	}
 	if cfg.Cleanup.Enabled {
 		rows = append(rows, cfgRow{"cleanup", cfg.Cleanup.Command, ""})
 	}
-	for _, name := range sortedKeys(cfg.Budgets) {
-		b := cfg.Budgets[name]
+	budgets := cfg.Budgets()
+	for _, name := range sortedKeys(budgets) {
+		b := budgets[name]
 		rows = append(rows, cfgRow{"budget " + name, fmtTokens(b.MaxTokens) + " tokens / " + b.Period, ""})
 	}
 	return rows
