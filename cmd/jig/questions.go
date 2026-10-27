@@ -1,10 +1,12 @@
 package main
 
 import (
-	"fmt"
+	"cmp"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kinged007/jigz/internal/collector"
@@ -14,13 +16,15 @@ import (
 
 func itemKey(project string, n int) string { return project + "#" + strconv.Itoa(n) }
 
-// questionRow is one question on the page. Template is the agent-answer
-// comment a person posts on GitHub.
+// questionRow is one question on the page. Suggested is the initial text
+// of the answer box. OpenURL is the question's own page on the tracker.
 type questionRow struct {
 	store.Question
-	Title    string
-	URL      string
-	Template string
+	Title       string
+	URL         string
+	OpenURL     string
+	TrackerName string
+	FromBody    bool
 }
 
 // questionItem is a scanned item with problems.
@@ -30,16 +34,16 @@ type questionItem struct {
 	Malformed bool
 }
 
-// projectPass is the scanner's state for one project.
-type projectPass struct {
-	Project string
-	Status  string
-}
-
 type questionsView struct {
 	pageData
-	On        bool
-	Projects  []projectPass
+	On bool
+	// Projects are the projects the scanner covers. With one, the project
+	// filter is fixed to it.
+	Projects  []string
+	Single    bool
+	Active    bool
+	Notices   []string
+	NextIn    int
 	Filter    store.QuestionFilter
 	Questions []questionRow
 	Items     []questionItem
@@ -98,9 +102,35 @@ func (a *app) questionsOn() bool {
 	return false
 }
 
-// answerTemplate is the comment that answers q.
-func answerTemplate(q store.Question) string {
-	return fmt.Sprintf("<!-- agent-answer id=%q -->\n%s\n<!-- /agent-answer -->", q.QID, q.Suggested)
+// trackerName names the tracker that serves rawURL.
+func trackerName(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "issue tracker"
+	}
+	host := strings.ToLower(u.Hostname())
+	switch {
+	case strings.Contains(host, "github"):
+		return "GitHub"
+	case strings.Contains(host, "gitlab"):
+		return "GitLab"
+	}
+	return "issue tracker"
+}
+
+// openURL is the page of question q on the tracker: its comment, or the
+// item when the question is in the description. The comment's own URL is
+// used as the tracker returned it; the comment anchor is added only when
+// that URL has none.
+func openURL(q store.Question, itemURL string) string {
+	if q.AskedCommentID == 0 {
+		return cmp.Or(itemURL, q.AskedCommentURL)
+	}
+	u := cmp.Or(q.AskedCommentURL, itemURL)
+	if u == "" || strings.Contains(u, "#") {
+		return u
+	}
+	return u + "#issuecomment-" + strconv.FormatInt(q.AskedCommentID, 10)
 }
 
 // questionsData collects the questions and problem items for f.
@@ -128,7 +158,7 @@ func (a *app) questionsData(f store.QuestionFilter) ([]questionRow, []questionIt
 	}
 	rows := make([]questionRow, 0, len(qs))
 	for _, q := range qs {
-		row := questionRow{Question: q, Template: answerTemplate(q)}
+		row := questionRow{Question: q, FromBody: q.AskedCommentID == 0}
 		if q.IgnoredAnswers == nil {
 			row.IgnoredAnswers = []store.IgnoredAnswer{}
 		}
@@ -137,46 +167,61 @@ func (a *app) questionsData(f store.QuestionFilter) ([]questionRow, []questionIt
 		} else if it, err := a.store.QuestionItem(q.Project, q.Number); err == nil {
 			row.Title, row.URL = it.Title, it.URL
 		}
+		row.OpenURL, row.TrackerName = openURL(q, row.URL), trackerName(cmp.Or(row.URL, q.AskedCommentURL))
 		rows = append(rows, row)
 	}
 	return rows, withProblems, nil
 }
 
-// passStatuses describes the last scanner pass of each project that has
-// github.questions on.
-func (a *app) passStatuses() []projectPass {
-	var out []projectPass
-	interval := a.questionsSettings().QuestionPassInterval()
+// scanState lists the projects the scanner covers, the problems of its last
+// pass as short notices, and the seconds until the next pass (-1 when no
+// pass has run). A pass that is overdue is reported as due in the time
+// between two checks of the scanner.
+func (a *app) scanState() (projects, notices []string, nextIn int) {
 	for _, t := range a.questions.Targets() {
 		if !a.projectQuestionsOn(t.Project) {
 			continue
 		}
-		p := projectPass{Project: t.Project}
+		projects = append(projects, t.Project)
 		st := a.questions.Status(t.Project)
 		switch {
 		case t.Token == "":
-			p.Status = "no GitHub token"
-		case st.At.IsZero():
-			p.Status = "no pass yet"
-		default:
-			p.Status = fmt.Sprintf("last pass %s ago, %s; next pass due %s", since(st.At.Format(time.RFC3339)), st.Text(), st.At.Add(interval).Local().Format("15:04"))
+			notices = append(notices, t.Project+": no GitHub token")
+		case !st.At.IsZero() && !st.OK:
+			notices = append(notices, t.Project+": last scan failed: "+st.Err)
 		}
-		out = append(out, p)
 	}
-	return out
+	slices.Sort(projects)
+	next := a.questions.NextPass()
+	if next.IsZero() {
+		return projects, notices, -1
+	}
+	return projects, notices, max(int(time.Until(next).Seconds()), scanCheck)
 }
 
+// scanCheck is how often the scanner checks whether a pass is due, in
+// seconds.
+const scanCheck = 15
+
 func (a *app) questionsPage(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	v := questionsView{pageData: a.dataFor(r, "", ""), On: a.questionsOn(), Filter: questionFilter(q)}
+	v := questionsView{pageData: a.dataFor(r, "", ""), On: a.questionsOn(), Filter: questionFilter(r.URL.Query())}
 	v.Nav, v.Title = "questions", "Questions"
 	if v.On {
+		v.Projects, v.Notices, v.NextIn = a.scanState()
+		v.Single = len(v.Projects) == 1
+		switch {
+		case v.Single:
+			v.Filter.Project = v.Projects[0]
+		case !slices.Contains(v.Projects, v.Filter.Project):
+			v.Filter.Project = ""
+		}
+		f := v.Filter
+		v.Active = f.Audience != "" || f.Blocking != "" || f.State != "open" || (!v.Single && f.Project != "")
 		var err error
 		if v.Questions, v.Items, err = a.questionsData(v.Filter); err != nil {
 			a.fail(w, "questions", err)
 			return
 		}
-		v.Projects = a.passStatuses()
 	}
 	execPage(w, "questions", v)
 }

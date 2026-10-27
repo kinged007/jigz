@@ -227,6 +227,16 @@ func (s *Scanner) remember(project string, n int) {
 	s.items[project][n] = true
 }
 
+// NextPass returns when the next pass is due, zero before the first pass.
+func (s *Scanner) NextPass() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.last.IsZero() {
+		return time.Time{}
+	}
+	return s.last.Add(s.Settings().QuestionPassInterval())
+}
+
 // Run checks every few seconds whether a pass is due, until ctx is
 // cancelled.
 func (s *Scanner) Run(ctx context.Context) {
@@ -290,13 +300,23 @@ type ghItem struct {
 	Assignees []struct {
 		Login string `json:"login"`
 	} `json:"assignees"`
-	PullRequest *json.RawMessage `json:"pull_request"`
+	PullRequest       *json.RawMessage `json:"pull_request"`
+	Body              string           `json:"body"`
+	AuthorAssociation string           `json:"author_association"`
+	User              struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 func (g ghItem) item(project, etag string) store.QuestionItem {
 	it := store.QuestionItem{
 		Project: project, Number: g.Number, IsPR: g.PullRequest != nil, Title: g.Title, URL: g.HTMLURL,
 		IssueETag: etag, Labels: []string{}, Assignees: []string{},
+		Body: g.Body, Author: g.User.Login, AuthorAssociation: g.AuthorAssociation,
+	}
+	if !g.CreatedAt.IsZero() {
+		it.CreatedAt = g.CreatedAt.UTC().Format(time.RFC3339)
 	}
 	for _, l := range g.Labels {
 		it.Labels = append(it.Labels, l.Name)
@@ -431,7 +451,7 @@ func (s *Scanner) issue(ctx context.Context, t Target, n int, cached bool) (stor
 		return store.QuestionItem{}, false, err
 	}
 	etag := ""
-	if cached && err == nil {
+	if cached && err == nil && prev.CreatedAt != "" {
 		etag = prev.IssueETag
 	}
 	resp, err := s.gh().Get(ctx, t.Project, t.Token, fmt.Sprintf("/repos/%s/issues/%d", t.Project, n), etag)
@@ -507,6 +527,7 @@ func (s *Scanner) scan(ctx context.Context, t Target, login string, it store.Que
 			return ItemScan{}, err
 		}
 	}
+	comments = append(bodyComment(it), comments...)
 	res := questions.Parse(comments, authorized(t.Project, login, it.Assignees))
 	st := questions.Check(res)
 	it.CommentsETag = cetag
@@ -523,8 +544,24 @@ func (s *Scanner) scan(ctx context.Context, t Target, login string, it store.Que
 	return ItemScan{Item: saved, Result: res, Status: st}, nil
 }
 
+// bodyComment is the item's description as a comment by the item's author,
+// created when the item was. An edit of the description does not change
+// that time, so an answer posted before the edit still answers a question
+// added by it.
+func bodyComment(it store.QuestionItem) []questions.Comment {
+	if strings.TrimSpace(it.Body) == "" {
+		return nil
+	}
+	created, _ := time.Parse(time.RFC3339, it.CreatedAt)
+	return []questions.Comment{{
+		IsBody: true, Author: it.Author, AuthorAssociation: it.AuthorAssociation,
+		URL: it.URL, Created: created, Body: it.Body,
+	}}
+}
+
 func sameItem(prev, it store.QuestionItem) bool {
 	return prev.Title == it.Title && prev.URL == it.URL && prev.IsPR == it.IsPR &&
+		prev.Body == it.Body && prev.Author == it.Author && prev.AuthorAssociation == it.AuthorAssociation &&
 		slices.Equal(prev.Labels, it.Labels) && slices.Equal(prev.Assignees, it.Assignees)
 }
 
@@ -604,7 +641,7 @@ func storeQuestions(res questions.Result) []store.Question {
 	for _, q := range res.Questions {
 		sq := store.Question{
 			QID: q.ID, Audience: q.Audience, Blocking: q.Blocking, Resume: q.Resume,
-			Question: q.Text, Suggested: q.Suggested, AskedCommentURL: q.CommentURL,
+			Question: q.Text, Suggested: q.Suggested, AskedCommentURL: q.CommentURL, AskedCommentID: q.CommentID,
 			AskedAt: q.Asked.UTC().Format(time.RFC3339), AskedCount: q.AskedCount,
 			IgnoredAnswers: []store.IgnoredAnswer{},
 		}

@@ -183,6 +183,11 @@ var migrations = []string{
 		run_id   INTEGER NOT NULL,
 		PRIMARY KEY (project, workflow)
 	);`,
+	`ALTER TABLE question_items ADD COLUMN body TEXT NOT NULL DEFAULT '';
+	ALTER TABLE question_items ADD COLUMN author TEXT NOT NULL DEFAULT '';
+	ALTER TABLE question_items ADD COLUMN author_association TEXT NOT NULL DEFAULT '';
+	ALTER TABLE question_items ADD COLUMN created_at TEXT NOT NULL DEFAULT '';
+	ALTER TABLE questions ADD COLUMN asked_comment_id INTEGER NOT NULL DEFAULT 0;`,
 }
 
 // Open opens dir/history.db, creating the directory and the database, and
