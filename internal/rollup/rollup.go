@@ -36,6 +36,9 @@ type Run struct {
 	Turns      int    `json:"turns"`
 	Tokens     int64  `json:"tokens"`
 	Model      string `json:"model"`
+	AgentKind  string `json:"agent_kind,omitempty"`
+	RuleName   string `json:"rule_name,omitempty"`
+	Effort     string `json:"effort,omitempty"`
 	StartedAt  string `json:"started_at"`
 	// PickUp is when the loop first took this issue on its current
 	// pass, taken from the run history rather than the engine: a retried
@@ -272,6 +275,12 @@ type Session struct {
 	Attempt    int       `json:"attempt"`
 	StartedAt  time.Time `json:"started_at"`
 	Turns      int       `json:"turns"`
+	// AgentKind, RuleName, Model and Effort are what the engine logged
+	// when it dispatched the session.
+	AgentKind string `json:"agent_kind,omitempty"`
+	RuleName  string `json:"rule_name,omitempty"`
+	Model     string `json:"model,omitempty"`
+	Effort    string `json:"effort,omitempty"`
 }
 
 // Loop builds one loop's figures from its database. live says a process
@@ -359,6 +368,7 @@ func runsOf(sessions []Session) []Run {
 	for _, s := range sessions {
 		out = append(out, Run{
 			Identifier: s.Identifier, State: "running", Turns: s.Turns, issueID: s.IssueID,
+			AgentKind: s.AgentKind, RuleName: s.RuleName, Model: s.Model, Effort: s.Effort,
 			StartedAt: s.StartedAt.UTC().Format(time.RFC3339),
 		})
 	}
@@ -426,7 +436,10 @@ func (l *Loop) readSessions(db *sql.DB, schema Schema, known bool) {
 	for i, r := range l.Running {
 		listed[r.issueID] = true
 		if f, ok := inFlight[r.issueID]; ok {
-			l.Running[i].Tokens, l.Running[i].Model = f.tokens, f.model
+			l.Running[i].Tokens = f.tokens
+			if f.model != "" {
+				l.Running[i].Model = f.model
+			}
 		}
 	}
 	if known {

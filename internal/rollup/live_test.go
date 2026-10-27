@@ -2,8 +2,10 @@ package rollup
 
 import (
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -106,5 +108,24 @@ func TestCountRetrying(t *testing.T) {
 	}
 	if n, err := CountRetrying(filepath.Join(t.TempDir(), "none.db")); err != nil || n != 0 {
 		t.Errorf("missing database: retrying = %d, %v, want 0 and no error", n, err)
+	}
+}
+
+func TestSessionKeepsTheLoggedKindAndModelUnlessTheDatabaseHasOne(t *testing.T) {
+	sessions := []Session{
+		{IssueID: "30", Identifier: "acme/app#30", AgentKind: "pi", RuleName: "plan", Model: "logged", Effort: "high"},
+		{IssueID: "31", Identifier: "acme/app#31", AgentKind: "pi", Model: "logged"},
+	}
+	l := Reader{}.Loop("acme/app", "build", fixtureDB(t, inFlight), true, sessions, true)
+	first, second := l.Running[0], l.Running[1]
+	if first.AgentKind != "pi" || first.RuleName != "plan" || first.Effort != "high" || first.Model != "claude-sonnet-5-5" {
+		t.Errorf("first = %+v, want the logged kind, rule and effort with the database model", first)
+	}
+	if second.AgentKind != "pi" || second.Model != "logged" {
+		t.Errorf("second = %+v, want the logged kind and model before the first turn", second)
+	}
+	raw, _ := json.Marshal(second)
+	if !strings.Contains(string(raw), `"agent_kind":"pi"`) {
+		t.Errorf("json = %s, want agent_kind", raw)
 	}
 }

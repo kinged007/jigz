@@ -283,3 +283,13 @@ func serveForm(h http.Handler, method, path, body, origin string) *httptest.Resp
 	h.ServeHTTP(rec, req)
 	return rec
 }
+
+func TestActivePrefersTheLoggedAgentKind(t *testing.T) {
+	f := rollup.Fleet{Loops: []rollup.Loop{{Repo: "a/b", Loop: "w", Running: []rollup.Run{
+		{Identifier: "a/b#1", AgentKind: "pi"}, {Identifier: "a/b#2"},
+	}}}}
+	got := active(f, map[string]string{"a/b/w": "codex"})
+	if len(got) != 2 || got[0].Agent != "pi" || got[1].Agent != "codex" {
+		t.Errorf("agents = %+v, want pi then the configured codex", got)
+	}
+}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"embed"
 	"fmt"
 	"html/template"
@@ -188,8 +189,8 @@ type activeRun struct {
 	State      string
 	Turns      int
 	Tokens     int64
-	// Agent is the loop's agent adapter, empty when the setting is unset
-	// and the engine's own default applies.
+	// Agent is the adapter the engine logged for the session, else the
+	// loop's configured one; empty when neither is known.
 	Agent string
 	Model string
 	// StartedAt is when the engine started this attempt.
@@ -215,7 +216,7 @@ func active(f rollup.Fleet, agents map[string]string) []activeRun {
 			run := activeRun{
 				Repo:       l.Repo,
 				Loop:       l.Loop,
-				Agent:      agents[l.Repo+"/"+l.Loop],
+				Agent:      cmp.Or(r.AgentKind, agents[l.Repo+"/"+l.Loop]),
 				Identifier: r.Identifier,
 				State:      r.State,
 				Turns:      r.Turns,
