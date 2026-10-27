@@ -251,3 +251,65 @@ Every dispatch line carries `agent_kind`, `rule_name`, `model` and `effort`.
 Section 6.4's "a test checks that a run after a change shows its own model" is
 supported directly by the log, and `session_metadata.model_name` /
 `run_history.agent_adapter` are the database side of the same fact.
+
+## Runtime fixture findings (2026-10-27)
+
+Answers the three items sections 2.7, 4.5 and 5.4 marked "to verify with a
+fixture". Full evidence in `/tmp/fixture-report.md`, harness in `/tmp/fixtures/`
+(copy of `internal/fakegithub` plus stub commands that record their argv).
+Both binaries behave identically on all three.
+
+### No per-runtime-block `command` (settles section 4.5 item 5)
+
+`claude-code: {command: ...}` validates with **zero warnings** — the key is not
+even reported as unknown — but it is never executed. The marker file shows
+`agent.command` always runs. With `agent.command` absent the engine falls back
+to the kind's default binary on `PATH` (the real `claude`), not to the block's
+command. Same on upstream.
+
+Consequences:
+
+- The generator never emits `command:` inside a runtime block. `agent.command`
+  is the only lever that selects the executable.
+- Section 4.5 item 5 is settled against merging: rules of different runtimes
+  cannot share one loop, because there is no per-kind command or environment.
+  Separate loops per differing candidate list (section 4.5 item 2) is the only
+  path and is no longer provisional.
+
+### `claude-code.effort` reaches the CLI (settles section 2.7)
+
+With `effort: high` in the `claude-code:` block, the child argv contains
+`--effort high` between `--model` and `--tools`; the child environment carries
+only `HOME`, `PATH`, `PWD`. Without the key there is no `--effort` argument and
+the dispatch line reads `effort=""`. Same on upstream.
+
+Decision 2 ("effort is left out until delivery to each CLI is verified") is
+now half satisfied: delivery to `claude-code` is proven as `--effort <value>`;
+delivery to `pi` is not. The generator still emits no `effort`, because
+`effort` lives in the runtime block and so is per agent kind, not per rule.
+Enabling it is an owner decision and needs the `pi` delivery proof too.
+
+### A query-matching, rule-non-matching item is NOT skipped (settles section 4.5 item 3)
+
+`tracker.query_filter: "label:todo"`, one rule matching `labels:
+["agent:plan"]`. Issue 2 has only `todo`. It is dispatched anyway:
+
+```
+msg="issue dispatched" issue_id=2 rule_name=default
+msg="tick completed" candidates=1 dispatched=1 dispatched_by_rule=0
+  dispatched_by_default=1 dispatched_by_fallback=0
+```
+
+With `dispatch.default` removed it is still dispatched through the fallback
+path (`rule_name=""`, `dispatched_by_fallback=1`). Same on upstream.
+
+Consequence: the rule `match.labels` clause does **not** filter what a loop
+claims. Two loops of one work entry that share a `query_filter` each claim
+every active query-matching item. Loop splitting must fold each group's label
+clauses into its own combined query and `active_states`, as section 4.5 item 3
+already requires — that narrowing is the only mechanism that prevents
+double-claiming, so it is mandatory and not a refinement. Validation must
+reject a split whose combined queries overlap.
+
+Open detail, low priority: which template the fallback path renders when no
+`dispatch.default` exists.

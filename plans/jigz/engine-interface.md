@@ -153,9 +153,10 @@ Consequences for the generator:
 - Settled by probing (`engine-interface-notes.md`, "Engine findings"): `$VAR`
   is not expanded in `agent.command`, and shell quoting in `agent.command` is
   not passed through intact.
-- Still open, each needing a runtime fixture: whether `command` can be set per
-  runtime block, and whether `claude-code.effort` reaches the CLI (it is
-  accepted without warning in the runtime block on both releases).
+- Settled by runtime fixtures (`engine-interface-notes.md`, "Runtime fixture
+  findings"): `command` in a runtime block validates silently but is never
+  executed, so `agent.command` is the only lever; `claude-code.effort` reaches
+  the CLI as `--effort <value>`. Nothing is left open here.
 
 ### 2.8 Discrepancy: `JIG_MODEL`
 
@@ -422,16 +423,21 @@ command or list per rule.
    agent command, model and environment per process, which is verified.
 3. The query of a separate loop is the work `query_filter` combined with the
    label clauses of its rules, and its `active_states` come from the same
-   labels plus the in-progress state, so loops of one entry do not claim the
-   same item. Whether the engine skips an item that matches the query but no
-   rule of the document is unknown (fixture).
+   labels plus the in-progress state. This narrowing is the only thing that
+   keeps loops of one entry from claiming the same item: a fixture shows the
+   engine does **not** skip an item that matches the query but no rule — it
+   dispatches it to `dispatch.default` or through the fallback path
+   (`engine-interface-notes.md`). Validation rejects a split whose combined
+   queries overlap.
 4. Stages chain rules inside one document. When chained rules fall into
    different groups, validation rejects `next` and the first rule's prompt hands
    the item over by changing labels (example 3). Chained rules in one group are
    generated as written.
-5. Merging rules of different runtimes into one loop through the per-rule kind
-   is possible in principle. It is not generated until a fixture shows that
-   per-kind `command` and environment work (to verify with a fixture).
+5. Merging rules of different runtimes into one loop is not possible: a
+   fixture shows a `command` key in a runtime block is accepted but never
+   executed, so there is no per-kind command or environment
+   (`engine-interface-notes.md`). Separate loops per differing candidate list
+   (item 2) is the only path.
 
 ### 4.6 Agent command and environment
 
@@ -749,8 +755,11 @@ Decided by the owner and applied throughout this document.
    (`agents`, `pools`) and `work` (section 3). Assignee is always `@me`;
    milestone is not configurable. The engine target is the fork
    `kinged007/sortie` v1.28.1 until upstream supports `pi` and `github-pr`.
-   `effort` is left out until delivery to each CLI is verified. Secrets are
-   environment variable references.
+   `effort` is not in the model: it is a runtime-block key, so it is per agent
+   kind and not per rule. Delivery to `claude-code` is proven
+   (`--effort <value>`, `engine-interface-notes.md`); delivery to `pi` is not,
+   so no `effort` is generated. Adding it back needs the `pi` proof. Secrets
+   are environment variable references.
 3. **Manager.** First available agent per loop; offline with reason and
    estimated start when none; document rewrite to a backup agent at idle;
    drain and restart on a query filter change (section 5).
@@ -858,6 +867,17 @@ plan; this section records what is done.
   of the six `livelog.go` literals, and the dispatch line carrying
   `agent_kind`, `rule_name`, `model` and `effort`. Sections 4.6, 5.3 and 9 are
   updated to match; the `$JIG_BIN` fallback is dropped.
+- 2026-10-27: runtime fixtures answered the three remaining open questions
+  (`plans/jigz/engine-interface-notes.md`, "Runtime fixture findings"). A
+  `command` key in a runtime block validates silently but is never executed,
+  so section 4.5 item 5 rules out merging different runtimes into one loop and
+  `agent.command` is the only lever. `claude-code.effort` reaches the CLI as
+  `--effort <value>`, so decision 2 is half satisfied; `effort` stays out
+  because it is per agent kind and `pi` delivery is unproven. An item that
+  matches the query but no rule is dispatched through `dispatch.default` or
+  the fallback path, so section 4.5 item 3's query narrowing is the only
+  mechanism that prevents two loops of one entry claiming the same item, and
+  validation must reject overlapping combined queries.
 
 ### 12.3 Deviations from the plan
 
