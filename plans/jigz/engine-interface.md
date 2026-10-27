@@ -794,7 +794,7 @@ plan; this section records what is done.
 | Phase | Branch | Status | Notes |
 | --- | --- | --- | --- |
 | 0 Documentation fix | `feat/engine-interface` | done | README `JIG_MODEL` rows removed (a7c7d4c) |
-| 1 Config model and loader | | not started | |
+| 1 Config model and loader | `feat/engine-interface` | done | merged 4c0ac2b; `internal/config/{work,strict}.go`, `Config.Resolve()`, `UnresolvedRefs()` |
 | 2 Hours and offline handling | | not started | |
 | 3 Document generation | | not started | |
 | 4 Fallback | | not started | |
@@ -822,6 +822,25 @@ plan; this section records what is done.
   `max_concurrent_agents: 0`, the `SORTIE_*` override set, registered kinds,
   rule key behaviour, front-matter keys, log literals, schema tables). The
   findings feed phases 3 to 5.
+- 2026-10-27: phase 1 complete, merged `--no-ff` into `feat/engine-interface`.
+  `.jigz/config.yaml` gains `engine`, `operating_hours`, `tracker`, `hooks`,
+  `agents`, `pools`, `work`. `internal/config/strict.go` walks the YAML node
+  tree against the struct's yaml tags so an unknown key reports its field
+  path (the yaml package's `KnownFields` cannot). Credentials are
+  `{from_env: NAME}` references; a literal is rejected for a key ending in
+  `TOKEN`/`KEY`/`SECRET`/`PASSWORD`; `Config.UnresolvedRefs()` reports the
+  unresolved references per agent. `milestone`, `assignee` and `workflows`
+  are rejected with a message naming the replacement. `FilterFor` reads
+  `work.<slug>.query_filter` and appends `assignee:@me`; budgets move to
+  `work.<slug>.budget`; the `JIG_MILESTONE`/`GH_MILESTONE`/`JIG_ASSIGNEE`
+  reads are dropped. `internal/source/hub.go` stops writing `assignee:`
+  because the loader rejects it (the scope is unchanged: `@me` is the
+  runner's login). Gate green: `gofmt` empty, `go vet` clean, `go build`
+  clean, all 23 packages pass. Review: the strict-key checker is reflection
+  over yaml tags, the only way to name the path of the offending key; tests
+  cover 22 unknown-key cases across every nesting level, the three worked
+  examples of section 3 asserting the resolved structure, secret literal
+  rejection, and the removed-key messages.
 - 2026-10-27: the first phase 1 dispatch died to a provider stall
   (`stall-watchdog-retry`) before producing output; no worktree was created and
   no code was written. Re-dispatched the same brief as `phase1-config-2`, with
