@@ -12,7 +12,7 @@ pre.tail .l::before { content: attr(data-n); display: inline-block; width: 3.5re
   </div>
   <div class="row">
     <a class="btn" href="/logs/{{.Project}}/{{.Workflow}}">Reload</a>
-    <a class="btn" href="/workflows">Workflows</a>
+    {{if not (.Hide.HidesPage "workflows")}}<a class="btn" href="/workflows">Workflows</a>{{end}}
   </div>
 </div>
 {{if .Why}}<p class="empty">{{.Why}}</p>{{else if not .Lines}}<p class="empty">the log is empty</p>{{else}}

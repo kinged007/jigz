@@ -159,7 +159,7 @@ func findUniteDashboardOn(p int) int {
 	if probeFreePort(p) {
 		return 0
 	}
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/", p))
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/status", p))
 	if err != nil {
 		return 0
 	}
@@ -168,7 +168,7 @@ func findUniteDashboardOn(p int) int {
 	if rerr != nil || resp.StatusCode != http.StatusOK {
 		return 0
 	}
-	if strings.Contains(string(body), `name="jig-dashboard" content="unite"`) {
+	if strings.Contains(string(body), `data-dashboard="unite"`) {
 		return p
 	}
 	return 0

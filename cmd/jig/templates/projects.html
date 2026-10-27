@@ -37,19 +37,19 @@
     <p class="sub">Effective configuration, workflows, loops, disk use and history.</p>
   </div>
   <div class="row">
-    <a class="btn" href="/agents">Agent settings</a>
+    {{if not (.Hide.HidesPage "agents")}}<a class="btn" href="/agents">Agent settings</a>{{end}}
   </div>
 </div>
 {{if not .Enabled}}<div class="banner">This project is disabled, so it is never started.</div>{{end}}
 {{if eq .Validation "invalid"}}<div class="banner err">{{.ValidationDetail}}</div>{{end}}
 {{if eq .Validation "failed"}}<div class="banner err">{{.ValidationDetail}}</div>{{end}}
 <div class="grid2">
-  <div class="card"><h3>Effective config</h3>
+  {{if not (.Hide.HidesSection "effective_config")}}<div class="card"><h3>Effective config</h3>
     <div class="tw"><table class="cfg"><thead><tr><th>Key</th><th>Value</th><th>Set by</th></tr></thead><tbody>
     {{range .Config}}<tr><td>{{.Key}}</td><td>{{if .Value}}<code>{{.Value}}</code>{{else}}<span class="muted">&mdash;</span>{{end}}</td><td>{{if .Origin}}<span class="org o-{{.Origin}}">{{.Origin}}</span>{{end}}</td></tr>{{end}}
     </tbody></table></div>
     <p class="legend"><span><span class="org o-default">default</span> Jigz defaults</span><span><span class="org o-repo">repo</span> this project</span><span><span class="org o-workflow">workflow</span> workflow file</span></p>
-  </div>
+  </div>{{end}}
   <div class="card"><h3>Disk use</h3>
     <p style="margin:0 0 .5rem"><b>{{.DiskText}}</b> <span class="muted">in <code>{{.Path}}</code>, measured every 10 minutes</span></p>
     {{with .Disk}}
@@ -78,18 +78,18 @@
   <td><span class="chip v-{{.Status}}">{{if eq .Status "valid"}}valid{{else if eq .Status "invalid"}}invalid{{else}}not checked{{end}}</span>{{if .Warnings}} <span class="tag">{{.Warnings}} warning{{if gt .Warnings 1}}s{{end}}</span>{{end}}</td>
   <td>{{.Detail}}</td></tr>{{end}}
 </tbody></table></div>
-<p class="muted">Validation runs the engine's validation on each file when the page loads. Dispatch rules are on <a href="/workflows">Workflows</a>.</p>
+<p class="muted">Validation runs the engine's validation on each file when the page loads. {{if not (.Hide.HidesPage "workflows")}}Dispatch rules are on <a href="/workflows">Workflows</a>.{{end}}</p>
 {{else}}<p class="empty">No workflow files are installed yet.</p>{{end}}
-<h2>Backups</h2>
+{{if not (.Hide.HidesPage "backups")}}<h2>Backups</h2>
 {{if .Backups}}<div class="tw"><table><thead><tr><th>#</th><th>Time (UTC)</th><th>File</th><th>Saved by</th></tr></thead><tbody>
 {{range .Backups}}<tr><td>{{.ID}}</td><td>{{utc .TS}}</td><td><code>{{.File}}</code></td><td>{{.Actor}}</td></tr>{{end}}
 </tbody></table></div>
 <p class="muted">The project's own files, and the newest backups of the shared config that holds its entry.</p>
-{{else}}<p class="empty">No backups.</p>{{end}}
-<h2>Audit</h2>
+{{else}}<p class="empty">No backups.</p>{{end}}{{end}}
+{{if not (.Hide.HidesSection "audit_log")}}<h2>Audit</h2>
 {{if .Audit}}<div class="tw"><table><thead><tr><th>Time (UTC)</th><th>By</th><th>Action</th><th>Result</th></tr></thead><tbody>
 {{range .Audit}}<tr><td>{{utc .TS}}</td><td>{{.Actor}}</td><td>{{.Action}}</td><td>{{.Result}}</td></tr>{{end}}
 </tbody></table></div>
-{{else}}<p class="empty">No audit entries for this project yet.</p>{{end}}
+{{else}}<p class="empty">No audit entries for this project yet.</p>{{end}}{{end}}
 {{template "statuspoll"}}
 {{template "shell-bottom" .}}{{end}}

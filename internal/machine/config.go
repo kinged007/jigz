@@ -81,6 +81,8 @@ type Config struct {
 	Engine Engine  `yaml:"engine"`
 	// Connected tunes the connected-mode daemon.
 	Connected Connected `yaml:"connected"`
+	// Dashboard holds the dashboard settings.
+	Dashboard Dashboard `yaml:"dashboard"`
 	// Warnings are non-fatal findings from Load, for example file permissions.
 	Warnings []string `yaml:"-"`
 	// Unsupported holds the runtimes the engine cannot run. Their pool
@@ -236,6 +238,9 @@ func (c *Config) validate() error {
 		return err
 	}
 	if err := c.Connected.validate(); err != nil {
+		return err
+	}
+	if err := c.Dashboard.validate(); err != nil {
 		return err
 	}
 	if err := c.Hours.validate("hours"); err != nil {

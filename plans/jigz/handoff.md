@@ -83,8 +83,8 @@ Read, in order:
   are `github.com/kinged007/jigz`; the user directories are `jigz` under
   the XDG roots (`~/.cache/jigz`, `~/.local/share/jigz`,
   `~/.local/state/jigz`, `~/.config/jigz`); the fleet config file is
-  `jigz.yaml`; the log file is `jig.log`; the dashboard meta name is
-  `jig-dashboard`. Shiftd for the hub. The rename is done
+  `jigz.yaml`; the log file is `jig.log`; the unite marker is the
+  `data-dashboard` attribute of the `/status` fragment. Shiftd for the hub. The rename is done
   (`plans/jigz/vision-and-roadmap.md` section 6, "Rename to Jigz").
 - The engine keeps its own names: the `sortie` binary and the `SORTIE_*`
   variables it owns. The scratch workspace keeps its `.sortie/`
@@ -126,6 +126,19 @@ Read, in order:
   migrated.
 
 Open decisions (do not decide them; ask): none at the time of writing.
+
+- Dashboard hiding: `dashboard.hide.pages` and `dashboard.hide.sections`
+  in `machine.yaml` (machine level, because one dashboard can span
+  projects). Every route is listed once in `routeTable` (`cmd/jig/hide.go`)
+  with its page and optional section; the hide check wraps each route, so a
+  handler cannot skip it, and a route without a valid page fails
+  `TestRouteTableNames`. Names are registered in
+  `internal/machine/dashboard.go` (`HidePages`, `HideSections`). Templates
+  use `.Hide.HidesPage`, `.Hide.HidesSection` and `.Hide.HidesLink`. The
+  run page's agent log must wrap itself in
+  `{{if not (.Hide.HidesSection "agent_log")}}` and its data route must set
+  section `agent_log` in `routeTable`. The unite probe requests `/status`
+  because `/` may be hidden.
 
 ## 4. State of the work
 

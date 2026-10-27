@@ -39,7 +39,7 @@
   <td>{{.Label}}</td><td class="num">{{commas .Runs}}</td><td class="num">{{commas .Unmeasured}}</td>
   <td class="num">{{commas .Input}}</td><td class="num">{{commas .Output}}</td><td class="num">{{commas .CacheRead}}</td>
   <td class="num"><b>{{commas .Total}}</b></td><td class="num">&mdash;</td>
-  <td><a href="{{.Href}}">view runs</a></td>
+  <td>{{if not ($.Hide.HidesLink .Href)}}<a href="{{.Href}}">view runs</a>{{end}}</td>
 </tr>
 {{end}}
 </tbody>
@@ -49,7 +49,7 @@
 {{if .Top}}<div class="tw"><table>
 <thead><tr><th>issue or PR</th><th class="num">runs</th><th class="num" title="Summed over all stages and retries">tokens</th><th></th></tr></thead>
 <tbody>
-{{range .Top}}<tr><td>{{.DisplayIdentifier}}</td><td class="num">{{commas .Runs}}</td><td class="num">{{commas .Total}}</td><td><a href="{{.Href}}">view runs</a></td></tr>
+{{range .Top}}<tr><td>{{.DisplayIdentifier}}</td><td class="num">{{commas .Runs}}</td><td class="num">{{commas .Total}}</td><td>{{if not ($.Hide.HidesLink .Href)}}<a href="{{.Href}}">view runs</a>{{end}}</td></tr>
 {{end}}
 </tbody></table></div>{{else}}<p class="empty">No measured runs in this range.</p>{{end}}
 {{end}}
@@ -58,7 +58,7 @@
 {{if .Holds}}<div class="tw"><table>
 <thead><tr><th>budget hold</th><th></th></tr></thead>
 <tbody>
-{{range .Holds}}<tr><td>{{.Msg}}</td><td><a href="{{.Href}}">project</a></td></tr>
+{{range .Holds}}<tr><td>{{.Msg}}</td><td>{{if not ($.Hide.HidesLink .Href)}}<a href="{{.Href}}">project</a>{{end}}</td></tr>
 {{end}}
 </tbody></table></div>{{end}}
 {{end}}

@@ -5,7 +5,7 @@
     <p class="sub">This dashboard's access, versions and paths.</p>
   </div>
   <div class="row">
-    <a class="btn" href="/backups">Backups</a>
+    {{if not (.Hide.HidesPage "backups")}}<a class="btn" href="/backups">Backups</a>{{end}}
   </div>
 </div>
 <div class="grid2">

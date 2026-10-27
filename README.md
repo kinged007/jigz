@@ -293,6 +293,63 @@ and a non-GET request from another origin. Naming one interface
 with `--host` limits the accepted `Host` values to that address and the
 loopback names; a wildcard bind accepts any `Host`.
 
+### Hiding pages and sections
+
+The dashboard has no authentication, so hiding content is its only built-in
+protection when it is reachable beyond localhost. The `dashboard.hide` block
+of `machine.yaml` (see [Working hours and agent accounts](#working-hours-and-agent-accounts))
+lists the pages and sections to hide:
+
+```yaml
+dashboard:
+  hide:
+    pages: [questions, settings, backups, logs]
+    sections: [audit_log, log_tail]
+```
+
+A hidden page is removed from the sidebar and from every link, and every
+route that serves it answers `404`, including its JSON and CSV forms. A
+hidden section is removed from the page that shows it, and a route that
+serves only that section answers `404`. A `404` for a hidden page is the same
+answer as for a path that does not exist. Nothing is hidden by default.
+`jig` commands are not affected.
+
+The setting is per machine because one dashboard can show several
+projects (`--unite`) and has no per-project configuration. The dashboard
+rereads `machine.yaml` when the file changes, so an edit applies without a
+restart. If the `dashboard` block cannot be read after an edit, the last valid
+setting stays in force. If it cannot be read when the dashboard starts, every
+page answers `404`. An unknown page or section name, or a misspelled key, is
+an error that lists the valid names.
+
+Pages:
+
+| Name | Hides |
+|---|---|
+| `operations` | Operations, its live fragment, `GET /api/v1/fleet`, `GET /api/v1/metrics` |
+| `runs` | Runs, the CSV export, run detail pages, `GET /api/v1/runs` |
+| `questions` | Questions, `GET /api/v1/questions` |
+| `usage` | Usage, `GET /api/v1/usage` |
+| `workflows` | Workflows |
+| `projects` | Projects, project detail pages, `GET /api/v1/projects` |
+| `agents` | Agents |
+| `settings` | Settings |
+| `backups` | Backups, and the backups list on project pages |
+| `logs` | The child log page of a workflow |
+
+Sections:
+
+| Name | Hides |
+|---|---|
+| `agent_log` | The agent event log on the run detail page |
+| `log_tail` | The log tail on the run detail page and the endpoint behind it |
+| `audit_log` | The audit log on Operations and project pages, `GET /api/v1/audit` |
+| `effective_config` | The effective configuration table on project pages |
+
+The header load figures (`/status`) are always served. Hiding `projects`
+does not remove the project names that Operations, Runs and the fleet API
+show; hide those pages too when project names are sensitive.
+
 ## Install
 
 macOS and Linux, on Intel or Apple silicon.
@@ -924,6 +981,10 @@ limits:
 engine:
   repo: ""               # owner/name of the engine's GitHub repository; empty = the default
   version: v1.28.1       # release tag, vX.Y.Z; empty = the default
+dashboard:
+  hide:
+    pages: []            # pages to hide; see Hiding pages and sections
+    sections: []         # page sections to hide
 ```
 
 The `engine` block selects the engine release and is optional; an empty

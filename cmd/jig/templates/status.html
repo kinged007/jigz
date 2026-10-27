@@ -2,7 +2,7 @@
      the header, outside the live block, and a CPU percentage is only
      meaningful when it is re-read: a single sample of /proc/stat is
      cumulative since boot. */}}
-{{define "status"}}<div class="status" id="status">
+{{define "status"}}<div class="status" id="status" data-dashboard="{{if .Unite}}unite{{else}}repo{{end}}">
   <span class="metric">
     {{template "icon-memory"}}
     <span class="figures">

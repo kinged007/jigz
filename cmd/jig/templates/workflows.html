@@ -32,7 +32,7 @@
   </div>
 </div>
 {{range .Projects}}
-<h2><span class="chip s-{{.State}}">{{.State}}</span> {{.Slug}} <a class="btn" href="/projects/{{.Slug}}">Project</a> <a class="btn" href="/agents">Agent settings</a></h2>
+<h2><span class="chip s-{{.State}}">{{.State}}</span> {{.Slug}} {{if not ($.Hide.HidesPage "projects")}}<a class="btn" href="/projects/{{.Slug}}">Project</a>{{end}} {{if not ($.Hide.HidesPage "agents")}}<a class="btn" href="/agents">Agent settings</a>{{end}}</h2>
 {{if .Pipeline}}<div class="card"><div class="pipe">{{.Pipeline}}</div></div>{{end}}
 {{if .Files}}{{template "wftable" .Files}}{{end}}
 {{if .Idle}}<details><summary>{{len .Idle}} not started</summary>{{template "wftable" .Idle}}</details>{{end}}

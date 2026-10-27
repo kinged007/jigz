@@ -79,6 +79,7 @@ func serveDashboard(port int, unite bool, sup *supervisor, hostFlag string) {
 		unite:     unite,
 	}
 	a.sup.app = a
+	a.hide = machineHider()
 	a.source = loopsrc.StatusDoc{
 		Reader: rollup.Reader{},
 		Roots:  a.projectRoots,

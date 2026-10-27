@@ -107,8 +107,10 @@ type app struct {
 	verOnce    sync.Once
 	versions   []pair
 	alertCache dbAlertCache
+	// hide is nil when nothing can be hidden, as in tests.
+	hide *hider
 	// unite is set when this page spans every registered repository,
-	// which the page states in its head so a later run can find it.
+	// which the status fragment states so a later run can find it.
 	unite bool
 }
 
