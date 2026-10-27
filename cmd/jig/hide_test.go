@@ -165,9 +165,21 @@ func TestHiddenSectionsLeaveTheRenderedPage(t *testing.T) {
 		{"backups on a project", "<h2>Backups</h2>", func(h hideView) string {
 			return render(t, "project", projectView{pageData: pageData{Hide: h}, Slug: "o/n"})
 		}, []string{"backups"}, ""},
-		{"log_tail on a run", `id="logcard"`, func(h hideView) string {
-			return render(t, "run", runDetailData{pageData: pageData{Hide: h}, Log: logCard{URL: "/x"}})
+		{"log_tail on a run", `id="pane-engine"`, func(h hideView) string {
+			return render(t, "run", runDetailData{pageData: pageData{Hide: h}, Logs: logsView{Engine: logCard{URL: "/x"}}})
 		}, nil, "log_tail"},
+		{"agent_log on a run", `id="pane-agent"`, func(h hideView) string {
+			return render(t, "run", runDetailData{pageData: pageData{Hide: h}, Logs: logsView{AgentURL: "/x"}})
+		}, nil, "agent_log"},
+		{"session on a run", `id="part-session"`, func(h hideView) string {
+			return render(t, "run", runDetailData{pageData: pageData{Hide: h}, Parts: runParts{Hide: h}})
+		}, nil, "session"},
+		{"session on a live run", `id="part-session"`, func(h hideView) string {
+			return render(t, "runlive", runLiveData{pageData: pageData{Hide: h}, Parts: runParts{Hide: h}})
+		}, nil, "session"},
+		{"agent_log on a live run", `id="pane-agent"`, func(h hideView) string {
+			return render(t, "runlive", runLiveData{pageData: pageData{Hide: h}, Parts: runParts{Hide: h}})
+		}, nil, "agent_log"},
 	}
 	for _, c := range cases {
 		if !strings.Contains(c.render(hideView{}), c.marker) {
@@ -235,7 +247,7 @@ func TestHideConfigErrors(t *testing.T) {
 	dir := t.TempDir()
 	for yaml, want := range map[string]string{
 		"dashboard:\n  hide:\n    pages: [nope]\n":    "dashboard.hide.pages: \"nope\" is not a known name (use operations, runs, questions",
-		"dashboard:\n  hide:\n    sections: [nope]\n": "dashboard.hide.sections: \"nope\" is not a known name (use agent_log, log_tail, audit_log, effective_config)",
+		"dashboard:\n  hide:\n    sections: [nope]\n": "dashboard.hide.sections: \"nope\" is not a known name (use agent_log, session, log_tail, audit_log, effective_config)",
 		"dashboard:\n  hide:\n    page: [runs]\n":     "field page not found",
 		"dashboard:\n  hid: {}\n":                     "field hid not found",
 	} {

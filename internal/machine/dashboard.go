@@ -35,7 +35,8 @@ var HidePages = []Name{
 // HideSections are parts of pages that can be hidden while the page stays.
 // A route that serves only a section answers 404 when the section is hidden.
 var HideSections = []Name{
-	{"agent_log", "Agent event log on the run detail page"},
+	{"agent_log", "Agent log and agent events on the run detail page, and the endpoint that serves them"},
+	{"session", "Session id, workspace directory and resume command on the run detail page"},
 	{"log_tail", "Log tail on the run detail page and the endpoint that serves it"},
 	{"audit_log", "Audit log on Operations and project pages and GET /api/v1/audit"},
 	{"effective_config", "Effective configuration table on project pages"},

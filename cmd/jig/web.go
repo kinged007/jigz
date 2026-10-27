@@ -39,6 +39,7 @@ var funcs = template.FuncMap{
 	"gib":      gib,
 	"agent":    agentLabel,
 	"utc":      utc,
+	"evtime":   eventTime,
 	"trunc":    trunc,
 }
 

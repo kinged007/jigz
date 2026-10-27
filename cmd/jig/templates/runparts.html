@@ -1,0 +1,180 @@
+{{define "icon-chat"}}<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>{{end}}
+{{define "icon-tool"}}<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>{{end}}
+{{define "icon-terminal"}}<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>{{end}}
+{{define "icon-dots"}}<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>{{end}}
+{{define "icon-flag"}}<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>{{end}}
+{{define "icon-play"}}<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg>{{end}}
+
+{{define "event-icon"}}{{if eq .Kind "tool_result"}}{{template "icon-tool"}}{{else if eq .Kind "tool_call"}}{{template "icon-terminal"}}{{else if eq .Kind "thinking"}}{{template "icon-dots"}}{{else if eq .Kind "error"}}{{template "icon-alert"}}{{else if eq .Kind "turn"}}{{template "icon-flag"}}{{else if eq .Kind "session"}}{{template "icon-play"}}{{else}}{{template "icon-chat"}}{{end}}{{end}}
+
+{{define "partstyle"}}
+.alog { list-style: none; margin: 0; padding: 0; }
+.ev { display: flex; gap: .5rem; padding: .3rem 0; border-bottom: 1px solid var(--line); }
+.ev .eic { flex: none; color: var(--mut); padding-top: 2px; }
+.ev .evb { min-width: 0; flex: 1; }
+.ev pre { max-height: 12rem; white-space: pre-wrap; word-break: break-word; margin-top: .2rem; }
+.ev.k-thinking { color: var(--mut); }
+.ev.k-tool_result .eic { color: var(--info); }
+.ev.k-tool_call .eic { color: var(--s2); }
+.ev.bad { background: color-mix(in srgb, var(--err) 12%, transparent); }
+.ev.bad .eic { color: var(--err); }
+.ev summary { cursor: pointer; color: var(--mut); overflow-wrap: anywhere; }
+.pane { max-height: 36rem; overflow: auto; }
+.tabs { display: flex; gap: .4rem; margin-bottom: .5rem; }
+.tabs button[aria-selected="true"] { background: var(--acc); color: var(--bg); border-color: var(--acc); font-weight: 700; }
+code.resume { overflow-wrap: anywhere; }
+{{end}}
+
+{{define "run-agentlog"}}{{if .AgentWhy}}<p class="muted">{{.AgentWhy}}.</p>{{end}}{{if .Agent}}<p class="muted">The last {{len .Agent}} events, read from the {{.AgentFrom}}.</p>
+<ol class="alog">{{range .Agent}}<li class="ev k-{{.Kind}}{{if .Failed}} bad{{end}}"><span class="eic">{{template "event-icon" .}}</span>
+  <div class="evb"><div><b>{{.Title}}</b>{{if .Failed}} <span class="chip s-failed">failed</span>{{end}} <span class="muted">{{evtime .Time}}</span></div>
+  {{if .Text}}{{if or (gt (len .Text) 300) (eq .Kind "thinking")}}<details data-k="{{.Time}}|{{.Kind}}|{{.Title}}"><summary>{{trunc .Text 120}}</summary><pre>{{.Text}}</pre></details>{{else}}<pre>{{.Text}}</pre>{{end}}{{if .Truncated}}<span class="muted">cut at 4000 bytes</span>{{end}}{{end}}</div></li>{{end}}</ol>{{else if not .AgentWhy}}<p class="muted">No events yet.</p>{{end}}{{end}}
+
+{{define "run-timeline"}}{{if .Timeline}}<div class="tw maxh"><table>
+  <thead><tr><th>Time (UTC)</th><th>Source</th><th>Kind</th><th>Event</th></tr></thead>
+  <tbody>{{range .Timeline}}<tr{{if .Failed}} class="bad"{{end}}><td>{{evtime .Time}}</td><td><span class="tag">{{.Source}}</span></td><td>{{.Kind}}</td><td>{{.Title}}</td></tr>{{end}}</tbody>
+  </table></div>{{else}}<p class="muted">No events recorded yet.</p>{{end}}{{end}}
+
+{{define "run-session"}}{{if not (.Hide.HidesSection "session")}}<div class="card" id="part-session">
+  <h2>Session</h2>
+  <table><tbody>
+    <tr><td>Session id</td><td>{{if .Session.ID}}<code>{{.Session.ID}}</code>{{else}}<span class="na">not known yet</span>{{end}}</td></tr>
+    <tr><td>Agent adapter</td><td>{{if .Session.Adapter}}{{.Session.Adapter}}{{else}}<span class="na">not available</span>{{end}}</td></tr>
+    {{if .Session.Workspace}}<tr><td>Workspace</td><td><code>{{.Session.Workspace}}</code>{{if .Session.WorkspaceMissing}} <span class="muted">(directory not found)</span>{{end}}</td></tr>{{end}}
+    {{if .Session.Resume}}<tr><td>Resume</td><td><code class="resume">{{.Session.Resume}}</code> <button type="button" data-copy="{{.Session.Resume}}">Copy</button></td></tr>{{end}}
+  </tbody></table>
+  <p class="muted">{{if .Why}}Workspace and resume command: {{.Why}}.{{else}}The resume command works on the machine that has the workspace.{{end}}</p>
+</div>{{end}}{{end}}
+
+{{define "run-tokens-live"}}<div class="card" id="part-tokens">
+  <h2>Token breakdown</h2>
+  {{if .Tokens.SessionStarted}}<div class="stack" role="img" aria-label="Input, output and cache read tokens so far">
+    <i style="flex:{{.Tokens.InputN}};background:var(--info)" title="input {{.Tokens.Input}}"></i><i style="flex:{{.Tokens.OutputN}};background:var(--ok)" title="output {{.Tokens.Output}}"></i><i style="flex:{{.Tokens.CacheN}};background:var(--idle)" title="cache read {{.Tokens.Cache}}"></i></div>
+  <table style="margin-top:.5rem"><tbody>
+    <tr><td><i class="sw" style="background:var(--info)"></i>input</td><td class="num">{{.Tokens.Input}}</td></tr>
+    <tr><td><i class="sw" style="background:var(--ok)"></i>output</td><td class="num">{{.Tokens.Output}}</td></tr>
+    <tr><td><i class="sw" style="background:var(--idle)"></i>cache read</td><td class="num">{{.Tokens.Cache}}</td></tr>
+    <tr><td>cache write</td><td class="num">{{.Tokens.CacheWrite}}</td></tr>
+    <tr><th>total</th><th class="num">{{.Tokens.Total}}</th></tr>
+    {{if .Tokens.Model}}<tr><td>model</td><td class="num">{{.Tokens.Model}}</td></tr>{{end}}
+  </tbody></table>
+  <p class="muted">Totals so far{{if .Tokens.UpdatedAt}}, updated {{evtime .Tokens.UpdatedAt}} UTC{{end}}.</p>
+  {{else}}<p class="muted">The engine reports tokens after the first turn of the session ends.</p>{{end}}
+</div>{{end}}
+
+{{define "run-delivery-live"}}<div class="card" id="part-delivery">
+  <h2>Delivery</h2>
+  <table><tbody>
+    <tr><td>Branch</td><td>{{if .Delivery.Branch}}<code>{{.Delivery.Branch}}</code>{{else}}<span class="na">not recorded yet</span>{{end}}</td></tr>
+    <tr><td>Pull request</td><td>{{if .Delivery.PR}}{{if .Delivery.PRURL}}<a href="{{.Delivery.PRURL}}" target="_blank" rel="noopener">#{{.Delivery.PR}}</a>{{else}}#{{.Delivery.PR}}{{end}}{{else}}<span class="na">not recorded yet</span>{{end}}</td></tr>
+    {{template "run-delivery-extra" .}}
+  </tbody></table>
+  <p class="muted">Read from the files the agent writes in its workspace during the run.</p>
+</div>{{end}}
+
+{{define "run-delivery-extra"}}<tr><td>Commit</td><td>{{if .Delivery.Commit}}<code>{{.Delivery.Commit}}</code>{{else}}<span class="na">not recorded</span>{{end}}</td></tr>
+    <tr><td>Status file</td><td>{{if .Delivery.Status}}{{.Delivery.Status}}{{else}}<span class="na">not written yet</span>{{end}}</td></tr>{{end}}
+
+{{define "run-logs"}}{{$engine := not (.Hide.HidesSection "log_tail")}}{{$agent := not (.Hide.HidesSection "agent_log")}}{{if or $engine $agent}}<div class="card" id="logcard" data-running="{{.Logs.Running}}" data-poll="{{.Logs.PollMs}}">
+  <h2>Logs</h2>
+  <div class="tabs" role="tablist">
+    {{if $agent}}<button type="button" role="tab" data-tab="agent" aria-selected="true">Agent log</button>{{end}}
+    {{if $engine}}<button type="button" role="tab" data-tab="engine" aria-selected="{{if $agent}}false{{else}}true{{end}}">Engine log</button>{{end}}
+  </div>
+  {{if $agent}}<div id="pane-agent" class="pane" role="tabpanel" data-url="{{.Logs.AgentURL}}">{{template "run-agentlog" .Parts}}</div>{{end}}
+  {{if $engine}}<div id="pane-engine" role="tabpanel" data-url="{{.Logs.Engine.URL}}"{{if $agent}} hidden{{end}}>
+    {{if .Logs.Engine.Why}}<p><button type="button" disabled>Load engine log</button> <span class="muted">{{.Logs.Engine.Why}}</span></p>
+    {{else}}<p class="muted">Lines of the workflow log that name this issue{{if not .Logs.Running}}, within the time of this run{{end}}.</p>
+    <p class="row"><button type="button" id="logload">Load engine log</button>
+      <label class="f">Find in log <input type="search" id="logq" placeholder="text"></label>
+      <span class="muted" id="logcount" aria-live="polite"></span></p>
+    <div id="logbox" class="muted">Not loaded. The log is read only when you ask.</div>{{end}}
+  </div>{{end}}
+</div>{{end}}{{end}}
+
+{{define "run-js"}}<script>
+(function () {
+  function copy(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).catch(function () { fallback(text); });
+    }
+    fallback(text);
+  }
+  function fallback(text) {
+    var t = document.createElement('textarea');
+    t.value = text; t.style.position = 'fixed'; t.style.opacity = '0';
+    document.body.appendChild(t); t.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(t);
+  }
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-copy]');
+    if (!b) { return; }
+    copy(b.dataset.copy);
+    var was = b.textContent; b.textContent = 'Copied';
+    setTimeout(function () { b.textContent = was; }, 1500);
+  });
+
+  var card = document.getElementById('logcard');
+  if (!card) { return; }
+  var running = card.dataset.running === 'true', every = parseInt(card.dataset.poll, 10) || 4000;
+  var agent = document.getElementById('pane-agent'), engine = document.getElementById('pane-engine');
+  function bottom(el) { return el.scrollHeight - el.scrollTop - el.clientHeight < 24; }
+
+  card.querySelectorAll('[data-tab]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      card.querySelectorAll('[data-tab]').forEach(function (o) { o.setAttribute('aria-selected', o === b); });
+      if (agent) { agent.hidden = b.dataset.tab !== 'agent'; }
+      if (engine) { engine.hidden = b.dataset.tab !== 'engine'; }
+    });
+  });
+
+  function refreshAgent() {
+    fetch(agent.dataset.url).then(function (r) {
+      if (!r.ok) { location.reload(); return null; }
+      return r.json();
+    }).then(function (d) {
+      if (!d) { return; }
+      var stick = bottom(agent), top = agent.scrollTop, open = {};
+      agent.querySelectorAll('details[open]').forEach(function (x) { open[x.dataset.k] = true; });
+      agent.innerHTML = d.html;
+      agent.querySelectorAll('details').forEach(function (x) { if (open[x.dataset.k]) { x.open = true; } });
+      agent.scrollTop = stick ? agent.scrollHeight : top;
+      if (!d.running) { clearInterval(agentTimer); }
+    }).catch(function () {});
+  }
+  var agentTimer;
+  if (agent) {
+    agent.scrollTop = agent.scrollHeight;
+    if (running) { agentTimer = setInterval(refreshAgent, every); }
+  }
+
+  var load = document.getElementById('logload');
+  if (!engine || !load) { return; }
+  var box = document.getElementById('logbox'), q = document.getElementById('logq'), count = document.getElementById('logcount'), lines = [], loaded = false;
+  function show() {
+    var term = q.value.trim().toLowerCase();
+    var shown = term ? lines.filter(function (l) { return l.toLowerCase().indexOf(term) >= 0; }) : lines;
+    var stick = !loaded || !box.firstChild || bottom(box.firstChild), top = box.firstChild ? box.firstChild.scrollTop : 0;
+    var pre = document.createElement('pre');
+    pre.className = 'log'; pre.tabIndex = 0; pre.setAttribute('aria-label', 'Engine log lines of this run');
+    pre.textContent = shown.join('\n');
+    box.replaceChildren(pre);
+    pre.scrollTop = stick ? pre.scrollHeight : top;
+    count.textContent = shown.length + ' of ' + lines.length + ' lines';
+  }
+  function fetchEngine() {
+    load.disabled = true;
+    fetch(engine.dataset.url).then(function (r) { return r.json(); }).then(function (d) {
+      lines = d.lines || [];
+      if (d.message) { box.textContent = d.message; count.textContent = ''; } else { show(); loaded = true; }
+    }).catch(function () { box.textContent = 'Could not read the log.'; }).then(function () { load.disabled = false; });
+  }
+  load.addEventListener('click', fetchEngine);
+  q.addEventListener('input', function () { if (lines.length) { show(); } });
+  if (running) {
+    fetchEngine();
+    setInterval(function () { if (!engine.hidden) { fetchEngine(); } }, every);
+  }
+})();
+</script>{{end}}

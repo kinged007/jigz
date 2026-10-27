@@ -27,6 +27,8 @@ type runLiveData struct {
 	Attempts []attemptRow
 	Timeline template.HTML
 	Row      runRow
+	Parts    runParts
+	Logs     logsView
 }
 
 // liveHref is the live detail page of a running agent.
@@ -39,6 +41,48 @@ func liveHref(project, workflow, identifier string) string {
 // stored earlier attempts of the same issue. Once the agent is gone the
 // page redirects to the latest stored run of the issue.
 func (a *app) runLive(w http.ResponseWriter, r *http.Request, issue string) {
+	d, redirect, code := a.liveData(r, issue)
+	switch {
+	case redirect != "":
+		http.Redirect(w, r, redirect, http.StatusSeeOther)
+		return
+	case code != 0:
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(code)
+		if err := page.ExecuteTemplate(w, "run-missing", d); err != nil {
+			log.Printf("live run: %v", err)
+		}
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := page.ExecuteTemplate(w, "runlive", d); err != nil {
+		log.Printf("live run: %v", err)
+	}
+}
+
+// runLiveFragment renders the part of the live page that changes. It
+// answers 410 once the run is gone, which tells the page to reload.
+func (a *app) runLiveFragment(w http.ResponseWriter, r *http.Request) {
+	issue, ok := liveID(r.PathValue("id"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	d, redirect, code := a.liveData(r, issue)
+	if redirect != "" || code != 0 {
+		w.WriteHeader(http.StatusGone)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := page.ExecuteTemplate(w, "runlive-body", d); err != nil {
+		log.Printf("live run: %v", err)
+	}
+}
+
+// liveData builds the live page. It returns a redirect target when the
+// agent is gone and a stored run exists, and a status code for any other
+// answer than the page.
+func (a *app) liveData(r *http.Request, issue string) (runLiveData, string, int) {
 	d := runLiveData{pageData: a.dataFor(r, "", ""), Issue: issue}
 	d.Nav, d.Title = "runs", "Live run"
 	d.Project = r.PathValue("owner") + "/" + r.PathValue("name")
@@ -47,8 +91,9 @@ func (a *app) runLive(w http.ResponseWriter, r *http.Request, issue string) {
 	if a.store != nil {
 		var err error
 		if stored, err = a.issueRuns(d.Project, d.Workflow, issue); err != nil {
-			a.fail(w, "live run", err)
-			return
+			log.Printf("live run: %v", err)
+			d.Err = "The run history could not be read."
+			return d, "", http.StatusInternalServerError
 		}
 	}
 	idx := -1
@@ -60,16 +105,10 @@ func (a *app) runLive(w http.ResponseWriter, r *http.Request, issue string) {
 	}
 	if idx < 0 {
 		if n := len(stored); n > 0 {
-			http.Redirect(w, r, storedRow(stored[n-1]).Href, http.StatusSeeOther)
-			return
+			return d, storedRow(stored[n-1]).Href, 0
 		}
 		d.Err = "No agent is running this issue and no run of it is stored."
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusNotFound)
-		if err := page.ExecuteTemplate(w, "run-missing", d); err != nil {
-			log.Printf("live run: %v", err)
-		}
-		return
+		return d, "", http.StatusNotFound
 	}
 	ar := d.pageData.Active[idx]
 	d.Agent = ar
@@ -97,10 +136,13 @@ func (a *app) runLive(w http.ResponseWriter, r *http.Request, issue string) {
 	d.Timeline = attemptTimeline(timelineLabel(ar.Identifier, d.Attempts), d.Attempts, nil)
 	d.Row = runRow{IssueURL: issueURL(d.Project, ar.Identifier, issue)}
 	d.Row.Href = "/runs?" + url.Values{"project": {d.Project}, "workflow": {d.Workflow}, "q": {issue}}.Encode()
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := page.ExecuteTemplate(w, "runlive", d); err != nil {
-		log.Printf("live run: %v", err)
+	in := liveInput(d.Project, d.Workflow, issue, ar)
+	if n := len(stored); n > 0 {
+		in.IssueID = stored[n-1].IssueID
 	}
+	d.Parts = a.runParts(in)
+	d.Logs = a.logsView(in, d.Href+"/agent-log")
+	return d, "", 0
 }
 
 func parseOr(ts string, fallback time.Time) time.Time {
