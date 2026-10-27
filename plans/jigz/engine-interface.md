@@ -918,3 +918,13 @@ None so far.
   `FilterFor` still supplies the query override. The new `work` entries are
   bound to the existing document of the same name from phase 2 onward, and
   generate documents from phase 3 onward.
+
+- 2026-10-27: the first phase 3a dispatch died on a provider billing error
+  ("insufficient credits") after 59 tool calls of design reading and before
+  any code was written. It left one out-of-scope commit that pointed
+  `README.md` at a `ROADMAP.md` it never created; that commit is discarded
+  (`git reset --hard` to the previous tip) because it is broken and outside
+  the phase 3a scope. No generator code exists yet. The re-dispatch gets a
+  tighter brief: the engine facts are stated as settled, it is told to write
+  code early rather than read the whole tree, and it is told to stay inside
+  `internal/gen`.
