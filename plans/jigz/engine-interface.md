@@ -804,7 +804,7 @@ plan; this section records what is done.
 | --- | --- | --- | --- |
 | 0 Documentation fix | `feat/engine-interface` | done | README `JIG_MODEL` rows removed (a7c7d4c) |
 | 1 Config model and loader | `feat/engine-interface` | done | merged 4c0ac2b; `internal/config/{work,strict}.go`, `Config.Resolve()`, `UnresolvedRefs()` |
-| 2 Hours and offline handling | | not started | |
+| 2 Hours and offline handling | `feat/engine-interface` | done | merged 0a2ba54; `gateDecide` per loop, `.jigz/data/state.json`, `d2_offline_reason_and_estimate` |
 | 3 Document generation | | not started | |
 | 4 Fallback | | not started | |
 | 5 Contract tests and CI | | not started | |
@@ -850,6 +850,28 @@ plan; this section records what is done.
   cover 22 unknown-key cases across every nesting level, the three worked
   examples of section 3 asserting the resolved structure, secret literal
   rejection, and the removed-key messages.
+- 2026-10-27: phase 2 complete, merged `--no-ff` into `feat/engine-interface`.
+  `gateDecide` evaluates each loop on the 2-second tick against the candidate
+  agents of its work entry (schedule open, not exhausted, `from_env` resolved,
+  runtime registered in the engine), with operating hours as a second-level
+  constraint. The first available candidate is the loop's agent; otherwise the
+  loop is offline with a reason and an estimated start, the earliest of the
+  next schedule start, the earliest exhaustion reset and the next
+  operating-hours start. The reason that closed the gate picks the end mode:
+  `operating_hours.end` when operating hours closed, else the blocked
+  candidate's `schedule.end` when its hours alone closed, else `finish`.
+  Runtime state moves to `<repo>/.jigz/data/state.json` under flock (per agent
+  `exhausted_until`/`reason`/`last_used`, per loop agent, offline reason and
+  ETA); the legacy XDG `pool.json` is read once and never written. A tick
+  reporting more sessions than the tracker saw keeps the loop busy. `drift` is
+  exposed on `workflowStatus` and left empty for phase 3. Gate green:
+  `gofmt` empty, `go vet` and `go vet -tags acceptance` clean, `go build`
+  clean, all 23 packages pass. Review: `gateDecide` matches section 5.1 and
+  5.2 step for step; the tests assert exact values across the Europe/Berlin
+  spring-forward jump and across Asia/Tokyo versus America/New_York, and cover
+  end-mode precedence in both directions, paused loops, several sessions under
+  `finish` and `stop`, all four no-candidate cases, and the ETA being the
+  earliest of its three inputs.
 - 2026-10-27: the first phase 1 dispatch died to a provider stall
   (`stall-watchdog-retry`) before producing output; no worktree was created and
   no code was written. Re-dispatched the same brief as `phase1-config-2`, with
