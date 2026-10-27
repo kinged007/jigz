@@ -156,3 +156,98 @@ stage, next}]}`. Models are literal lines (`model: "sonnet"`,
   acceptance), `test`, `acceptance`. There is no `schema-fixture` target yet.
 - Existing testdata: `cmd/jig/testdata/` (example.yaml, runpage.js,
   WORKFLOW.*.md), `internal/rollup/testdata/schema18.sql`.
+
+## Engine findings (probed 2026-10-27)
+
+Recorded by running the two cached binaries in `~/.local/share/jigz/`. These
+settle the items section 2.7 and section 7 marked "to verify with a fixture".
+The phase 5 contract tests turn them into assertions.
+
+### Registered kinds
+
+| | v1.28.1 (fork `kinged007/sortie`) | v1.29.0 (upstream `sortie-ai/sortie`) |
+| --- | --- | --- |
+| Trackers | `file, gitea, github, github-pr, gitlab, jira, linear` | `file, gitea, github, gitlab, jira, linear` |
+| Agents | `agent-client-protocol, claude-code, codex, copilot-cli, mock, opencode, pi` | `agent-client-protocol, claude-code, codex, copilot-cli, mock, opencode` |
+
+Confirmed by the `__probe__` document technique of `internal/engine/probe.go`.
+Section 2.7 is correct.
+
+### `validate --format json` shape
+
+```json
+{"valid": false,
+ "errors":   [{"severity":"error","check":"tracker_adapter","message":"..."}],
+ "warnings": [{"severity":"warning","check":"unknown_key","message":"bogus_top: unknown top-level key \"bogus_top\""},
+              {"severity":"warning","check":"unknown_sub_key","message":"agent.bogus_agent_key: unknown key \"bogus_agent_key\" in section \"agent\""}]}
+```
+
+Unknown front-matter keys are **warnings**, not errors: `valid` stays `true`
+and the checks are `unknown_key` (top level) and `unknown_sub_key` (inside a
+section). A document with a rule `agent: pi` on the upstream binary gives
+`{"valid":false,"errors":[{"severity":"error","check":"config.dispatch.rules[0].agent",
+"message":"unknown agent kind \"pi\""}]}`. The phase 5 contract test must
+require `valid: true` AND an empty `warnings` list, not just `valid: true`.
+
+### Flags
+
+Both binaries: `--env-file PATH  Path to .env file for config overrides`,
+`--port PORT  HTTP server port, 0 to disable (default: 7678)`, `-dumpversion`,
+`-V/--version`. Section 7.5 is satisfied by both.
+
+### `agent.command`: `$VAR` is not expanded
+
+`agent.command: /bin/sh -c 'echo PROBE_VAR_VALUE=$PROBE_MARKER > /tmp/ep/out.txt'`
+reaches the runtime with `$PROBE_MARKER` literal (`sh` reports
+`PROBE_VAR_VALUE=$PROBE_MARKER: 1: Syntax error: Unterminated quoted string`).
+The engine does not expand `$VAR` in `agent.command`, and the quoting is not
+passed through intact. Consequences for section 4.6:
+
+- The `$JIG_BIN` fallback is dropped. The generator writes the absolute path
+  of `jig` taken at generation time.
+- `agent.command` must be a single argv-bearing value that does not rely on
+  shell quoting. Generate `agent.command` as the absolute `jig` path plus the
+  agent name, with no shell metacharacters.
+
+### `max_concurrent_agents: 0` does not drain (answers section 5.3 and section 9)
+
+Ran the engine with a `mock` agent against a scratch tracker and varied
+`max_concurrent_agents`, counting the `tick completed` fields:
+
+| setting | candidates | first tick |
+| --- | --- | --- |
+| `1` | 2 | `dispatched=1 running=1` |
+| `0` | 2 | `dispatched=2 running=2` |
+| `0` | 3 | `dispatched=3 running=3` |
+
+`0` means **no limit**, not "claim nothing". There is no document value that
+stops new claims while running sessions finish. Section 5.3's mitigation ("the
+manager sets `max_concurrent_agents: 0` when a drain starts") is not available.
+
+Replacement: drain is `finish` semantics only — `gateStopIdle` stops the loop
+when no session is active. With `max_concurrent_agents > 1` a draining loop can
+claim new items until it becomes idle; that is already the documented README
+limitation and stays a known limitation. Section 9's risk "claims between close
+and stop with several workers" keeps its effect and its mitigation changes to
+"document the limitation; use `stop` end behaviour when it matters".
+
+### Log literals are stable across both binaries
+
+`cmd/jig/livelog.go`'s six literals all appear in both binaries:
+`issue dispatched`, `retried issue dispatched`, `turn completed`,
+`worker exiting`, `worker run failed, scheduling retry`, `tick completed`.
+Near-misses exist and must not be matched: `turn complete`, `worker exit`,
+`session completed`, `worker run failed` (without the retry suffix).
+`tick done` and `turn finished` do not appear.
+
+### Dispatch log carries the model (answers section 6.4)
+
+```
+issue dispatched" issue_id=1 issue_identifier=1 agent_kind=claude-code
+  rule_name=plan model=claude-haiku-5-5 effort=""
+```
+
+Every dispatch line carries `agent_kind`, `rule_name`, `model` and `effort`.
+Section 6.4's "a test checks that a run after a change shows its own model" is
+supported directly by the log, and `session_metadata.model_name` /
+`run_history.agent_adapter` are the database side of the same fact.

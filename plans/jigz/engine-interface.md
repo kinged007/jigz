@@ -150,9 +150,12 @@ Consequences for the generator:
   variables in v1.29.0 and `SORTIE_AGENT_MAX_SESSIONS` in v1.28.1; unverified).
   Each release's keys are confirmed before the generator emits them
   (section 7.8).
-- Unknown, each needing a fixture: whether `$VAR` is expanded in
-  `agent.command`, whether `command` can be set per runtime block, and whether
-  `claude-code.effort` reaches the CLI.
+- Settled by probing (`engine-interface-notes.md`, "Engine findings"): `$VAR`
+  is not expanded in `agent.command`, and shell quoting in `agent.command` is
+  not passed through intact.
+- Still open, each needing a runtime fixture: whether `command` can be set per
+  runtime block, and whether `claude-code.effort` reaches the CLI (it is
+  accepted without warning in the runtime block on both releases).
 
 ### 2.8 Discrepancy: `JIG_MODEL`
 
@@ -448,9 +451,11 @@ resolved from the supervisor's environment and detects usage-limit text
 (section 6.2). Kind and command are in the document, not in `SORTIE_AGENT_*`
 overrides, so an agent change is a document change that the engine re-reads.
 The command uses the absolute path of `jig` at generation time; the digest
-includes it, so moving the binary is drift. If `$VAR` is expanded in
-`agent.command`, `$JIG_BIN` replaces the path (to verify with a fixture). The
-model is a literal line; `JIG_MODEL` is unused.
+includes it, so moving the binary is drift. The engine does not expand `$VAR`
+in `agent.command` and does not pass shell quoting through intact (probed,
+`engine-interface-notes.md`), so the generator writes a literal absolute path
+and no shell metacharacters, and there is no `$JIG_BIN` fallback. The model is
+a literal line; `JIG_MODEL` is unused.
 
 ### 4.7 Engine targets and profiles
 
@@ -528,10 +533,11 @@ decision above is made per loop. With several sessions:
   the tracker saw start is not known and is never treated as idle.
 - A session record gains the agent name (from `agent-exec`); one loop has one
   agent at a time because changes happen at idle.
-- With `finish` the loop can claim new items until idle. To verify with a
-  fixture: whether setting `agent.max_concurrent_agents` to 0 in the
-  re-read document stops new claims while running sessions finish. If it does,
-  the manager sets it when a drain starts and restores it after the change.
+- With `finish` the loop can claim new items until idle. `max_concurrent_agents:
+  0` is not a drain lever: probing the engine shows `0` means no limit, not
+  "claim nothing" (`engine-interface-notes.md`), so no document value stops new
+  claims while running sessions finish. Drain is `finish` semantics only
+  (`gateStopIdle`).
 - A usage limit hit by one session marks the agent exhausted; the other
   sessions of that agent fail on the same limit and the engine retries them.
 - Status per loop: `sessions`, `agent`, `state` (running, draining, offline),
@@ -722,7 +728,7 @@ the contract job and the other fixtures wait for phase 5.
 | Risk | Effect | Mitigation |
 | --- | --- | --- |
 | A loop under continuous load never becomes idle | Agent changes and `finish` are delayed | Measure in acceptance; if needed a bounded wait, then a drain |
-| Claims between close and stop with several workers | Work starts after the gate closed | The `max_concurrent_agents: 0` fixture (section 5.3) |
+| Claims between close and stop with several workers | Work starts after the gate closed | No document value stops new claims (`max_concurrent_agents: 0` means no limit). Use `finish` and accept that a draining loop claims until idle; use `stop` when the gap matters. Document the limitation. |
 | The engine's re-read scope is not proven | A live document change is ignored | The re-read fixture (7.4); restart the loop when a change is not applied |
 | Per-kind commands unverified | Rules cannot share a loop | Separate loops (section 4.5) |
 | Hand edits to a managed document are overwritten | Lost edits | `.bak` copy, drift report, `managed: false` |
@@ -823,6 +829,16 @@ plan; this section records what is done.
   gate rather than stopping early. Baseline on `feat/engine-interface` at
   a7c7d4c is green: `gofmt` empty, `go vet` clean, `go build` clean, all 23
   packages pass `go test ./...`.
+- 2026-10-27: the engine probe (coding-low) ran 84 tool calls and was then
+  killed by the same provider stall before writing its report. Its findings
+  were recovered from the transcript and recorded in
+  `plans/jigz/engine-interface-notes.md` under "Engine findings": registered
+  kinds per release, the `validate --format json` shape (unknown keys are
+  warnings, not errors), the CLI flags, no `$VAR` expansion in
+  `agent.command`, `max_concurrent_agents: 0` meaning no limit, the stability
+  of the six `livelog.go` literals, and the dispatch line carrying
+  `agent_kind`, `rule_name`, `model` and `effort`. Sections 4.6, 5.3 and 9 are
+  updated to match; the `$JIG_BIN` fallback is dropped.
 
 ### 12.3 Deviations from the plan
 
