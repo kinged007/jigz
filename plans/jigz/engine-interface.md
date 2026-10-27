@@ -57,7 +57,7 @@ fleet.
 
 `cmd/jig/workflows/WORKFLOW.issues.md` and `WORKFLOW.prs.md` are complete
 engine files: tracker settings, `db_path` (`jigz-issues.db`, relative to the
-repository root), `workspace.root` (`$JIG_WORKSPACES/<name>`, which is
+workflows directory `.jigz/workflows/`), `workspace.root` (`$JIG_WORKSPACES/<name>`, which is
 `.jigz/workspaces/<name>`; `internal/config/config.go` line 428), `hooks`, an
 `agent:` block (`claude-code`, `max_turns: 10`, `max_concurrent_agents: 1`), a
 `pi:` and a `claude-code:` block with a model, and `dispatch.rules`. The
@@ -160,7 +160,7 @@ README (near line 946) states that `jig` sets `JIG_MODEL` and
 `JIG_MODEL_<WORKFLOW>` from the `model` setting in `jigz.yaml`. No code path
 outside tests loads `jigz.yaml` or calls `fleetconfig.Resolved.Env` and
 `ModelVar`, and documents hold literal models, as generated ones will
-(section 11, item 1).
+(section 10, item 12).
 
 ## 3. Target configuration model
 
@@ -179,8 +179,10 @@ directory. The hub daemon may differ; that is out of scope.
   `.jigz/.env.loop`.
 
 `machine.yaml` settings move into the file: `hours` becomes `operating_hours`,
-`pool` becomes `agents` and `pools`. `dashboard.hide`, `limits` and `connected`
-are open (section 11).
+`pool` becomes `agents` and `pools`, and `dashboard.hide`, `limits` and
+`connected` become keys of the same file. A united dashboard (`--unite`) uses
+the file of the repository where the first united dashboard is spawned
+(section 10, item 10).
 
 ### 3.2 Sections of `.jigz/config.yaml`
 
@@ -224,7 +226,7 @@ pools:
   <name>: [<agent name>, <agent name>]   # order = fallback order
 ```
 
-- `effort` is not accepted (section 11, item 2).
+- `effort` is not accepted (section 10, item 2).
 - Secrets are never stored in the file. A credential is a reference to an
   environment variable of the supervising process, `{ from_env: NAME }`. The
   validator rejects a plain string for a key ending in `TOKEN`, `KEY`, `SECRET`
@@ -368,8 +370,8 @@ Document: `.jigz/workflows/WORKFLOW.<loop>.md`. Database:
 (unchanged for `issues` and `prs`). State: `.jigz/data/state.json`.
 
 The search path of `internal/loopsrc/discover.go` and the `.gitignore` entries
-written by `jig setup` gain `.jigz/data/`. Existing installs keep
-`<repo>/jigz-<name>.db` until migration (section 4.8).
+written by `jig setup` gain `.jigz/data/`; databases left under
+`.jigz/workflows/` are ignored (section 4.8).
 
 ### 4.3 Managed and unmanaged documents
 
@@ -384,7 +386,7 @@ digest covers the file without that line.
   that must change the document (config change, agent change, setup)
   overwrites the hand edit and keeps the previous file as `<name>.md.bak`.
   Hand edits to a managed document are overwritten or reported as drift and
-  are not merged. Section 11, item 4 asks the owner to confirm this.
+  are not merged (section 10, item 13).
 
 `managed: false`: Jigz neither generates nor overwrites the document. It reads
 `tracker.kind` and the rule agents from it for status and for the manager;
@@ -466,23 +468,15 @@ release has no contract tests; a version older than `MinVersion` starts no
 loop. Switching `engine` in the config and running all tests shows what
 breaks.
 
-### 4.8 Migration of existing installs
+### 4.8 Existing installs
 
-Existing installs have `machine.yaml`, a `.jigz/config.yaml` in the current
-format (the new loader rejects `milestone`, `assignee`, `workflows`),
-documents without markers, and `jigz-<name>.db` in the repository root.
-
-- The loader names the new key for each old key it rejects.
-- `jig migrate` converts once after backing up `.jigz/config.yaml` and
-  `machine.yaml`: `hours` to `operating_hours`, `pool` to `agents` and one pool,
-  `workflows.<name>.budget` to `work.<name>.budget`, `filters.<name>` to
-  `work.<name>.query_filter`; it moves `jigz-<name>.db` (with `-wal`, `-shm`)
-  to `.jigz/data/` while the loop is stopped (section 11, item 5).
-- A document equal to a known shipped version (digests compiled into the
-  binary) is adopted and regenerated with the marker; a document that differs
-  stays and its work entry gets `managed: false`.
-- `dashboard.hide`, `limits` and `connected` stay in `machine.yaml` until
-  section 11, item 3 is settled.
+There is no migration (section 10, item 11). Previous user configuration is
+ignored: `machine.yaml` and `jigz.yaml` are not read, and the loader rejects
+the old keys of `.jigz/config.yaml` (`milestone`, `assignee`, `workflows`) with
+a message naming the replacement where one exists. The owner removes the old files and runs `jig
+setup`, which writes the first config copy (section 3.1). Documents without a
+marker are handled as drift (section 4.3); `jigz-<name>.db` files left under
+`.jigz/workflows/` are not read.
 
 ## 5. Scheduling: availability and operating hours
 
@@ -711,13 +705,13 @@ ones and includes its tests and README update.
 
 | Phase | Scope | Acceptance criteria | Tests |
 | --- | --- | --- | --- |
-| 0 | Documentation fix: correct the README `JIG_MODEL` rows (section 2.8), subject to section 11, item 1. No behaviour change | README matches the code | Review |
+| 0 | Documentation fix: correct the README `JIG_MODEL` rows (section 2.8). No behaviour change | README matches the code | Review |
 | 1 | Single-file config model and loader: `engine`, `operating_hours`, `tracker`, `hooks`, `agents`, `pools`, `work` in `internal/config`; strict keys; cross-reference validation; `from_env` handling and rejection of plain secrets; `jig validate` reports config errors. The loader still accepts the current keys, and loops still use the shipped documents | A valid file loads into one resolved struct; invalid files fail with field paths | Config tests for strict keys, error paths, name resolution, the three examples of section 3 |
 | 2 | Agent hours, operating hours and offline handling: per-loop evaluation in `gateDecide`, estimated start time, `jig status` and dashboard fields, state in `.jigz/data/state.json`, concurrency changes of section 5.3 (no document generation; a work entry is bound to the existing document of the same name) | A loop outside agent or operating hours is offline with reason and estimate; `finish` and `stop` behave as in section 5.2; several sessions are handled | Table tests in `gate_test.go` (wrap, DST, both closed, end precedence, paused, several sessions, no candidate); one acceptance case |
-| 3 | Generation of engine documents: templates, names and paths, marker and digest, drift, `managed: false`, loop splitting, atomic write, `jig setup`/`validate`/`reload`/`start` integration, query-change drain and restart, golden files for both engine targets | Output for the default config equals the shipped files except for the marker and paths; a hand edit in a managed document is reported as drift | Golden set (7.2), drift tests, adoption test using the shipped digests |
+| 3 | Generation of engine documents: templates, names and paths, marker and digest, drift, `managed: false`, loop splitting, atomic write, `jig setup`/`validate`/`reload`/`start` integration, query-change drain and restart, golden files for both engine targets | Output for the default config equals the shipped files except for the marker and paths; a hand edit in a managed document is reported as drift | Golden set (7.2), drift tests |
 | 4 | Fallback: candidate lists, rule agent arrays, document rewrite at idle, return to the primary, status and dashboard fields, alert, stages across split loops | Example 2 and 3 behave as section 3 describes | Supervisor tests on the fake clock and state; one acceptance case |
 | 5 | Contract tests and CI: engine profile table folding `rollup.EngineReleases` and `MinVersion`, schema fixtures, log fixtures, flag and probe tests under the `contract` tag, re-read fixture; the four approved CI changes (7.7), each in its own pull request | Adding a release to the table without fixtures fails a test; both profiles pass; switching `engine` in a test config reports breakage | Sections 7.3 to 7.5 |
-| 6 | Cleanup and migration: `jig migrate`, adoption of unmodified shipped documents, move of databases, removal of `fleetconfig.Load`, `plan.Setup/Validate/Apply`, `ApplySettings`, the model-reference pruning and the `jigz.yaml` README text; machine-level reads of `machine.yaml` for hours and pool removed | `go build`, vet and tests pass; no package imports the removed code; old installs convert with a backup | Migration tests on fixture repositories; existing suite |
+| 6 | Cleanup: removal of `fleetconfig.Load`, `plan.Setup/Validate/Apply`, `ApplySettings`, the model-reference pruning and the `jigz.yaml` README text; machine-level reads of `machine.yaml` for hours and pool removed | `go build`, vet and tests pass; no package imports the removed code | Existing suite |
 | 7 | Model-unavailable trigger after fixtures exist | As the fixtures show | Fixture tests of the messages |
 
 Phase 2 needs the loader but no generation. Phase 3 carries the golden files;
@@ -734,7 +728,7 @@ the contract job and the other fixtures wait for phase 5.
 | Hand edits to a managed document are overwritten | Lost edits | `.bak` copy, drift report, `managed: false` |
 | Two loops claim one item | Duplicate work | Label overlap validation, combined queries (section 4.5) |
 | Engine renames a log message or a column | Live view or history breaks | Sections 7.3 and 7.4; degraded notices in `rollup` |
-| Strict keys reject old files | Installs fail to load | `jig migrate`, clear errors (4.8) |
+| Strict keys reject old files | Old files fail to load | Clear errors naming the new keys; `jig setup` writes the first copy (4.8) |
 | Agent changes flap when limits flap | Repeated rewrites | Changes only at idle; cooldown before returning |
 
 ## 10. Decisions
@@ -749,7 +743,8 @@ Decided by the owner and applied throughout this document.
    (`agents`, `pools`) and `work` (section 3). Assignee is always `@me`;
    milestone is not configurable. The engine target is the fork
    `kinged007/sortie` v1.28.1 until upstream supports `pi` and `github-pr`.
-   `effort` is left out. Secrets are environment variable references.
+   `effort` is left out until delivery to each CLI is verified. Secrets are
+   environment variable references.
 3. **Manager.** First available agent per loop; offline with reason and
    estimated start when none; document rewrite to a backup agent at idle;
    drain and restart on a query filter change (section 5).
@@ -764,37 +759,50 @@ Decided by the owner and applied throughout this document.
 8. **Old code.** The `fleetconfig` loader and `internal/plan` settings
    patching are removed in phase 6.
 9. **CI changes are approved** (section 7.7), each its own pull request.
+10. **Dashboard settings and secret references.** There is one configuration
+    file (item 2): `dashboard.hide`, `limits` and `connected` are keys of
+    `.jigz/config.yaml`, and the `from_env` references live in that file and
+    resolve from the supervising process's environment. A united dashboard
+    (`--unite`) uses the configuration and location of the repository where
+    the first united dashboard is spawned.
+11. **No migration.** Previous users and configuration are ignored (section
+    4.8); there is no `jig migrate` and no automatic conversion.
+12. **README `JIG_MODEL`.** The claim is wrong and phase 0 corrects it
+    (section 2.8); `JIG_MODEL` has no use in the target model.
+13. **Conflicting edits.** The section 4.3 behaviour stands: drift is
+    reported, and the next generation that must change the document
+    overwrites the hand edit and keeps a `.bak`.
 
 ## 11. Still open
 
-Each item has options and a recommendation. The owner has not decided them.
+Nothing is open.
 
-1. **README `JIG_MODEL` claim.** Options: A, correct the README now (phase 0);
-   B, leave it. Recommendation: A. The variable has no use in the target model.
-2. **`effort` key.** The engine accepts `claude-code.effort` without warning
-   and records `configured_effort`, but delivery to each CLI is not verified.
-   Options: A, leave `effort` out until delivery per runtime is verified; B,
-   accept it now. Recommendation: A.
-3. **Where the dashboard hide setting and the account secret references
-   live.** `dashboard.hide` is in `~/.config/jigz/machine.yaml` because one
-   dashboard can span several repositories (`--unite`). The usage-limit
-   patterns (`limits`) and `connected` are also in that file. The `from_env`
-   variables are read from the supervising process's environment, so their
-   storage (shell profile, service unit, env file) is outside the repository.
-   Options: A, keep machine-wide dashboard settings in the user directory and
-   leave everything else in the repository; B, add `dashboard.hide` to the
-   repository file and merge the settings when several repositories are
-   united; C, a repository `.jigz/` env file for the references. The owner
-   chooses.
-4. **Conflicting edits of a managed document.** The inferred behaviour
-   (section 4.3): `jig validate` reports drift; the next generation that must
-   change the document overwrites the hand edit and keeps a `.bak`. Options:
-   A, as stated; B, never overwrite a drifted document and refuse to apply the
-   change until the owner resolves it; C, merge. Recommendation: A, because C
-   cannot be tested exhaustively and B can leave a loop on a stale agent.
-5. **Migration of existing users.** Existing `machine.yaml` hours and pool
-   entries and existing `.jigz/config.yaml` files fail strict-key loading in
-   the new format. Options: A, a one-time `jig migrate` the user runs; B,
-   automatic conversion at first load with a backup. Recommendation: B with a
-   backup and a printed summary, with `jig migrate` available to run the same
-   conversion explicitly.
+## 12. Implementation status
+
+Maintained while the work is executed. Every entry names the branch or pull
+request and the tests that gate it. The phase table of section 8 stays the
+plan; this section records what is done.
+
+### 12.1 Phase table
+
+| Phase | Branch | Status | Notes |
+| --- | --- | --- | --- |
+| 0 Documentation fix | `feat/engine-interface` | in progress | README `JIG_MODEL` rows |
+| 1 Config model and loader | | not started | |
+| 2 Hours and offline handling | | not started | |
+| 3 Document generation | | not started | |
+| 4 Fallback | | not started | |
+| 5 Contract tests and CI | | not started | |
+| 6 Cleanup | | not started | |
+| 7 Model-unavailable trigger | | not started | |
+
+### 12.2 Work log
+
+- 2026-10-27: integration branch `feat/engine-interface` created from `main`.
+  Each phase is built in its own git worktree branch and merged into the
+  integration branch after review and the quality gate (`gofmt`, `go vet`,
+  `go build`, `go test ./...`).
+
+### 12.3 Deviations from the plan
+
+None so far.

@@ -1002,8 +1002,6 @@ Env overrides: `JIG_REPO`, `JIG_TOKEN`,
 | `JIG_WORKSPACES` | Directory that holds the agent checkouts. `jig` sets it for each loop (`.jigz/workspaces` by default) and the shipped workflows use it as `workspace.root: $JIG_WORKSPACES/<loop>`. Set it by hand only when validating a workflow file with the engine directly. |
 | `JIG_BIN` | Path of the `jig` binary that the supervisor starts for each loop. Without it, `jig` uses a `jig` binary next to the running one, then `jig` on `PATH`. |
 | `JIG_REGISTRY_DIR` | Directory for the project registry and status files. Unset, they are kept in the shared user cache directory, so several `jig` processes on one machine see each other. `jig daemon` sets it for its loop children so their files stay apart from the shared ones. |
-| `JIG_MODEL` | Model name the agent adapter receives. `jig` sets it from the `model` agent setting of a repository in `jigz.yaml`; a workflow file refers to it as `model: $JIG_MODEL`. |
-| `JIG_MODEL_<WORKFLOW>` | Model for one workflow when `jigz.yaml` overrides `model` for that workflow, for example `JIG_MODEL_BUILD` for `WORKFLOW.build.md` and `JIG_MODEL_REVIEW` for `WORKFLOW.review.md`. `jig` sets these; `-` in a workflow name becomes `_`. |
 
 ### Working hours and agent accounts
 
