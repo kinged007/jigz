@@ -1,5 +1,5 @@
 {{define "backups"}}{{template "shell-top" .}}
-<p class="sub"><a href="/settings">Settings</a> / backups</p>
+<p class="sub">{{if not (.Hide.HidesPage "settings")}}<a href="/settings">Settings</a> / {{end}}backups</p>
 <h1>Backups</h1>
 <p class="sub">Copies of files saved before earlier changes to them.</p>
 {{if .Backups}}

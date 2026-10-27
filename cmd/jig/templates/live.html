@@ -40,7 +40,7 @@ tr.lp td:first-child { padding-left: 1.6rem; }
 
 {{define "livetop"}}<div id="live-top"><span id="active-n" hidden>{{.Ops.Active}}</span>
 {{if .Ops.Alerts}}<h2 style="margin-top:0">Alerts <span class="chip s-{{.Ops.AlertChip}}">{{len .Ops.Alerts}}</span></h2>
-<div class="alerts">{{range .Ops.Alerts}}<div class="alert {{.Sev}}">{{template "icon-alert"}}<span class="k">{{.Kind}}</span><span class="m">{{.Msg}}</span>{{if .Href}}<a href="{{.Href}}">Open</a>{{end}}</div>
+<div class="alerts">{{range .Ops.Alerts}}<div class="alert {{.Sev}}">{{template "icon-alert"}}<span class="k">{{.Kind}}</span><span class="m">{{.Msg}}</span>{{if and .Href (not ($.Hide.HidesLink .Href))}}<a href="{{.Href}}">Open</a>{{end}}</div>
 {{end}}</div>{{else}}<p class="sub" style="margin-bottom:.75rem">No alerts</p>{{end}}
 <div class="tiles">
   <div class="tile" title="Loops with a running process, of all loops"><b>{{.Fleet.Live}}/{{len .Fleet.Loops}}</b><span>loops active</span></div>
@@ -67,7 +67,7 @@ tr.lp td:first-child { padding-left: 1.6rem; }
 <tbody>
 {{range .Ops.Projects}}
 <tr>
-  <td><a href="/projects/{{.Slug}}"><b>{{.Slug}}</b></a><div class="muted">{{len .Loops}} loop{{if ne (len .Loops) 1}}s{{end}}
+  <td>{{if $.Hide.HidesPage "projects"}}<b>{{.Slug}}</b>{{else}}<a href="/projects/{{.Slug}}"><b>{{.Slug}}</b></a>{{end}}<div class="muted">{{len .Loops}} loop{{if ne (len .Loops) 1}}s{{end}}
     <span class="metric-inline" title="Space this repository's directory occupies on disk, measured every 10 minutes">{{template "icon-disk-small"}}{{if .DiskKnown}}{{size .Disk}}{{else}}&mdash;{{end}}</span>
     <span class="metric-inline" title="{{.Dir}}">{{template "icon-folder"}}</span></div></td>
   <td>
@@ -90,7 +90,7 @@ tr.lp td:first-child { padding-left: 1.6rem; }
 {{range .Loops}}
 <tr class="lp">
   <td>{{.L.Loop}} <span class="muted">loop</span>
-    <a class="btn" href="/logs/{{.L.Repo}}/{{.L.Loop}}" title="The last lines of this workflow's child log">log</a></td>
+    {{if not ($.Hide.HidesPage "logs")}}<a class="btn" href="/logs/{{.L.Repo}}/{{.L.Loop}}" title="The last lines of this workflow's child log">log</a>{{end}}</td>
   <td>
     <span class="chip s-{{.Class}}">{{.State}}</span>
     {{if .Paused}}<span class="chip s-paused" title="The budget holds this workflow">{{if .PausedBy}}{{.PausedBy}}{{else}}paused{{end}}</span>{{end}}
@@ -136,7 +136,7 @@ tr.lp td:first-child { padding-left: 1.6rem; }
 <tr>
   <td>{{.Repo}}</td>
   <td>{{.Loop}}</td>
-  <td><a href="{{liveHref .Repo .Loop .Identifier}}"><code>{{.Identifier}}</code></a></td>
+  <td>{{if $.Hide.HidesPage "runs"}}<code>{{.Identifier}}</code>{{else}}<a href="{{liveHref .Repo .Loop .Identifier}}"><code>{{.Identifier}}</code></a>{{end}}</td>
   <td>{{.State}}</td>
   <td class="num">{{.Turns}}</td>
   <td class="num">{{commas .Tokens}}</td>
@@ -151,7 +151,7 @@ tr.lp td:first-child { padding-left: 1.6rem; }
 {{end}}
 </div>
 
-<h2>Audit log</h2>
+{{if not (.Hide.HidesSection "audit_log")}}<h2>Audit log</h2>
 {{if not .Ops.Audit}}<p class="empty">No audit entries yet.</p>
 {{else}}<div class="tw audit"><table>
 <thead><tr><th>When (UTC)</th><th>Who</th><th>Action</th><th>Target</th><th>Result</th></tr></thead>
@@ -159,7 +159,7 @@ tr.lp td:first-child { padding-left: 1.6rem; }
 {{range .Ops.Audit}}<tr><td>{{utc .TS}}</td><td>{{.Actor}}</td><td>{{.Action}}</td><td>{{.Project}}{{if .Target}} ({{.Target}}){{end}}</td><td>{{.Result}}</td></tr>
 {{end}}
 </tbody>
-</table></div>{{end}}
+</table></div>{{end}}{{end}}
 </div>{{end}}
 
 {{define "livescript"}}<script>

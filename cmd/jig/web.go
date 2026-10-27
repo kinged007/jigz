@@ -315,32 +315,7 @@ func serve(a *app, g hostGuard, port int) error {
 }
 
 func (a *app) routes(g hostGuard) http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{$}", a.page)
-	mux.HandleFunc("GET /live", a.live)
-	mux.HandleFunc("GET /usage", a.usage)
-	mux.HandleFunc("GET /runs", a.runs)
-	mux.HandleFunc("GET /runs.csv", a.runsCSV)
-	mux.HandleFunc("GET /questions", a.questionsPage)
-	mux.HandleFunc("GET /runs/{owner}/{name}/{workflow}/{id}", a.runDetail)
-	mux.HandleFunc("GET /runs/{owner}/{name}/{workflow}/log", a.runLog)
-	mux.HandleFunc("GET /logs/{owner}/{name}/{workflow}", a.loopLog)
-	mux.HandleFunc("GET /workflows", a.workflows)
-	mux.HandleFunc("GET /projects", a.projectsPage)
-	mux.HandleFunc("GET /projects/{owner}/{name}", a.projectPage)
-	mux.HandleFunc("GET /agents", a.agents)
-	mux.HandleFunc("GET /settings", a.settings)
-	mux.HandleFunc("GET /backups", a.backupsPage)
-	mux.HandleFunc("GET /status", a.status)
-	mux.HandleFunc("GET /api/v1/fleet", a.apiFleet)
-	mux.HandleFunc("GET /api/v1/projects", a.apiProjects)
-	mux.HandleFunc("GET /api/v1/projects/{owner}/{name}", a.apiProject)
-	mux.HandleFunc("GET /api/v1/runs", a.apiRuns)
-	mux.HandleFunc("GET /api/v1/runs/{rest...}", a.apiRun)
-	mux.HandleFunc("GET /api/v1/usage", a.apiUsage)
-	mux.HandleFunc("GET /api/v1/metrics", a.apiMetrics)
-	mux.HandleFunc("GET /api/v1/audit", a.apiAudit)
-	mux.HandleFunc("GET /api/v1/questions", a.apiQuestions)
+	mux := a.routeMux()
 	return g.guard(func(w http.ResponseWriter, r *http.Request) {
 		if !sameOrigin(r) {
 			http.Error(w, "this page does not answer a request from another origin", http.StatusForbidden)
@@ -429,6 +404,8 @@ type pageData struct {
 	Ops opsView
 	// Sorts are the orderings the Operations page offers.
 	Sorts []string
+	// Hide is what the dashboard hides, for the sidebar and for links.
+	Hide hideView
 	// Unite marks a page that spans every registered repository, which is
 	// how a later --unite run recognises this one before joining it.
 	Unite bool
@@ -475,6 +452,7 @@ func (a *app) data(msg, errMsg string) pageData {
 		Active:     active(f, agents),
 		Sys:        a.readSys(),
 		Unite:      a.unite,
+		Hide:       a.hideView(),
 	}
 }
 

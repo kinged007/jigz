@@ -213,7 +213,7 @@ pre.log { max-height: 20rem; white-space: pre-wrap; word-break: break-all; }
   <p class="muted">The session of this run.</p>
 </div>{{end}}
 
-<div class="card" id="logcard" data-url="{{.Log.URL}}" data-issue="{{.IssueNumber}}">
+{{if not (.Hide.HidesSection "log_tail")}}<div class="card" id="logcard" data-url="{{.Log.URL}}" data-issue="{{.IssueNumber}}">
   <h2>Log tail</h2>
   <p class="muted">Workflow log (latest lines), not filtered to this run. The {{.Run.Workflow}} workflow writes one log for all its issues.</p>
   {{if .Log.Why}}<p><button type="button" disabled>Load log tail</button> <span class="muted">{{.Log.Why}}</span></p>
@@ -222,7 +222,7 @@ pre.log { max-height: 20rem; white-space: pre-wrap; word-break: break-all; }
     <button type="button" id="logissue">this issue (#{{.IssueNumber}})</button>
     <span class="muted" id="logcount" aria-live="polite"></span></p>
   <div id="logbox" class="muted">Not loaded. The log is read only when you ask.</div>{{end}}
-</div>
+</div>{{end}}
 <script>
 (function () {
   var more = document.getElementById('more-attempts');

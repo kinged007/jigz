@@ -207,13 +207,17 @@ func (a *app) detail(r *http.Request, d pageData, slug string) (projectView, boo
 			v.projectSummary = s
 		}
 	}
-	v.Config = a.configRows(res)
+	if !d.Hide.HidesSection("effective_config") {
+		v.Config = a.configRows(res)
+	}
 	for _, n := range projectWorkflows(res) {
 		f := a.workflowFile(res, n)
 		v.Files = append(v.Files, f)
 		v.WorkflowFiles = append(v.WorkflowFiles, wfStatus{Name: n, Status: f.Status, Detail: f.Detail, Warnings: f.Warnings})
 	}
-	v.Config = withFileSettings(v.Config, v.Files)
+	if !d.Hide.HidesSection("effective_config") {
+		v.Config = withFileSettings(v.Config, v.Files)
+	}
 	v.Loops = loopsFor(d.Fleet, slug)
 	a.applyStatus(&v, slug)
 	for _, l := range v.Loops {
@@ -228,8 +232,10 @@ func (a *app) detail(r *http.Request, d pageData, slug string) (projectView, boo
 	}
 	v.Disk = diskSplitOf(res.Dir, a.backupBytes(slug))
 	if a.store != nil {
-		v.Backups = a.projectBackups(slug)
-		if rows, err := a.store.Audit(500); err == nil {
+		if !d.Hide.HidesPage("backups") {
+			v.Backups = a.projectBackups(slug)
+		}
+		if rows, err := a.store.Audit(500); err == nil && !d.Hide.HidesSection("audit_log") {
 			for _, e := range rows {
 				if e.Project == slug && len(v.Audit) < 10 {
 					v.Audit = append(v.Audit, e)

@@ -44,6 +44,10 @@ section 6.
   CLI (`stop`, `restart`, `reload`, `wake`, `cleanup`, `pause`, `resume`,
   `budget override`, `setup`) — exists
 - Backups page lists saved copies of files, without restore — exists
+- `dashboard.hide.pages` and `dashboard.hide.sections` in `machine.yaml`
+  hide pages and sections; a hidden page or section answers 404 on every
+  route that serves it (`hide.go`, `internal/machine/dashboard.go`). This is
+  the built-in protection for a dashboard that is reachable beyond localhost — exists
 - Remove authentication; document local, private-network, and proxy
   deployment [0]
 - `--host` flag, default 127.0.0.1 [0]
