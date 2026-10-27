@@ -136,13 +136,14 @@ sequencing constraints (its phases share one branch and one config model).
 Jigz owns all user-facing configuration in one file (`.jigz/config.yaml`)
 and generates the engine's workflow documents from it; supervision runs
 against the agents' availability. Plan: `plans/jigz/engine-interface.md`.
-Branch `feat/engine-interface`; phases 0 and 1 are done there, the rest is
+Branch `feat/engine-interface`; phases 0 to 2 are done there, the rest is
 open.
 
 - [x] Phase 0: documentation fix (README model-configuration claims)
 - [x] Phase 1: config model and loader (single-file config, resolved work
   entries)
-- [ ] Phase 2: hours and offline handling
+- [x] Phase 2: hours and offline handling (per-loop hours, offline reason
+  and estimated start)
 - [ ] Phase 3: document generation (workflow documents from the config)
 - [ ] Phase 4: fallback (pool fallback order into loop supervision)
 - [ ] Phase 5: contract tests and CI
