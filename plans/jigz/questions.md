@@ -231,24 +231,39 @@ page has no form that posts and no route that writes.
 
 - When no registered project has `github.questions` on, the page shows
   only "Questions are off (github.questions: false)".
-- The time of the last pass per project and its error, if any; a project
-  without a token shows "no GitHub token".
+- Short notices, shown only when something is wrong: a project without a
+  token ("no GitHub token") and a project whose last pass failed, with the
+  error. A countdown ("Next scan in 1:23") counts down to the next pass
+  from the time the server renders; at zero the page waits 3 seconds and
+  reloads once, with its query string.
 - One row per question: project, item link, title, audience, blocking,
-  age, question text, suggested answer, link to the question comment on
-  GitHub, the current answer with its author and link, and "ignored:
-  <author>" with a link for each unauthorized answer.
+  age, question text, a link to the question's comment (or "description"),
+  the current answer with its author and link, and "ignored: <author>"
+  with a link for each unauthorized answer. External links open in a new
+  tab.
 - Filters as query parameters: `audience=product|project`,
-  `blocking=true|false`, `project=<slug>`, `state=open|answered`.
-- Per open question, an answer template in a read-only text area with a
-  Copy button (client-side clipboard only) and a link to the item on
-  GitHub, where the person posts it:
+  `blocking=true|false`, `project=<slug>`, `state=open|answered`. The
+  project filter is a dropdown of the projects the scanner covers. With
+  one project there is no dropdown, the name is shown and always applied.
+  A change to a filter submits the form (client-side script); Apply is the
+  fallback without script, and Reset shows only while a filter is active.
+- Per open question, a text area as wide as the card, filled with the
+  suggested answer only (empty if none), that the person may edit. The
+  Copy button builds the comment in the script and copies it with the
+  clipboard API, or `execCommand("copy")` as a fallback; the person never
+  sees the markers. An empty text area copies nothing. The comment is:
 
   ```markdown
   <!-- agent-answer id="<qid>" -->
-  <suggested answer, or empty>
+  <text area content>
   <!-- /agent-answer -->
   ```
 
+- "Open on <tracker>" per open question, in a new tab: the tracker name
+  comes from the host of the stored URL (GitHub, GitLab, else "issue
+  tracker"). The URL is the comment's own `html_url` as the tracker
+  returned it, with `#issuecomment-<id>` added only if it has no anchor;
+  for a question in the description it is the item's URL.
 - Item problems are listed above the questions with a link to the item
   and the comment: malformed blocks, unknown-id answers, differing
   `resume` values, "resume failed: <error>", and "parked again after the
@@ -259,7 +274,7 @@ page has no form that posts and no route that writes.
 
 There is no refresh route. A rescan button would let anyone who reaches
 the dashboard start a pass, which spends the token's rate limit and can
-change labels. The page shows when the next pass is due.
+change labels. The page shows a countdown to the next pass.
 
 ### 2.7 Answering
 

@@ -1,72 +1,130 @@
 {{define "questions"}}{{template "shell-top" .}}
+<style>
+.qfilters .apply, .qfilters .reset { align-self: flex-end; }
+.qfilters.auto .apply { display: none; }
+.qfilters .fixed { display: flex; flex-direction: column; gap: .15rem; font-size: .92em; color: var(--mut); }
+.qfilters .fixed b { color: var(--fg); font-weight: 600; padding: .15rem 0; }
+.qanswer { display: block; margin: .5rem 0; }
+.qanswer textarea { display: block; width: 100%; max-width: none; min-height: 7rem; margin-top: .25rem; box-sizing: border-box; }
+.nextscan { font-size: .85em; }
+.copied { font-size: .9em; color: var(--ok); }
+</style>
 <div class="pagehead">
   <div>
     <h1>Questions</h1>
-    {{if .On}}<p class="sub">{{len .Questions}} questions{{if .Items}}, {{len .Items}} items need attention{{end}}. To answer, post the template as a comment on GitHub.</p>{{end}}
+    {{if .On}}<p class="sub">{{len .Questions}} questions{{if .Items}}, {{len .Items}} items need attention{{end}}. Edit the suggested answer if needed, copy it and post it as a comment on {{if .Questions}}{{(index .Questions 0).TrackerName}}{{else}}the tracker{{end}}.</p>{{end}}
   </div>
+  {{if and .On (ge .NextIn 0)}}<span class="muted nextscan" id="nextscan" data-in="{{.NextIn}}">Next scan in <span id="nextscan-t"></span></span>{{end}}
 </div>
 {{if not .On}}
 <div class="empty">Questions are off (github.questions: false)</div>
 {{else}}
-<ul class="muted">{{range .Projects}}<li>{{.Project}}: {{.Status}}</li>{{end}}</ul>
-<form class="filters" method="get" action="/questions" role="search">
+{{range .Notices}}<div class="banner warn">{{.}}</div>{{end}}
+<form class="filters qfilters" id="qfilters" method="get" action="/questions" role="search">
+  {{if .Single}}<div class="fixed">Project<b>{{index .Projects 0}}</b></div>
+  {{else}}<label class="f">Project<select name="project"><option value="">all</option>{{range .Projects}}<option value="{{.}}" {{if eq . $.Filter.Project}}selected{{end}}>{{.}}</option>{{end}}</select></label>{{end}}
   <label class="f">Audience<select name="audience"><option value="">all</option><option value="product" {{if eq .Filter.Audience "product"}}selected{{end}}>product</option><option value="project" {{if eq .Filter.Audience "project"}}selected{{end}}>project</option></select></label>
   <label class="f">Blocking<select name="blocking"><option value="">all</option><option value="true" {{if eq .Filter.Blocking "true"}}selected{{end}}>blocking</option><option value="false" {{if eq .Filter.Blocking "false"}}selected{{end}}>non-blocking</option></select></label>
-  <label class="f">Project<input type="search" name="project" value="{{.Filter.Project}}" placeholder="owner/repo"></label>
   <label class="f">State<select name="state"><option value="open" {{if eq .Filter.State "open"}}selected{{end}}>open</option><option value="answered" {{if eq .Filter.State "answered"}}selected{{end}}>answered</option></select></label>
-  <button class="primary" type="submit">Apply</button>
-  <a class="btn" href="/questions">Reset</a>
+  <button class="primary apply" type="submit">Apply</button>
+  {{if .Active}}<a class="btn reset" href="/questions">Reset</a>{{end}}
 </form>
 {{if .Items}}
 <h2>Items needing attention</h2>
 {{range .Items}}
 <div class="card">
-  <h2><a href="{{.URL}}">{{.Project}}#{{.Number}}</a> <span class="muted">{{.Title}}</span></h2>
-  <ul>{{range .Problems}}<li>{{.Message}}{{with .CommentURL}} <a href="{{.}}">comment</a>{{end}}</li>{{end}}</ul>
+  <h2><a href="{{.URL}}" target="_blank" rel="noopener noreferrer">{{.Project}}#{{.Number}}</a> <span class="muted">{{.Title}}</span></h2>
+  <ul>{{range .Problems}}<li>{{.Message}}{{with .CommentURL}} <a href="{{.}}" target="_blank" rel="noopener noreferrer">comment</a>{{end}}</li>{{end}}</ul>
 </div>
 {{end}}
 {{end}}
 {{if .Questions}}
 {{range $i, $q := .Questions}}
 <div class="card">
-  <h2><a href="{{$q.URL}}">{{$q.Project}}#{{$q.Number}}</a> <span class="muted">{{$q.Title}}</span></h2>
+  <h2><a href="{{$q.URL}}" target="_blank" rel="noopener noreferrer">{{$q.Project}}#{{$q.Number}}</a> <span class="muted">{{$q.Title}}</span></h2>
   <p class="row">
     <span class="chip">{{$q.Audience}}</span>
     {{if $q.Blocking}}<span class="chip s-warn">blocking</span>{{else}}<span class="chip">non-blocking</span>{{end}}
     {{if $q.AnsweredAt}}<span class="chip s-succeeded">answered</span>{{end}}
     {{if $q.AskedAt}}<span class="muted" title="{{$q.AskedAt}}">asked {{since $q.AskedAt}} ago</span>{{end}}
     {{if gt $q.AskedCount 1}}<span class="muted">asked {{$q.AskedCount}} times</span>{{end}}
-    {{with $q.AskedCommentURL}}<a href="{{.}}">question comment</a>{{end}}
+    {{with $q.AskedCommentURL}}<a href="{{.}}" target="_blank" rel="noopener noreferrer">{{if $q.FromBody}}description{{else}}question comment{{end}}</a>{{end}}
   </p>
   <p>{{$q.Question.Question}}</p>
+  {{if $q.AnsweredAt}}
   {{with $q.Suggested}}<p><b>Suggested answer:</b> {{.}}</p>{{end}}
-  {{if $q.AnsweredAt}}<p><b>Answer by {{$q.AnsweredBy}}:</b> {{$q.Answer}}{{with $q.AnswerCommentURL}} <a href="{{.}}">comment</a>{{end}}</p>{{end}}
-  {{range $q.IgnoredAnswers}}<p class="muted">ignored: {{.Author}}{{with .CommentURL}} <a href="{{.}}">comment</a>{{end}}</p>{{end}}
+  <p><b>Answer by {{$q.AnsweredBy}}:</b> {{$q.Answer}}{{with $q.AnswerCommentURL}} <a href="{{.}}" target="_blank" rel="noopener noreferrer">comment</a>{{end}}</p>
+  {{end}}
+  {{range $q.IgnoredAnswers}}<p class="muted">ignored: {{.Author}}{{with .CommentURL}} <a href="{{.}}" target="_blank" rel="noopener noreferrer">comment</a>{{end}}</p>{{end}}
   {{if not $q.AnsweredAt}}
-  <div class="field"><label>Answer template<textarea id="answer-{{$i}}" readonly rows="4">{{$q.Template}}</textarea></label></div>
+  <label class="qanswer">Your answer<textarea id="answer-{{$i}}" data-qid="{{$q.QID}}" rows="5" placeholder="Write an answer">{{$q.Suggested}}</textarea></label>
   <p class="row">
-    <button type="button" data-copy="answer-{{$i}}">Copy</button>
-    <a class="btn" href="{{$q.URL}}">Open on GitHub</a>
+    <button type="button" data-copy="answer-{{$i}}">Copy answer</button>
+    <span class="copied" role="status" hidden></span>
+    {{with $q.OpenURL}}<a class="btn" href="{{.}}" target="_blank" rel="noopener noreferrer">Open on {{$q.TrackerName}}</a>{{end}}
   </p>
   {{end}}
 </div>
 {{end}}
-<script>
-document.querySelectorAll("button[data-copy]").forEach(function (b) {
-  b.addEventListener("click", function () {
-    var t = document.getElementById(b.dataset.copy);
-    if (!t) { return; }
-    t.select();
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(t.value);
-    } else {
-      document.execCommand("copy");
-    }
-  });
-});
-</script>
 {{else if not .Items}}
-<div class="empty"><b>No questions match these filters.</b><br>Try a wider state or clear the search.<br><br><a class="btn" href="/questions">Reset filters</a></div>
+<div class="empty"><b>No questions match these filters.</b>{{if .Active}}<br>Try a wider state or clear the filters.<br><br><a class="btn" href="/questions">Reset filters</a>{{end}}</div>
 {{end}}
+<script>
+(function () {
+  var form = document.getElementById("qfilters");
+  if (form) {
+    form.classList.add("auto");
+    form.addEventListener("change", function () { form.submit(); });
+  }
+
+  function block(id, text) {
+    return '<!-- agent-answer id="' + id + '" -->\n' + text + '\n<!-- /agent-answer -->';
+  }
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise(function (resolve, reject) {
+      var t = document.createElement("textarea");
+      t.value = text;
+      t.style.position = "fixed";
+      t.style.opacity = "0";
+      document.body.appendChild(t);
+      t.select();
+      var ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+      document.body.removeChild(t);
+      if (ok) { resolve(); } else { reject(new Error("copy failed")); }
+    });
+  }
+  document.querySelectorAll("button[data-copy]").forEach(function (b) {
+    var area = document.getElementById(b.dataset.copy);
+    var note = b.parentNode.querySelector(".copied");
+    function say(msg) {
+      note.textContent = msg;
+      note.hidden = false;
+      setTimeout(function () { note.hidden = true; }, 2000);
+    }
+    b.addEventListener("click", function () {
+      var text = area.value.trim();
+      if (!text) { say("Write an answer first"); return; }
+      copyText(block(area.dataset.qid, text)).then(function () { say("Copied"); }, function () { say("Copy failed"); });
+    });
+  });
+
+  var next = document.getElementById("nextscan");
+  if (next) {
+    var out = document.getElementById("nextscan-t");
+    var end = Date.now() + Number(next.dataset["in"]) * 1000;
+    var tick = function () {
+      var left = Math.max(0, Math.round((end - Date.now()) / 1000));
+      out.textContent = Math.floor(left / 60) + ":" + String(left % 60).padStart(2, "0");
+      if (left > 0) { setTimeout(tick, 1000); return; }
+      setTimeout(function () { location.reload(); }, 3000);
+    };
+    tick();
+  }
+})();
+</script>
 {{end}}
 {{template "shell-bottom" .}}{{end}}

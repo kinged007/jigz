@@ -769,11 +769,16 @@ rule). Editing the description does not change that time. Answers are read
 from comments only; an `agent-answer` block in a description is ignored.
 
 The Questions page lists the questions of every project with
-`github.questions` on. The dashboard is read-only: the page has links to
-the item and the question comment on GitHub, filters (audience, blocking,
-project, open or answered), and for each open question a copyable answer
-template. It writes nothing to GitHub. If a project has no token, the page
-shows "no GitHub token" for it.
+`github.questions` on. The dashboard is read-only: it writes nothing to
+GitHub. Each open question has a text area filled with the suggested
+answer, which the person can edit. The Copy button copies a complete
+`agent-answer` comment (below) with that text, and "Open on GitHub" opens
+the question's comment, or the item for a question in the description, in a
+new tab to post it. The page has filters (project, audience, blocking, open
+or answered) that apply as they are changed. With one project the project
+filter is fixed. A countdown shows the time to the next scan, and the page
+reloads once when it ends. A project with no token shows "no GitHub
+token", and a failed scan shows its error.
 
 A person answers in one of three ways:
 

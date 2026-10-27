@@ -137,11 +137,14 @@ func TestQuestionsPageIsReadOnly(t *testing.T) {
 	}
 	body := html.UnescapeString(raw)
 	for _, want := range []string{
-		"<!-- agent-answer id=\"q-1\" -->\nBlue.\n<!-- /agent-answer -->",
+		`data-qid="q-1" rows="5" placeholder="Write an answer">Blue.</textarea>`,
 		"Which colour for q-1?",
-		`href="https://github.com/acme/app/issues/1"`,
-		`href="https://github.com/acme/app/issues/1#issuecomment-1"`,
+		`href="https://github.com/acme/app/issues/1" target="_blank" rel="noopener noreferrer"`,
+		`href="https://github.com/acme/app/issues/1#issuecomment-1" target="_blank" rel="noopener noreferrer">Open on GitHub</a>`,
 		`data-copy="answer-0"`,
+		`'\x3C!-- agent-answer id="'`,
+		`'\n\x3C!-- /agent-answer -->'`,
+		`id="nextscan"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("page lacks %q", want)
@@ -169,7 +172,6 @@ func TestQuestionsPageFilters(t *testing.T) {
 		{"/questions?blocking=true", []string{"Which colour for q-1?"}, []string{"Which colour for q-2?"}},
 		{"/questions?blocking=false", []string{"Which colour for q-2?"}, []string{"Which colour for q-1?"}},
 		{"/questions?project=" + qProject, []string{"Which colour for q-1?", "Which colour for q-2?"}, nil},
-		{"/questions?project=other/repo", nil, []string{"Which colour for q-1?", "Which colour for q-2?"}},
 		{"/questions?state=answered", []string{"Which colour for q-3?", "Answer by bot:"}, []string{"Which colour for q-1?", "Which colour for q-2?"}},
 	} {
 		body := getPage(t, r.a, tc.path)
@@ -185,13 +187,16 @@ func TestQuestionsPageFilters(t *testing.T) {
 		}
 	}
 	body := getPage(t, r.a, "/questions?audience=project&blocking=false&project="+qProject+"&state=open")
-	for _, want := range []string{`<option value="project" selected>`, `<option value="false" selected>`, `value="acme/app"`, `<option value="open" selected>`} {
+	for _, want := range []string{`<option value="project" selected>`, `<option value="false" selected>`, `<b>acme/app</b>`, `<option value="open" selected>`, `class="btn reset"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("filter form lacks %q", want)
 		}
 	}
-	if strings.Contains(getPage(t, r.a, "/questions?state=answered"), "agent-answer id") {
-		t.Error("an answered question shows an answer template")
+	if strings.Contains(getPage(t, r.a, "/questions"), `class="btn reset"`) {
+		t.Error("Reset shows with no filter active")
+	}
+	if strings.Contains(getPage(t, r.a, "/questions?state=answered"), "<textarea") {
+		t.Error("an answered question shows an answer box")
 	}
 }
 
@@ -265,7 +270,7 @@ func TestQuestionsPageIgnoredAnswerAndProblems(t *testing.T) {
 			t.Errorf("page lacks %q: %s", want, body)
 		}
 	}
-	if !strings.Contains(html.UnescapeString(body), `id="q-1" -->`) {
+	if !strings.Contains(body, `data-qid="q-1"`) {
 		t.Error("ignored answer closed the question")
 	}
 }

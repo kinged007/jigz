@@ -227,6 +227,16 @@ func (s *Scanner) remember(project string, n int) {
 	s.items[project][n] = true
 }
 
+// NextPass returns when the next pass is due, zero before the first pass.
+func (s *Scanner) NextPass() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.last.IsZero() {
+		return time.Time{}
+	}
+	return s.last.Add(s.Settings().QuestionPassInterval())
+}
+
 // Run checks every few seconds whether a pass is due, until ctx is
 // cancelled.
 func (s *Scanner) Run(ctx context.Context) {
