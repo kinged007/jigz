@@ -139,6 +139,22 @@ Open decisions (do not decide them; ask): none at the time of writing.
   `{{if not (.Hide.HidesSection "agent_log")}}` and its data route must set
   section `agent_log` in `routeTable`. The unite probe requests `/status`
   because `/` may be hidden.
+- Run page files (`internal/runlive`, `cmd/jig/runparts.go`,
+  `templates/runparts.html`): the live data layer reads the agent
+  transcript, workspace files, the engine database and the workflow log.
+  The workspace is `<root>/.jigz/workspaces/<workflow>/<issue id>` unless the
+  engine database records another path inside that directory. The session id
+  comes from the stored run, the engine database, the `accepted_session_id`
+  of the workflow log, or the newest transcript since the attempt started.
+  Transcript directories are derived from the workspace path (pi:
+  `~/.pi/agent/sessions/--<path with - for />--`; claude-code:
+  `~/.claude/projects/<path with - for every non-alphanumeric>`); a file is
+  read only when it resolves inside that directory. Polling routes:
+  `.../{id}/live` (HTML fragment, 410 when the run is gone) and
+  `.../{id}/agent-log` (JSON, section `agent_log`), interval 4 s
+  (`livePollMillis`). Claude transcript line schemas other than
+  `user` and `assistant` with `text`, `thinking`, `tool_use` and
+  `tool_result` blocks are not read.
 
 ## 4. State of the work
 

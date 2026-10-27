@@ -275,6 +275,48 @@ with whatever process is supervising it.
 A repository that stopped keeps its row with its last known state.
 The dashboard answers only `GET` requests; any other method is refused.
 
+### The run page
+
+The page of a run (stored or running) shows the run's status, the attempts
+of its issue, events, tokens, delivery, the session and the logs. The page of a
+running agent is addressed as `/runs/<owner>/<repo>/<workflow>/live-<issue number>`
+and fetches new data every 4 seconds while the run is running, from
+`GET` routes under the same address. It stops fetching when the run is
+finished and then shows the stored run.
+
+While a run is in progress the page reads these sources on the machine that
+runs the loop:
+
+- Tokens and model: the engine database, from the end of the first turn of the
+  session.
+- Delivery: the files the agent writes in its workspace
+  (branch, pull request number, status). The stored pull requests of the issue
+  are shown when GitHub details are on.
+- Session: the session id, the agent kind, the workspace directory and a
+  command that reopens the session (`cd '<workspace>' && claude -r <id>` for
+  `claude-code`, `cd '<workspace>' && pi --session <id>` for `pi`) with a
+  Copy button. The command works only on the machine that has the workspace.
+  Other agent kinds show the session id only.
+- Agent log: the agent's own transcript, which the agent writes under
+  `~/.claude/projects` (`claude-code`) or `~/.pi/agent/sessions` (`pi`)
+  while it runs. Only files in the transcript directory of the run's
+  workspace are read, symlinks that leave that directory are not followed,
+  and the page reads the last 1 MiB of the file. Each entry is shown as a
+  message, a thinking block (collapsed), a tool call, a tool result or an
+  error, with text cut at 4000 bytes.
+- Engine log: the lines of the workflow log that name the issue.
+
+After the run the engine database has the run's event record, which the Agent
+log shows in place of the transcript. A run with no event record falls back to
+the transcript when it is still on this machine. A workspace that was cleaned
+up shows no delivery files. A project that is not on this machine shows the
+stored fields only.
+
+The Agent log, the engine log and the session details can hold text the
+agent read or wrote and paths of the machine. They are not redacted. Hide
+them with the `agent_log`, `log_tail` and `session` sections
+([Hiding pages and sections](#hiding-pages-and-sections)).
+
 ### Access
 
 The dashboard has no authentication. It binds `127.0.0.1` by default, so
@@ -304,7 +346,7 @@ lists the pages and sections to hide:
 dashboard:
   hide:
     pages: [questions, settings, backups, logs]
-    sections: [audit_log, log_tail]
+    sections: [audit_log, log_tail, agent_log, session]
 ```
 
 A hidden page is removed from the sidebar and from every link, and every
@@ -341,8 +383,9 @@ Sections:
 
 | Name | Hides |
 |---|---|
-| `agent_log` | The agent event log on the run detail page |
-| `log_tail` | The log tail on the run detail page and the endpoint behind it |
+| `agent_log` | The agent log tab, the agent steps in the events list, and the endpoint behind them, on the run detail page |
+| `session` | The session id, workspace directory and resume command on the run detail page |
+| `log_tail` | The engine log tab, its milestones in the events list, and the endpoint behind them, on the run detail page |
 | `audit_log` | The audit log on Operations and project pages, `GET /api/v1/audit` |
 | `effective_config` | The effective configuration table on project pages |
 
