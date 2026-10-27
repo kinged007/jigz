@@ -3,6 +3,7 @@ package runlive
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"time"
@@ -12,6 +13,13 @@ import (
 
 // MaxDBEvents is the most engine event rows read for one run.
 const MaxDBEvents = 1000
+
+// MaxRowBytes is the largest event row payload the full-text route reads.
+const MaxRowBytes = 4 << 20
+
+// ErrTooLarge says that a stored record is larger than the full-text route
+// reads.
+var ErrTooLarge = errors.New("record is too large")
 
 func hasColumn(db *sql.DB, table, col string) bool {
 	var n int
@@ -103,7 +111,7 @@ func ReadRunEvents(dbPath, dispatchID string) ([]Event, error) {
 	if db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'run_events'`).Scan(&n) != nil || n == 0 {
 		return nil, nil
 	}
-	rows, err := db.Query(`SELECT COALESCE(at, ''), event, COALESCE(payload, '') FROM run_events
+	rows, err := db.Query(`SELECT seq, COALESCE(at, ''), event, COALESCE(payload, '') FROM run_events
 		WHERE dispatch_id = ? ORDER BY seq LIMIT ?`, dispatchID, MaxDBEvents)
 	if err != nil {
 		return nil, err
@@ -111,16 +119,44 @@ func ReadRunEvents(dbPath, dispatchID string) ([]Event, error) {
 	defer rows.Close()
 	var out []Event
 	for rows.Next() {
+		var seq int64
 		var at, event, payload string
-		if err := rows.Scan(&at, &event, &payload); err != nil {
+		if err := rows.Scan(&seq, &at, &event, &payload); err != nil {
 			return nil, err
 		}
-		out = append(out, rowEvent(at, event, payload))
+		e := rowEvent(MaxText, at, event, payload)
+		e.Ref = RowRef(seq)
+		out = append(out, e)
 	}
 	return out, rows.Err()
 }
 
-func rowEvent(at, event, payload string) Event {
+// ReadRowText returns the message of one engine event row, cut at
+// MaxFullText bytes, and the number of characters cut.
+func ReadRowText(dbPath, dispatchID string, seq int64) (string, int, error) {
+	db, err := open(dbPath)
+	if err != nil {
+		return "", 0, err
+	}
+	defer db.Close()
+	var at, event, payload string
+	var size int64
+	err = db.QueryRow(`SELECT COALESCE(at, ''), event, LENGTH(payload) FROM run_events WHERE dispatch_id = ? AND seq = ?`,
+		dispatchID, seq).Scan(&at, &event, &size)
+	if err != nil {
+		return "", 0, err
+	}
+	if size > MaxRowBytes {
+		return "", 0, ErrTooLarge
+	}
+	if err := db.QueryRow(`SELECT payload FROM run_events WHERE dispatch_id = ? AND seq = ?`, dispatchID, seq).Scan(&payload); err != nil {
+		return "", 0, err
+	}
+	e := rowEvent(MaxFullText, at, event, payload)
+	return e.Text, e.More, nil
+}
+
+func rowEvent(max int, at, event, payload string) Event {
 	var p struct {
 		Message   string `json:"message"`
 		ToolName  string `json:"tool_name"`
@@ -129,17 +165,21 @@ func rowEvent(at, event, payload string) Event {
 	if json.Unmarshal([]byte(payload), &p) != nil {
 		p.Message = payload
 	}
+	var e Event
 	switch event {
 	case "tool_result":
-		return newEvent(at, KindToolResult, "Result: "+p.ToolName, p.Message, p.ToolName, p.ToolError)
+		e = newEventMax(max, at, KindToolResult, "Result: "+p.ToolName, p.Message, p.ToolName, p.ToolError)
 	case "session_started":
-		return newEvent(at, KindSession, "Session started", "", "", false)
+		e = newEventMax(max, at, KindSession, "Session started", "", "", false)
 	case "turn_completed":
-		return newEvent(at, KindTurn, "Turn completed", p.Message, "", false)
+		e = newEventMax(max, at, KindTurn, "Turn completed", p.Message, "", false)
 	case "malformed":
-		return newEvent(at, KindError, "Malformed event", p.Message, "", true)
+		e = newEventMax(max, at, KindError, "Malformed event", p.Message, "", true)
+	default:
+		e = newEventMax(max, at, KindNotification, "Assistant", p.Message, "", false)
 	}
-	return newEvent(at, KindNotification, "Assistant", p.Message, "", false)
+	e.EngineCut = engineCut(p.Message)
+	return e
 }
 
 // IssueLines keeps the lines of an engine log that belong to an issue and

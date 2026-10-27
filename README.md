@@ -301,10 +301,26 @@ runs the loop:
   `~/.claude/projects` (`claude-code`) or `~/.pi/agent/sessions` (`pi`)
   while it runs. Only files in the transcript directory of the run's
   workspace are read, symlinks that leave that directory are not followed,
-  and the page reads the last 1 MiB of the file. Each entry is shown as a
-  message, a thinking block (collapsed), a tool call, a tool result or an
-  error, with text cut at 4000 bytes.
-- Engine log: the lines of the workflow log that name the issue.
+  and the page reads the last 1 MiB of the file, at most the last 300
+  events. Each entry is shown as a message, a thinking block (collapsed), a
+  tool call, a tool result or an error. Messages, notifications and thinking
+  are rendered as Markdown (headings, lists, code blocks, tables, quotes,
+  bold, italic, inline code and `http`, `https` and `mailto` links) by the
+  page script without loading anything from the network. HTML in the text is
+  shown as text. Tool results are rendered as Markdown only when they contain
+  Markdown such as a code fence, bold text or a link, and otherwise stay
+  plain text. Text longer than 4000 bytes is cut in the list and shows how
+  many characters are missing with a Show full button. The button loads the
+  whole text from `GET /runs/<owner>/<repo>/<workflow>/<id>/agent-log/event`
+  (up to 256 KiB, with a note when more is cut). The event is named by its
+  position in the transcript or by the sequence number of its event row, never
+  by a path. The page keeps open blocks and expanded events when it refreshes.
+  The engine shortens long notification and turn messages to 200 or 500
+  characters in its event record; these events are marked "Truncated by the
+  engine" and cannot be expanded.
+- Engine log: the lines of the workflow log that name the issue. The log loads
+  when the Engine log tab opens, and the Reload button and the refresh of a
+  running run read it again.
 
 After the run the engine database has the run's event record, which the Agent
 log shows in place of the transcript. A run with no event record falls back to
@@ -383,7 +399,7 @@ Sections:
 
 | Name | Hides |
 |---|---|
-| `agent_log` | The agent log tab, the agent steps in the events list, and the endpoint behind them, on the run detail page |
+| `agent_log` | The agent log tab, the agent steps in the events list, and the endpoints behind them (the polling route and the full-text route), on the run detail page |
 | `session` | The session id, workspace directory and resume command on the run detail page |
 | `log_tail` | The engine log tab, its milestones in the events list, and the endpoint behind them, on the run detail page |
 | `audit_log` | The audit log on Operations and project pages, `GET /api/v1/audit` |
