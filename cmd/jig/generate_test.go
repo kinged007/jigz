@@ -235,6 +235,71 @@ work:
 	}
 }
 
+// TestValidateOutputReportsDrift wires the generation checks into jig
+// validate: clean passes, a hand edit fails the loop's check.
+func TestValidateOutputReportsDrift(t *testing.T) {
+	t.Setenv("JIG_ENGINE_BIN", testEngineBin(t))
+	root := writeGenConfig(t, genBase()+`work:
+  issues:
+    query_filter: "label:agent:build,in-progress -label:needs-human"
+    agent: builder
+    rules:
+      - { name: build, match: { labels: [agent:build] }, prompt: prompts/build.md }
+`)
+	docs, _, err := generateDocs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := promoteDocs(root, docs); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ensurePrompts(root, docs); err != nil {
+		t.Fatal(err)
+	}
+	if out, ok := validateOutputFor(root, false); !ok {
+		t.Errorf("clean repo fails validate:\n%s", out)
+	}
+	path := gen.DocPath(root, "issues")
+	raw, _ := os.ReadFile(path)
+	if err := os.WriteFile(path, append(raw, []byte("# owner tweak\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, ok := validateOutputFor(root, false)
+	if ok {
+		t.Errorf("drifted repo passes validate:\n%s", out)
+	} else if !strings.Contains(out, "FAIL generation:issues") {
+		t.Errorf("no drift check in output:\n%s", out)
+	}
+}
+
+// TestValidateEngineProfile rejects engines the profile table does not
+// support.
+func TestValidateEngineProfile(t *testing.T) {
+	root := writeGenConfig(t, `repo: owner/repo
+engine: { repo: kinged007/sortie, version: v1.26.0 }
+tracker:
+  kind: github
+  api_key: { from_env: JIG_TEST_TOKEN }
+  project: owner/repo
+  in_progress_state: in-progress
+  handoff_state: agent:done
+agents:
+  builder: { runtime: claude-code, model: claude-haiku-5-5 }
+work:
+  issues:
+    query_filter: "label:agent:build,in-progress -label:needs-human"
+    agent: builder
+    rules:
+      - { name: build, match: { labels: [agent:build] }, prompt: prompts/build.md }
+`)
+	out, ok := validateOutputFor(root, false)
+	if ok {
+		t.Errorf("too-old engine passes validate:\n%s", out)
+	} else if !strings.Contains(out, "FAIL engine") {
+		t.Errorf("no engine check in output:\n%s", out)
+	}
+}
+
 // TestValidateDocsEngine runs the rendered document through the real
 // fork engine: valid with no warnings.
 func TestValidateDocsEngine(t *testing.T) {

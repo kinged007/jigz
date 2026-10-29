@@ -355,6 +355,27 @@ func keys(m map[string]bool) []string {
 	return out
 }
 
+// loopQueryMap resolves every work entry and returns the tracker query
+// of every loop by loop name: the narrowed query for split loops, the
+// entry query otherwise. The daemon boot display and childEnv agree
+// through it.
+func loopQueryMap(cfg *config.Config) map[string]string {
+	out := map[string]string{}
+	resolved := cfg.Resolve()
+	for _, slug := range sortedKeys(resolved) {
+		res := resolved[slug]
+		loops := gen.Split(res, cfg.Agents)
+		if len(loops) == 0 {
+			out[slug] = res.QueryFilter
+			continue
+		}
+		for _, l := range loops {
+			out[l.Name] = l.Query
+		}
+	}
+	return out
+}
+
 // generateAll renders the managed documents, ensures the prompts they
 // point at, engine-validates the renders and then promotes them. It is
 // what setup, start and reload run before anything else. A document on

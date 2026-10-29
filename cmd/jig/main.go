@@ -344,8 +344,15 @@ func run() (code int) {
 	if len(loops) == 0 {
 		fatal(fmt.Errorf("no WORKFLOW.*.md files in %s", filepath.Join(abs, ".jigz", "workflows")))
 	}
+	queries := loopQueryMap(cfg)
 	for _, l := range loops {
-		fmt.Printf("loop %-10s %s filter %q\n", l.name, l.file, cfg.FilterFor(l.name))
+		filter, ok := queries[l.name]
+		if !ok || strings.TrimSpace(filter) == "" {
+			filter = cfg.FilterFor(l.name)
+		} else {
+			filter += " assignee:@me"
+		}
+		fmt.Printf("loop %-10s %s filter %q\n", l.name, l.file, filter)
 	}
 	// An explicit --dashboard-port=N always starts a dashboard on N (fatal
 	// if busy). Otherwise a --unite run joins the live unite dashboard
