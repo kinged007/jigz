@@ -1,5 +1,5 @@
 ---
-# jig:generated v1 skeleton=delivery-planner engine=kinged007/sortie@v1.28.1 sha256=604b92f75b2bfa5e63c78ab38328805799fe559de2e9c9a89efeaba7427e5713
+# jig:generated v1 skeleton=delivery-planner engine=kinged007/sortie@v1.28.1 sha256=a8092471cffdf7ba822e27cd6fdab900a67192a36722d3c72138d1f3d97ad056
 tracker:
   kind: github
   api_key: $JIG_TRACKER_TOKEN
@@ -13,7 +13,7 @@ tracker:
   #
   # The assignee scope is always @me; it is appended at launch, not stored
   # here.
-  query_filter: "label:in-progress -label:needs-human label:agent:plan"
+  query_filter: "-label:needs-human label:agent:plan"
   active_states: [agent:plan, in-progress]
   in_progress_state: in-progress
   handoff_state: 

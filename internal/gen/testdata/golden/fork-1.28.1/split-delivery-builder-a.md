@@ -1,5 +1,5 @@
 ---
-# jig:generated v1 skeleton=delivery-builder-a engine=kinged007/sortie@v1.28.1 sha256=ed2f5b2e1f2de02069ca10e3b989d16cd11a8e6f7d1fd6b82fbaacff3bf4dba1
+# jig:generated v1 skeleton=delivery-builder-a engine=kinged007/sortie@v1.28.1 sha256=ec16589e9e6c8e9f57d2eba47a7fc007171d40cdfaafac9cb864d444634e34b1
 tracker:
   kind: github
   api_key: $JIG_TRACKER_TOKEN
@@ -13,7 +13,7 @@ tracker:
   #
   # The assignee scope is always @me; it is appended at launch, not stored
   # here.
-  query_filter: "label:in-progress -label:needs-human label:agent:build"
+  query_filter: "-label:needs-human label:agent:build"
   active_states: [agent:build, in-progress]
   in_progress_state: in-progress
   handoff_state: 

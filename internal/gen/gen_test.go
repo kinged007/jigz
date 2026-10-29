@@ -58,6 +58,132 @@ work:
 	return cfg, cfg.Agents
 }
 
+// variantFixture loads an inline config for the golden variants below.
+func variantFixture(t *testing.T, body string) (*config.Config, map[string]config.Agent) {
+	t.Helper()
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, ".jigz"), 0o755)
+	if err := os.WriteFile(filepath.Join(dir, ".jigz", "config.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("JIG_TRACKER_TOKEN", "test-token")
+	t.Setenv("SORTIE_TRACKER_API_KEY", "test-key")
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	return cfg, cfg.Agents
+}
+
+func renderEntry(t *testing.T, p Profile, cfg *config.Config, agents map[string]config.Agent, slug string) []byte {
+	t.Helper()
+	loops := Split(cfg.Resolve()[slug], agents)
+	if len(loops) != 1 {
+		t.Fatalf("%s: %d loops, want 1", slug, len(loops))
+	}
+	text, err := Render(p, loops[0], agents, "/usr/local/bin/jig", "prompts/default.md")
+	if err != nil {
+		t.Fatalf("render %s: %v", slug, err)
+	}
+	return text
+}
+
+// TestGoldenVariants pins the remaining section 7.2 shapes: a pool with
+// fallback, a pi agent, a one-group stage chain, and hook and prompt
+// overrides, plus the upstream issues document.
+func TestGoldenVariants(t *testing.T) {
+	p, _, err := ProfileFor("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, agents := variantFixture(t, `repo: owner/repo
+engine: { repo: kinged007/sortie, version: v1.28.1 }
+tracker:
+  kind: github
+  api_key: { from_env: JIG_TRACKER_TOKEN }
+  project: owner/repo
+  in_progress_state: in-progress
+  handoff_state: agent:done
+agents:
+  claude-main: { runtime: claude-code, model: claude-sonnet-5-5 }
+  claude-spare: { runtime: claude-code, model: claude-sonnet-5-5 }
+  pi-api: { runtime: pi, model: sonnet }
+pools:
+  build-pool: [claude-main, claude-spare, pi-api]
+work:
+  issues:
+    query_filter: "label:agent:build,in-progress -label:needs-human"
+    agent: build-pool
+    rules:
+      - { name: build, match: { labels: [agent:build] }, prompt: prompts/build.md }
+`)
+	checkGolden(t, "fork-1.28.1", "pool-issues", renderEntry(t, p, pool, agents, "issues"))
+
+	pi, piAgents := variantFixture(t, `repo: owner/repo
+tracker:
+  kind: github
+  api_key: { from_env: JIG_TRACKER_TOKEN }
+  project: owner/repo
+  in_progress_state: in-progress
+  handoff_state: agent:done
+agents:
+  pi-api: { runtime: pi, model: sonnet }
+work:
+  issues:
+    query_filter: "label:agent:build,in-progress -label:needs-human"
+    agent: pi-api
+    rules:
+      - { name: build, match: { labels: [agent:build] }, prompt: prompts/build.md }
+`)
+	checkGolden(t, "fork-1.28.1", "pi-issues", renderEntry(t, p, pi, piAgents, "issues"))
+
+	chain, chainAgents := variantFixture(t, `repo: owner/repo
+tracker:
+  kind: github
+  api_key: { from_env: JIG_TRACKER_TOKEN }
+  project: owner/repo
+  in_progress_state: in-progress
+  handoff_state: agent:done
+agents:
+  planner: { runtime: claude-code, model: claude-sonnet-5-5 }
+work:
+  delivery:
+    query_filter: "label:in-progress -label:needs-human"
+    agent: planner
+    rules:
+      - { name: plan, match: { labels: [agent:plan] }, prompt: prompts/plan.md, next: chain }
+      - { name: chain, stage: stage-build, prompt: prompts/build.md }
+`)
+	checkGolden(t, "fork-1.28.1", "chain-delivery", renderEntry(t, p, chain, chainAgents, "delivery"))
+
+	hooks, hookAgents := variantFixture(t, `repo: owner/repo
+tracker:
+  kind: github
+  api_key: { from_env: JIG_TRACKER_TOKEN }
+  project: owner/repo
+  in_progress_state: in-progress
+  handoff_state: agent:done
+agents:
+  builder: { runtime: claude-code, model: claude-haiku-5-5 }
+work:
+  issues:
+    query_filter: "label:agent:build,in-progress -label:needs-human"
+    polling_interval_ms: 30000
+    max_turns: 20
+    hooks: { after_create: "echo custom", timeout_ms: 300000 }
+    agent: builder
+    rules:
+      - { name: build, match: { labels: [agent:build] }, prompt: ./prompts/custom.md }
+`)
+	checkGolden(t, "fork-1.28.1", "hooks-issues", renderEntry(t, p, hooks, hookAgents, "issues"))
+
+	up, _, err := ProfileFor("sortie-ai/sortie", "v1.29.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkGolden(t, "upstream-1.29.0", "issues", renderEntry(t, up, pool, agents, "issues"))
+}
+
 // renderLoops renders every loop of every entry of cfg.
 func renderLoops(t *testing.T, p Profile, cfg *config.Config, agents map[string]config.Agent) map[string][]byte {
 	t.Helper()

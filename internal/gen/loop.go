@@ -1,6 +1,7 @@
 package gen
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -39,11 +40,13 @@ type Loop struct {
 // slug; rules with different lists become loops named <slug>-<group>.
 //
 // The query of a loop that shares the entry with others is the entry's
-// query_filter combined with the label clauses of its own rules, and its
-// active_states are those labels plus the in-progress state. That
-// narrowing is the only thing that keeps two loops of one entry from
-// claiming the same item: the engine dispatches a query-matching item
-// even when no rule matches it.
+// query_filter minus its label clauses plus the label clauses of its
+// own rules, and its active_states are those labels plus the
+// in-progress state. Dropping the base labels (rather than appending)
+// is the only thing that keeps two loops of one entry from claiming
+// the same item: the engine dispatches a query-matching item even when
+// no rule matches it. CheckOverlap rejects a split whose combined
+// queries still overlap.
 func Split(res config.Resolved, agents map[string]config.Agent) []Loop {
 	groups := groupRules(res.Rules)
 	if len(groups) == 0 {
@@ -150,18 +153,45 @@ func labelsOf(rules []config.ResolvedRule) []string {
 	return out
 }
 
-// combine narrows a query to the given labels. The labels are the only
-// filter the rules match on today, so the narrowed query is the base
-// query plus one label term per label.
+// combine narrows a base query to the given labels: the base query's
+// exclusions and other qualifiers stay, its label clauses do not. Each
+// loop carries only its own labels, so two loops of one entry never
+// claim the same item. in-progress is not a query term: it lives in
+// active_states, which keeps chained and interrupted items running
+// without widening the query to other loops' items.
 func combine(base string, labels []string) string {
-	if len(labels) == 0 {
-		return base
+	var keep []string
+	for _, term := range strings.Fields(base) {
+		if strings.HasPrefix(term, "label:") {
+			continue
+		}
+		keep = append(keep, term)
 	}
-	terms := make([]string, 0, len(labels))
-	for _, l := range labels {
-		terms = append(terms, "label:"+l)
+	if len(labels) > 0 {
+		keep = append(keep, "label:"+strings.Join(labels, ","))
 	}
-	return strings.TrimSpace(base + " " + strings.Join(terms, ","))
+	return strings.Join(keep, " ")
+}
+
+// CheckOverlap rejects a split whose loops share a rule label: their
+// combined queries would claim the same item, and no active_states
+// narrowing can separate identical queries.
+func CheckOverlap(loops []Loop) error {
+	if len(loops) < 2 {
+		return nil
+	}
+	seen := map[string]string{}
+	for _, l := range loops {
+		for _, r := range l.Rules {
+			for _, lb := range r.Labels {
+				if other, ok := seen[lb]; ok && other != l.Name {
+					return fmt.Errorf("gen: loops %s and %s share label %q; give the rules different labels", other, l.Name, lb)
+				}
+				seen[lb] = l.Name
+			}
+		}
+	}
+	return nil
 }
 
 func activeStates(res config.Resolved, rules []config.ResolvedRule) []string {
