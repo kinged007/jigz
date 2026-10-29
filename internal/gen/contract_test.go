@@ -10,6 +10,7 @@ package gen
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -35,9 +36,13 @@ type validateReport struct {
 
 func engineFor(t *testing.T, p Profile) string {
 	t.Helper()
-	bin := engine.Installed(engine.ShareDirs(), engine.Spec{Repo: p.Repo, Tag: p.Version})
-	if bin == "" {
-		t.Fatalf("no cached engine for %s", p.EngineVersion())
+	spec := engine.Spec{Repo: p.Repo, Tag: p.Version}
+	if bin := engine.Installed(engine.ShareDirs(), spec); bin != "" {
+		return bin
+	}
+	bin, err := engine.Fetch(spec)
+	if err != nil {
+		t.Fatalf("no cached engine for %s and cannot download: %v", p.EngineVersion(), err)
 	}
 	return bin
 }
@@ -224,6 +229,63 @@ func TestContractProbe(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestContractNewestRelease is the weekly canary (section 7.7): it runs
+// only with CONTRACT_CANARY=1, fetches the newest tag of each engine
+// repository and fails when a release has no profile, schema fixture
+// or contract run yet. The failure opens an issue; the owner follows
+// the release checklist (section 7.8).
+func TestContractNewestRelease(t *testing.T) {
+	if os.Getenv("CONTRACT_CANARY") == "" {
+		t.Skip("canary only")
+	}
+	for _, p := range Profiles() {
+		tag := newestRelease(t, p.Repo)
+		if tag == "" {
+			continue
+		}
+		if compareVersion(tag, p.Version) <= 0 {
+			continue
+		}
+		bin, err := engine.Fetch(engine.Spec{Repo: p.Repo, Tag: tag})
+		if err != nil {
+			t.Skipf("cannot download %s@%s: %v", p.Repo, tag, err)
+		}
+		caps := engine.Probe(bin)
+		if !caps.Known() {
+			t.Errorf("%s@%s: probe failed", p.Repo, tag)
+			continue
+		}
+		if got := "v" + caps.Version; got != tag {
+			t.Errorf("%s: probe reports %s, want newest %s", p.Repo, got, tag)
+		}
+		t.Errorf("new engine release %s@%s (profiled: %s): add a profile row, schema fixture and contract run per section 7.8", p.Repo, tag, p.Version)
+	}
+}
+
+// newestRelease returns the newest release tag of a repository, or ""
+// when the network is unavailable.
+func newestRelease(t *testing.T, repo string) string {
+	t.Helper()
+	resp, err := http.Get("https://api.github.com/repos/" + repo + "/releases/latest")
+	if err != nil {
+		t.Logf("releases API unreachable: %v", err)
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Logf("releases API %s: %s", repo, resp.Status)
+		return ""
+	}
+	var body struct {
+		Tag string `json:"tag_name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Logf("releases API decode: %v", err)
+		return ""
+	}
+	return body.Tag
 }
 
 // TestContractRuleAgent pins section 4.5: a rule naming the pi kind
