@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/kinged007/jigz/internal/config"
@@ -20,13 +19,7 @@ import (
 // the gate within a retry interval.
 const stateReadEvery = 10 * time.Second
 
-const (
-	gateHours = "hours"
-	gatePool  = "pool"
-)
-
 // Offline reasons of the work-entry gate. The machine gate keeps its own
-// texts through gateView.hold.
 const (
 	reasonOperatingHours = "outside operating hours"
 	reasonExhausted      = "every agent is exhausted"
@@ -42,22 +35,7 @@ const (
 	gateStart
 	gateStopNow
 	gateStopIdle
-	gateRecycleIdle
 )
-
-// gateView is what the machine settings say at one moment.
-type gateView struct {
-	// Open is false while the window is closed or the pool has no
-	// available account.
-	Open      bool
-	HoursOpen bool
-	// Runtime is the runtime of the first available pool entry, empty
-	// without a pool or when none is available.
-	Runtime string
-	Next    time.Time
-	// Reason is gateHours or gatePool while the gate is closed.
-	Reason string
-}
 
 // loopView is one loop's availability at one moment: the work entry's
 // operating hours and candidate agents, intersected with the machine
@@ -95,8 +73,7 @@ type gateAct struct {
 
 // gateInputs are the settings the gate decision reads.
 type gateInputs struct {
-	machine *machine.Config
-	state   machine.State
+	state machine.State
 	// work holds the resolved work entries by loop name. A loop without
 	// an entry has no candidate agents.
 	work map[string]config.Resolved
@@ -107,31 +84,15 @@ type gateInputs struct {
 	engine    engine.Gate
 }
 
-func gateEval(cfg *machine.Config, st machine.State, now time.Time) gateView {
-	v := gateView{HoursOpen: cfg.Hours.Open(now), Next: cfg.NextChange(st, now)}
-	if len(cfg.Pool) > 0 {
-		v.Runtime = cfg.ActiveRuntime(st, now)
-	}
-	switch {
-	case !v.HoursOpen:
-		v.Reason = gateHours
-	case len(cfg.Pool) > 0 && v.Runtime == "":
-		v.Reason = gatePool
-	}
-	v.Open = v.Reason == ""
-	return v
-}
-
-// gateDecide returns the machine gate view, the per-loop decisions and
-// the actions that bring the loops in line with the settings. Stopping
-// when idle and recycling are left to the caller to carry out once the
-// loop has no running session.
-func gateDecide(in gateInputs, now time.Time, loops []gateLoop) (gateView, map[string]loopView, []gateAct) {
-	mv := gateEval(in.machine, in.state, now)
+// gateDecide returns the per-loop decisions and the actions that bring
+// the loops in line with the settings. Stopping when idle and
+// recycling are left to the caller to carry out once the loop has no
+// running session.
+func gateDecide(in gateInputs, now time.Time, loops []gateLoop) (map[string]loopView, []gateAct) {
 	views := map[string]loopView{}
 	var acts []gateAct
 	for _, l := range loops {
-		lv := in.loopView(l.name, mv, now)
+		lv := in.loopView(l.name, now)
 		views[l.name] = lv
 		a := gateNone
 		switch {
@@ -145,32 +106,18 @@ func gateDecide(in gateInputs, now time.Time, loops []gateLoop) (gateView, map[s
 		case l.paused:
 		case l.held && !l.up:
 			a = gateStart
-		case l.up && l.runtime != mv.Runtime:
-			a = gateRecycleIdle
 		}
 		if a != gateNone {
 			acts = append(acts, gateAct{l.name, a})
 		}
 	}
-	return mv, views, acts
+	return views, acts
 }
 
-// loopView evaluates one loop: its work entry first, then the machine
-// gate. A closed work gate decides the end behaviour (section 5.2); the
-// machine gate decides only while the work gate is open.
-func (in gateInputs) loopView(name string, mv gateView, now time.Time) loopView {
-	wv := in.workView(in.work[name], now)
-	switch {
-	case !wv.Open:
-		return wv
-	case !mv.Open:
-		end := machine.EndFinish
-		if mv.Reason == gateHours && in.machine.Hours.End == machine.EndStop {
-			end = machine.EndStop
-		}
-		return loopView{Reason: mv.hold(), ETA: mv.Next, End: end}
-	}
-	return wv
+// loopView evaluates one loop's work entry: operating hours first, then
+// the ordered candidate agents.
+func (in gateInputs) loopView(name string, now time.Time) loopView {
+	return in.workView(in.work[name], now)
 }
 
 // workView evaluates a loop's work entry: operating hours first, then
@@ -334,19 +281,6 @@ func endOrFinish(end string) string {
 	return end
 }
 
-func (v gateView) hold() string {
-	switch v.Reason {
-	case gateHours:
-		return "outside working hours"
-	case gatePool:
-		if v.Next.IsZero() {
-			return "no agent account available"
-		}
-		return "no agent account available until " + v.Next.Format(time.RFC3339)
-	}
-	return ""
-}
-
 // gateStatus is the `gate` object of the status document. It is absent
 // when the machine file sets neither working hours nor a pool.
 //
@@ -367,21 +301,18 @@ type gateStatus struct {
 	Hold       string     `json:"hold"`
 }
 
-// machineState is the supervisor's view of machine.yaml, the work
-// config and state.json. The gate state is in memory: after a restart it
-// is recomputed from the files and the clock, which gives the same
-// answer.
+// machineState is the supervisor's view of the work config and the
+// agent state: the resolved entries the gate evaluates, the per-loop
+// queries and generation data, and the state file agents write to. The
+// machine file is never read: operating hours, agents and pools live in
+// .jigz/config.yaml.
 type machineState struct {
-	machinePath string
-	statePath   string
-	machine     *machine.Config
-	stamp       string
-	bootErr     error
-	agentState  machine.State
-	stateRead   time.Time
-	stateErr    string
-	workStamp   string
-	work        map[string]config.Resolved
+	statePath  string
+	agentState machine.State
+	stateRead  time.Time
+	stateErr   string
+	workStamp  string
+	work       map[string]config.Resolved
 	// queries holds the tracker query of every loop by loop name: the
 	// narrowed query for split loops, the entry query otherwise. The
 	// engine reads the filter only at start, so a change needs a drain
@@ -391,27 +322,22 @@ type machineState struct {
 	refs      config.RefStatus
 	operating machine.Hours
 	gateHeld  map[string]bool
-	gateSeen  bool
-	gateLast  gateView
 	recorded  map[string]machine.LoopState
 }
 
-func (s *supervisor) initMachine() {
-	s.machinePath, _ = machine.DefaultPath()
+func (s *supervisor) initState() {
 	s.statePath = machine.StatePath(s.root)
 	s.gateHeld = map[string]bool{}
 	s.recorded = map[string]machine.LoopState{}
-	s.machine, _ = machine.Load("")
-	s.bootErr = s.refreshMachine(s.clock(), true)
+	s.refreshState(s.clock(), true)
 }
 
-// setGate replaces the engine's gate, and with it the runtimes the pool
-// and the fleet may pick.
+// setGate replaces the engine's gate, and with it the runtimes the
+// fleet may pick.
 func (s *supervisor) setGate(g engine.Gate) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.gate = g
-	s.machine.Unsupported = unsupportedRuntimes(g)
 }
 
 // engineVersion is the version the engine reports, or the configured one
@@ -423,22 +349,6 @@ func (s *supervisor) engineVersion() string {
 	return engine.Current().Version()
 }
 
-func unsupportedRuntimes(g engine.Gate) map[string]bool {
-	out := map[string]bool{}
-	for _, rt := range machine.Runtimes {
-		if g.RuntimeOff(rt) != "" {
-			out[rt] = true
-		}
-	}
-	return out
-}
-
-func (s *supervisor) machineErr() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.bootErr
-}
-
 func fileStamp(path string) string {
 	fi, err := os.Stat(path)
 	if err != nil {
@@ -447,34 +357,12 @@ func fileStamp(path string) string {
 	return fmt.Sprintf("%d/%d", fi.ModTime().UnixNano(), fi.Size())
 }
 
-// refreshMachine reads machine.yaml when it changed (or force is set),
-// the work config when its file changed, and state.json when it is
-// stale. A machine.yaml that does not load keeps the previous settings
-// and its error is returned.
-func (s *supervisor) refreshMachine(now time.Time, force bool) (loadErr error) {
+// refreshState re-reads the work config when its file changed and
+// state.json when it is stale.
+func (s *supervisor) refreshState(now time.Time, force bool) {
 	s.mu.Lock()
-	path, statePath, old := s.machinePath, s.statePath, s.stamp
-	workOld := s.workStamp
+	statePath, workOld := s.statePath, s.workStamp
 	s.mu.Unlock()
-
-	stamp := fileStamp(path)
-	if force || stamp != old {
-		cfg, err := machine.Load(path)
-		s.mu.Lock()
-		s.stamp = stamp
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "jig: machine config:", err)
-			loadErr = err
-		} else {
-			for _, w := range cfg.Warnings {
-				fmt.Fprintln(os.Stderr, "jig: machine config:", w)
-			}
-			s.machine, s.bootErr = cfg, nil
-			s.machine.Unsupported = unsupportedRuntimes(s.gate)
-			s.stateRead = time.Time{}
-		}
-		s.mu.Unlock()
-	}
 
 	workStamp := fileStamp(filepath.Join(s.root, ".jigz", "config.yaml"))
 	if force || workStamp != workOld {
@@ -482,10 +370,10 @@ func (s *supervisor) refreshMachine(now time.Time, force bool) (loadErr error) {
 	}
 
 	s.mu.Lock()
-	stale := now.Sub(s.stateRead) >= stateReadEvery
+	stale := force || now.Sub(s.stateRead) >= stateReadEvery
 	s.mu.Unlock()
 	if !stale {
-		return loadErr
+		return
 	}
 	st, err := machine.LoadState(statePath)
 	s.mu.Lock()
@@ -496,11 +384,10 @@ func (s *supervisor) refreshMachine(now time.Time, force bool) (loadErr error) {
 			s.stateErr = err.Error()
 			fmt.Fprintln(os.Stderr, "jig: state:", err)
 		}
-		return loadErr
+		return
 	}
 	s.stateErr = ""
 	s.agentState = st
-	return loadErr
 }
 
 // refreshWork re-reads .jigz/config.yaml and resolves the work entries
@@ -610,7 +497,7 @@ func (s *supervisor) recycleDrain(name string) {
 // s.mu.
 func (s *supervisor) gateInputsLocked() gateInputs {
 	return gateInputs{
-		machine: s.machine, state: s.agentState, work: s.work,
+		state: s.agentState, work: s.work,
 		agents: s.agents, refs: s.refs, operating: s.operating, engine: s.gate,
 	}
 }
@@ -623,11 +510,11 @@ func (s *supervisor) startable(name string) bool {
 		return false
 	}
 	now := s.clock()
-	s.refreshMachine(now, false)
+	s.refreshState(now, false)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	in := s.gateInputsLocked()
-	if lv := in.loopView(name, gateEval(in.machine, in.state, now), now); !lv.Open {
+	if lv := in.loopView(name, now); !lv.Open {
 		s.gateHeld[name] = true
 		return false
 	}
@@ -647,63 +534,23 @@ var selfExe = func() (string, error) {
 // separately, so a boundary can fall between them.
 var errNoAgent = errors.New("no agent account available")
 
-// agentEnv is the agent part of a child's environment. The engine splits
-// agent.command on whitespace, so a path with whitespace cannot be used.
-func (s *supervisor) agentEnv() (env []string, runtime string, err error) {
-	now := s.clock()
-	s.refreshMachine(now, false)
-	s.mu.Lock()
-	pool := len(s.machine.Pool) > 0
-	runtime = gateEval(s.machine, s.agentState, now).Runtime
-	s.mu.Unlock()
-	if !pool {
-		return nil, "", nil
-	}
-	if runtime == "" {
-		return nil, "", errNoAgent
-	}
-	exe, err := selfExe()
-	if err != nil {
-		return nil, "", fmt.Errorf("agent pool: %w", err)
-	}
-	if strings.ContainsAny(exe, " \t\r\n") {
-		return nil, "", fmt.Errorf("agent pool: the binary path %q contains whitespace, which the engine cannot pass to agent.command; move the binary", exe)
-	}
-	return []string{
-		"SORTIE_AGENT_KIND=" + runtime,
-		"SORTIE_AGENT_COMMAND=" + exe + " agent-exec " + runtime,
-	}, runtime, nil
-}
-
 func (s *supervisor) gateStatusLocked() *gateStatus {
-	cfg := s.machine
-	if len(cfg.Hours.Windows) == 0 && len(cfg.Pool) == 0 {
-		return nil
-	}
-	v := gateEval(cfg, s.agentState, s.clock())
-	return &gateStatus{
-		Open: v.Open, HoursOpen: v.HoursOpen, Runtime: v.Runtime,
-		NextChange: timePtr(v.Next), Hold: v.hold(),
-	}
+	return nil
 }
 
-// gateStep runs on every tick. It applies the machine settings and the
-// work entries to the loops and logs each change of the gate once.
+// gateStep runs on every tick. It applies the work entries to the loops
+// and republishes when a decision changed.
 func (s *supervisor) gateStep() (int, bool) {
 	now := s.clock()
-	s.refreshMachine(now, false)
+	s.refreshState(now, false)
 	s.mu.Lock()
 	in := s.gateInputsLocked()
 	loops := s.gateLoopsLocked()
 	idle := !s.sleeping && !s.exitWhenEmpty
 	s.mu.Unlock()
 
-	mv, views, acts := gateDecide(in, now, loops)
-	changed := s.recordLoops(in, now, views)
-	if s.noteGate(mv, in.machine) {
-		changed = true
-	}
-	if changed {
+	views, acts := gateDecide(in, now, loops)
+	if changed := s.recordLoops(in, now, views); changed {
 		s.republish()
 	}
 	if !idle {
@@ -719,13 +566,13 @@ func (s *supervisor) gateStep() (int, bool) {
 			}
 		case gateStopNow:
 			s.gateStop(a.name, false)
-		case gateStopIdle, gateRecycleIdle:
+		case gateStopIdle:
 			// A draining loop keeps claiming new items until it goes
 			// idle: max_concurrent_agents 0 means no limit, not "claim
 			// nothing", so no document value stops new claims while
 			// running sessions finish. Drain is finish semantics only.
 			if s.noSession(a.name) {
-				s.gateStop(a.name, a.action == gateRecycleIdle)
+				s.gateStop(a.name, false)
 			}
 		}
 	}
@@ -996,38 +843,4 @@ func (s *supervisor) gateStart(name string) error {
 		return nil
 	}
 	return s.startOne(name)
-}
-
-// noteGate logs a change of the gate and reports whether there was one.
-func (s *supervisor) noteGate(v gateView, cfg *machine.Config) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	prev, seen := s.gateLast, s.gateSeen
-	s.gateLast, s.gateSeen = v, true
-	if !seen {
-		if !v.Open {
-			s.logClosed(v, cfg)
-		}
-		return !v.Open
-	}
-	switch {
-	case prev.Open != v.Open || prev.Reason != v.Reason:
-		if v.Open {
-			fmt.Fprintln(os.Stderr, "jig: gate open, starting the loops it held")
-		} else {
-			s.logClosed(v, cfg)
-		}
-	case v.Open && prev.Runtime != v.Runtime:
-		fmt.Fprintf(os.Stderr, "jig: agent runtime changed from %q to %q, loops restart as they go idle\n", prev.Runtime, v.Runtime)
-	}
-	return prev.Open != v.Open || prev.HoursOpen != v.HoursOpen || prev.Runtime != v.Runtime ||
-		!prev.Next.Equal(v.Next) || prev.hold() != v.hold()
-}
-
-func (s *supervisor) logClosed(v gateView, cfg *machine.Config) {
-	how := "loops stop as they go idle"
-	if v.Reason == gateHours && cfg.Hours.End == machine.EndStop {
-		how = "stopping loops now"
-	}
-	fmt.Fprintf(os.Stderr, "jig: gate closed (%s), %s\n", v.hold(), how)
 }

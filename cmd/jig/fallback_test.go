@@ -56,9 +56,9 @@ func fallbackSupervisor(t *testing.T, root string) *supervisor {
 
 func gateViews(t *testing.T, s *supervisor, now time.Time) (gateInputs, map[string]loopView) {
 	t.Helper()
-	s.refreshMachine(now, true)
+	s.refreshState(now, true)
 	in := s.gateInputsLocked()
-	_, views, _ := gateDecide(in, now, s.gateLoopsLocked())
+	views, _ := gateDecide(in, now, s.gateLoopsLocked())
 	return in, views
 }
 
@@ -206,7 +206,7 @@ work:
 			p.since = now.Add(-time.Hour)
 		}
 		sup.mu.Unlock()
-		sup.refreshMachine(now, true)
+		sup.refreshState(now, true)
 		if code, done := sup.gateStep(); done {
 			t.Fatalf("gateStep ended the run with code %d", code)
 		}

@@ -25,7 +25,7 @@ supported engine registers, so the shipped workflows run without extra
 setup. The one feature the workflows need that an engine may lack is the
 `github-pr` tracker (which treats pull requests as work items). The `pi`
 agent adapter is optional: an engine only needs it when a workflow or
-pool entry uses `pi`.
+agent uses `pi`.
 
 **The agent** is Claude Code (`claude`), a coding agent that runs in a terminal the same
 way you would: it reads files, edits code, runs checks, and shells out
@@ -357,8 +357,7 @@ loopback names; a wildcard bind accepts any `Host`.
 
 The dashboard has no authentication, so hiding content is its only built-in
 protection when it is reachable beyond localhost. The `dashboard.hide` block
-of `machine.yaml` (see [Working hours and agent accounts](#working-hours-and-agent-accounts))
-lists the pages and sections to hide:
+of `machine.yaml` lists the pages and sections to hide:
 
 ```yaml
 dashboard:
@@ -453,7 +452,7 @@ The workflows need one feature an engine may not ship: the **github-pr
 tracker**, which treats pull requests as work items so a review loop can
 watch a pull request rather than an issue. Every supported engine
 registers the **claude-code** agent adapter, and the `pi` adapter is only
-needed when a workflow or pool entry uses `pi`. A repository you configure
+needed when a workflow or agent uses `pi`. A repository you configure
 should carry the tracker; the next section says what is switched off when
 it does not.
 
@@ -487,8 +486,7 @@ The repository and version are read in this order, first match wins:
 
 1. `JIG_ENGINE_BIN`: use this binary. No repository or version applies.
 2. The environment variables `JIG_ENGINE_REPO` and `JIG_ENGINE_VERSION`.
-3. The `engine:` block of `machine.yaml` (see
-   [Working hours and agent accounts](#working-hours-and-agent-accounts)).
+3. The `engine:` block of `machine.yaml`.
 4. The defaults.
 
 Each of the repository and the version is resolved on its own. A release
@@ -1066,60 +1064,41 @@ Env overrides: `JIG_REPO`, `JIG_TOKEN`.
 
 ### Working hours and agent accounts
 
-The optional file `<user config dir>/jigz/machine.yaml` (Linux:
-`$XDG_CONFIG_HOME/jigz/machine.yaml` or `~/.config/jigz/machine.yaml`)
-applies to the loops of every repository on the machine. Without it, loops run
-without an hours limit and without a pool. The Agents page of the dashboard
-shows the hours and the pool.
+Working hours and agent accounts live in the repository's
+`.jigz/config.yaml`, so every repository has its own. Without a
+schedule the hours are always open. The Agents page of the dashboard
+shows the agents and the pools.
 
 ```yaml
-hours:
-  timezone: Europe/Madrid     # IANA name; empty = local time
-  end: finish                 # finish | stop; default finish
+operating_hours:                # gates every loop; omitted = 24/7
+  timezone: Europe/Madrid       # IANA name; empty = local time
+  end: finish                   # finish | stop; default finish
   windows:
     - days: [mon, tue, wed, thu, fri]
       start: "09:00"
-      end: "18:00"            # an end earlier than start wraps past midnight
-pool:
-  - name: claude-work
-    runtime: claude-code      # claude-code | pi
-    command: claude           # default "claude" or "pi" by runtime
-    env:
-      CLAUDE_CONFIG_DIR: ~/.claude-work
-    hours:                    # optional; windows only, same shape as above
-      windows: []
-    cost_class: subscription  # free-text label shown in the dashboard
-  - name: pi-api
-    runtime: pi
-    env:
-      ANTHROPIC_API_KEY: ...
-limits:
-  default_reset: 1h           # used when the CLI message has no reset time
-  patterns: []                # extra case-insensitive regexes
-engine:
-  repo: ""               # owner/name of the engine's GitHub repository; empty = the default
-  version: v1.28.1       # release tag, vX.Y.Z; empty = the default
-dashboard:
-  hide:
-    pages: []            # pages to hide; see Hiding pages and sections
-    sections: []         # page sections to hide
+      end: "18:00"               # an end earlier than start wraps past midnight
+
+agents:
+  claude-main:  { runtime: claude-code, model: claude-sonnet-5-5 }
+  claude-spare: { runtime: claude-code, model: claude-sonnet-5-5,
+                  env: { ANTHROPIC_OAUTH_TOKEN: { from_env: CLAUDE_SUB_2 } } }
+  pi-api:       { runtime: pi, model: sonnet,
+                  env: { ANTHROPIC_API_KEY: { from_env: ANTHROPIC_API_KEY } } }
+
+pools:
+  build-pool: [claude-main, claude-spare, pi-api]   # ordered fallback
 ```
 
-The `engine` block selects the engine release and is optional; an empty
-field uses the default. `JIG_ENGINE_REPO` and `JIG_ENGINE_VERSION`
-override it (see [The engine](#the-engine)). A problem in the hours or pool
-settings does not stop the engine from being resolved.
+A credential is always a reference to an environment variable of the
+supervising process (`{ from_env: NAME }`); a literal secret is
+rejected. An unset variable makes the agent unavailable, with the
+reason shown.
 
-Without windows the hours are always open. `env` values expand a leading `~/`
-and `$VAR` or `${VAR}`. The file can hold API keys, so keep it readable by you
-only (`chmod 600`); loading warns when it is not.
-
-`end: finish` makes loops claim nothing new when the window closes and stops
-each loop once it has no running session. `end: stop` stops the loops when the
-window closes; the engine aborts the turn, the issue keeps its in-progress
-label and is dispatched again when the next window opens. With several
-running sessions, `finish` waits for all of them and `stop` ends the loop at
-once.
+The machine file (`<user config dir>/jigz/machine.yaml`) now carries
+only the `engine:` block (which release to run; `JIG_ENGINE_REPO` and
+`JIG_ENGINE_VERSION` override it, see [The engine](#the-engine)) and
+the `dashboard:` block (pages and sections to hide, see Hiding pages
+and sections). It no longer holds hours or a pool.
 
 Hours gate every loop on its own. A loop's candidates are the agents of
 its work entry (`work.<slug>.agent`, falling back to the rule's own
@@ -1148,15 +1127,15 @@ stdout through unchanged and exits with the CLI's exit code. An unset
 credential reference makes the agent unavailable and `agent-exec` exits
 75 without running anything. When the CLI output
 reports a usage limit, the agent is marked exhausted until the reset time in
-the message, or for `limits.default_reset`. The state is stored in
+the message, or one hour later when the message carries none. The state is stored in
 `<repo root>/.jigz/data/state.json`, created by `jig setup` and kept out
 of commits by the `.jigz/` gitignore rule. A `pool.json` written by an
 older jig in the per-user state directory is still read and never
-written again. Without an available entry, `agent-exec`
+written again. Without an available agent, `agent-exec`
 exits 75. When the active agent changes, the loop document is rewritten
 once the loop has no running session; the engine re-reads it live.
-A bare runtime (`jig agent-exec <runtime>`) keeps the legacy behaviour:
-the CLI of the first available pool entry of that runtime.
+A bare runtime (`jig agent-exec <runtime>`) runs the first available
+fleet agent with that runtime — same availability rules, no pool file.
 
 Each loop runs its first candidate agent. When the gate picks another
 candidate — a usage limit, closed hours, unresolved credentials or an
@@ -1171,9 +1150,12 @@ alerts while a loop runs a standby agent.
 A usage limit is usually detected by `agent-exec` during the engine's credential
 check, which runs before each worker run. The run then fails before the turn
 starts, the engine posts no failure comment, and it retries after about 10
-seconds with the next available entry. A limit reached in the middle of a turn
+seconds with the next available agent. A limit reached in the middle of a turn
 fails that engine session: the engine posts a session-failure comment on
-the issue and retries the same way.
+the issue and retries the same way. A message naming an unknown model
+(`model not found`, `unknown model` and similar from either CLI) marks the
+agent exhausted the same way, so a misconfigured model fails over to the
+standby instead of retrying forever.
 
 The dashboard, the CSV export and the JSON API class each finished run as
 `succeeded`, `failed_agent`, `failed_workspace`, `failed_limit`, `cancelled`,
@@ -1383,10 +1365,11 @@ block and a `pi:` block; the engine reads only the block named by
 `agent.kind: pi` and `agent.command: pi`. To use another model, edit the
 `model:` line of the block the agent kind names; the value passes
 through to `claude --model` unvalidated, so only use aliases your
-installed CLI accepts. The account pool in `machine.yaml` (see
-[Working hours and agent accounts](#working-hours-and-agent-accounts))
-overrides `agent.kind` and `agent.command` at run time, so the same
-workflows can run with another runtime without touching the files. The
+installed CLI accepts. Generated documents point `agent.command` at
+`jig agent-exec <agent>` instead, and the supervisor rewrites the kind,
+command and model when the gate picks another fleet agent (see
+[Working hours and agent accounts](#working-hours-and-agent-accounts)).
+The
 pinned engine only knows `pi` and `claude-code` (plus a few others);
 other adapters need a newer or upstream engine binary, and a loop whose
 agent kind the engine lacks does not start (see [Engine

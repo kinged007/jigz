@@ -10,6 +10,27 @@ import (
 
 var BuiltinLimit = regexp.MustCompile(`(?i)usage limit|limit reached|limit exhausted|insufficient_quota|quota exceeded|out of credits`)
 
+// BuiltinModelError matches a CLI line reporting an unknown or
+// unavailable model. The per-CLI message catalog grows as recorded
+// engine logs show new wordings; the gate treats a hit like a usage
+// limit so the standby takes over.
+var BuiltinModelError = regexp.MustCompile(`(?i)model not found|unknown model|invalid model|model .* does not exist|no such model`)
+
+// IsModelError reports whether an agent CLI line says the model is
+// unavailable, returning the message. The text is extracted the same
+// way usage-limit text is; the per-CLI wording catalog grows as
+// recorded engine logs show new variants.
+func IsModelError(runtime, line string, stderr bool) (string, bool) {
+	text := line
+	if !stderr {
+		text = stdoutError(runtime, line)
+	}
+	if text == "" || !BuiltinModelError.MatchString(text) {
+		return "", false
+	}
+	return strings.TrimSpace(text), true
+}
+
 var (
 	resetEpoch = regexp.MustCompile(`\|(\d{9,11})\b`)
 	resetClock = regexp.MustCompile(`(?i)resets?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:\(([^)]+)\))?`)
@@ -130,5 +151,9 @@ func (c *Config) resetTime(text string, now time.Time) time.Time {
 			return t
 		}
 	}
-	return now.Add(c.Limits.reset)
+	reset := c.Limits.reset
+	if reset <= 0 {
+		reset = defaultReset
+	}
+	return now.Add(reset)
 }

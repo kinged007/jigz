@@ -180,7 +180,7 @@ func newSupervisor(root, bin string, defs []loopDef) *supervisor {
 		fallback:      map[string]fallbackInfo{},
 	}
 	s.quiet, s.sessions = s.loopQuiet, s.loopSessions
-	s.initMachine()
+	s.initState()
 	for _, d := range defs {
 		s.defs[d.name] = d
 	}
@@ -189,7 +189,10 @@ func newSupervisor(root, bin string, defs []loopDef) *supervisor {
 
 // childEnv resolves everything a child needs that is not the workflow
 // itself: the env file written from the current config, and the
-// environment to launch it with.
+// environment to launch it with. The gate is re-evaluated here because
+// the decision and the start read the clock separately, so an agent
+// that became unavailable between them holds the loop instead of
+// starting a child that would fail at once.
 //
 // Both are read from disk on every call rather than once at boot. A
 // supervisor rewrites config.yaml and the env file and then asks for a
@@ -203,6 +206,27 @@ func (s *supervisor) childEnv(name string) (envFile string, env []string, runtim
 	if envFile, err = writeEnvFile(s.root, cfg); err != nil {
 		return "", nil, "", err
 	}
+	s.refreshState(s.clock(), false)
+	s.mu.Lock()
+	in := s.gateInputsLocked()
+	res, ok := s.work[name]
+	agents := s.agents
+	s.mu.Unlock()
+	now := s.clock()
+	if ok {
+		if lv := in.workView(res, now); !lv.Open {
+			reason := lv.Reason
+			if reason == "" {
+				reason = "no agent available"
+			}
+			return "", nil, "", fmt.Errorf("the gate holds the loop: %s: %w", reason, errNoAgent)
+		}
+		if len(res.Agents) > 0 {
+			if a, known := agents[res.Agents[0]]; known {
+				runtime = a.Runtime
+			}
+		}
+	}
 	// The env override replaces the workflow's query_filter; a filters:
 	// entry narrows further, it does not add to the default. For
 	// generated loops the query is the loop's narrowed filter, which
@@ -215,11 +239,7 @@ func (s *supervisor) childEnv(name string) (envFile string, env []string, runtim
 	} else if filter := cfg.FilterFor(name); filter != "" {
 		env = append(env, "SORTIE_TRACKER_QUERY_FILTER="+filter)
 	}
-	agentEnv, runtime, err := s.agentEnv()
-	if err != nil {
-		return "", nil, "", err
-	}
-	return envFile, append(env, agentEnv...), runtime, nil
+	return envFile, env, runtime, nil
 }
 
 // lastEnv returns the last value set for key, as a child would see it.
@@ -246,7 +266,7 @@ func (s *supervisor) startOne(name string) error {
 		s.gateHeld[name] = true
 		s.mu.Unlock()
 		if first {
-			fmt.Fprintf(os.Stderr, "jig: %s: no agent account available, the gate holds the loop\n", name)
+			fmt.Fprintf(os.Stderr, "jig: %s: %v\n", name, err)
 		}
 		s.republish()
 		return nil
@@ -322,9 +342,6 @@ func (s *supervisor) startOne(name string) error {
 // startAll launches every loop in the run except the paused ones and
 // the ones the machine gate keeps down.
 func (s *supervisor) startAll(names []string) error {
-	if err := s.machineErr(); err != nil {
-		return err
-	}
 	for _, n := range names {
 		if !s.startable(n) {
 			continue
@@ -401,7 +418,7 @@ func (s *supervisor) reload() {
 	s.reloadBudgets(cfg.Budgets())
 	s.reloadCleanup(cfg)
 	old := s.querySnapshot()
-	s.refreshMachine(s.clock(), true)
+	s.refreshState(s.clock(), true)
 	for name, q := range s.querySnapshot() {
 		if oq, ok := old[name]; ok && oq != q {
 			fmt.Fprintf(os.Stderr, "jig: %s: query changed, draining and restarting\n", name)
@@ -700,15 +717,12 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 		Cleanup:              readCleanupRecord(s.root),
 		Sleep:                s.sleepStatusLocked(),
 	}
-	gate := s.gateStatusLocked()
-	doc.Gate = gate
 	in := s.gateInputsLocked()
 	drifts, derr := driftReports(s.root)
 	if derr != nil {
 		fmt.Fprintln(os.Stderr, "jig: drift:", derr)
 	}
 	now := s.clock()
-	mv := gateEval(in.machine, in.state, now)
 	primaryOf := func(name string) string {
 		return primaryCandidate(s.work[name])
 	}
@@ -720,7 +734,7 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 		return fb.String(primaryOf(name))
 	}
 	loopInfo := func(name string, bs *budgetStatus) loopView {
-		lv := in.loopView(name, mv, now)
+		lv := in.loopView(name, now)
 		if bs != nil && bs.Paused {
 			lv.Reason, lv.ETA = "", time.Time{}
 		}

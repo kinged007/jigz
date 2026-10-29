@@ -37,12 +37,12 @@ func TestCapAlerts(t *testing.T) {
 	prs2 := loopFile{"o/b", "prs", flow("github-pr", "claude-code")}
 
 	for _, c := range []struct {
-		name  string
-		g     engine.Gate
-		files []loopFile
-		env   []string
+		name     string
+		g        engine.Gate
+		files    []loopFile
+		env      []string
 		runtimes []string
-		want  []string
+		want     []string
 	}{
 		{"fork runs everything", fork, []loopFile{issues, prs}, nil, []string{"pi"}, nil},
 		{"upstream", upstream, []loopFile{issues, prs, prs2}, nil, nil, []string{

@@ -831,8 +831,8 @@ plan; this section records what is done.
 | 3 Document generation | `feat/engine-interface` | done (3b wired; 3a generator) | `internal/gen` renders, splits and validates; `cmd/jig/generate.go` drives setup/validate/reload/start; supervisor resolves per-loop inputs, drains on query change, reports drift in status |
 | 4 Fallback | `feat/engine-interface` | done | `agent-exec` runs a fleet agent by name; supervisor rewrites the managed document at idle on a standby pick, returns to the primary after consecutive stable ticks; status carries primary and fallback reason, ops page alerts, dashboard marks fallback agents | Rig tests on the fake clock plus agent-exec unit tests (see deviations) |
 | 5 Contract tests and CI | `feat/engine-interface` | done | Golden set per target plus pool/pi/chain/hooks variants; schema fixtures from real runs with `make schema-fixture`; contract suite (goldens, CLI, dry-run, probe, rule-agent, log literals, newest-release canary); CI gains contract, split acceptance, docs-ignore and canary jobs | Sections 7.2 to 7.5, `go test -tags contract` |
-| 6 Cleanup | | not started | |
-| 7 Model-unavailable trigger | | not started | |
+| 6 Cleanup | `feat/engine-interface` | done | Removed fleetconfig.Load (+tests), plan.Apply/ApplySettings + patching, model pruning; the loop supervisor, agent-exec, capabilities and Agents page no longer read machine.yaml (hub daemon untouched) | `go build`, vet, tests pass; no package imports the removed code |
+| 7 Model-unavailable trigger | `feat/engine-interface` | done | agent-exec matches model-not-found text and exhausts the agent so the standby takes over; unit tests on synthetic lines for both runtimes | Model error message catalog grows with recorded logs; see deviations |
 
 ### 12.2 Work log
 
@@ -1036,3 +1036,18 @@ plan; this section records what is done.
   four approved CI changes as separate commits. The canary already
   reports sortie-ai/sortie v1.30.0 as unprofiled; adding it is its own
   pull request per section 7.8 and out of scope here.
+- The phase-6 machine-file removal keeps the hub daemon's reads: the
+  hub still configures hours, pool, limits and dashboard from
+  machine.yaml. Only the loop supervisor side moved into
+  .jigz/config.yaml.
+- The model-unavailable trigger (phase 7) matches builtin message
+  patterns (`model not found`, `unknown model` and similar from either
+  CLI) and exhausts the agent like a usage limit. The per-CLI wording
+  catalog grows as recorded engine logs show new variants; the recorded
+  fixtures carry no model errors yet.
+- The phase-6 machine-file removal keeps the hub daemon's reads: the
+  hub still configures hours, pool, limits and dashboard from
+  machine.yaml. On the loop side, `jig agent-exec <runtime>` now runs
+  the first available fleet agent with that runtime instead of a pool
+  entry, and the usage-limit reset falls back to one hour when the
+  release has no configured default.

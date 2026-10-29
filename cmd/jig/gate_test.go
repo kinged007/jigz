@@ -13,20 +13,6 @@ import (
 	"github.com/kinged007/jigz/internal/machine"
 )
 
-func gateCfg(t *testing.T, body string) *machine.Config {
-	t.Helper()
-	p := filepath.Join(t.TempDir(), "machine.yaml")
-	mustWrite(t, p, body)
-	if err := os.Chmod(p, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := machine.Load(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return cfg
-}
-
 // gateWorkCfg loads a config body as a repository's .jigz/config.yaml
 // and returns the gate inputs it resolves to over an empty machine
 // config.
@@ -39,15 +25,14 @@ func gateWorkCfg(t *testing.T, body string, st machine.State) gateInputs {
 		t.Fatal(err)
 	}
 	return gateInputs{
-		machine: gateCfg(t, ""), state: st, work: cfg.Resolve(),
+		state: st, work: cfg.Resolve(),
 		agents: cfg.Agents, refs: cfg.UnresolvedRefs(), operating: cfg.OperatingHours,
 	}
 }
 
 const (
-	hoursFinish = "hours:\n  timezone: UTC\n  windows:\n    - {days: [mon, tue, wed, thu, fri], start: \"09:00\", end: \"18:00\"}\n"
-	hoursStop   = hoursFinish + "  end: stop\n"
-	poolTwo     = "pool:\n  - {name: c, runtime: claude-code}\n  - {name: p, runtime: pi}\n"
+	opHoursFinish = "operating_hours:\n  timezone: UTC\n  windows:\n    - {days: [mon, tue, wed, thu, fri], start: \"09:00\", end: \"18:00\"}\n"
+	opHoursStop   = opHoursFinish + "  end: stop\n"
 )
 
 // 2026-10-21 is a Wednesday.
@@ -57,40 +42,20 @@ var (
 )
 
 func TestGateDecide(t *testing.T) {
-	exhausted := func(names ...string) machine.State {
-		st := machine.State{Agents: map[string]machine.EntryState{}}
-		for _, n := range names {
-			st.Agents[n] = machine.EntryState{ExhaustedUntil: gateOpenAt.Add(24 * time.Hour)}
-		}
-		return st
-	}
-	up := gateLoop{name: "a", up: true}
 	cases := []struct {
 		name  string
-		cfg   string
-		st    machine.State
+		in    gateInputs
 		now   time.Time
 		loops []gateLoop
 		want  gateAction
 	}{
-		{"closed finish waits for idle", hoursFinish, machine.State{}, gateClosedAt, []gateLoop{up}, gateStopIdle},
-		{"closed stop stops now", hoursStop, machine.State{}, gateClosedAt, []gateLoop{up}, gateStopNow},
-		{"no runtime finishes although end is stop", hoursStop + poolTwo, exhausted("c", "p"), gateOpenAt, []gateLoop{{name: "a", up: true, runtime: "pi"}}, gateStopIdle},
-		{"window closed with end stop and a pool still stops now", hoursStop + poolTwo, machine.State{}, gateClosedAt, []gateLoop{{name: "a", up: true, runtime: "claude-code"}}, gateStopNow},
-		{"closed loop that is down needs nothing", hoursStop, machine.State{}, gateClosedAt, []gateLoop{{name: "a", held: true}}, gateNone},
-		{"reopen starts a held loop", hoursFinish, machine.State{}, gateOpenAt, []gateLoop{{name: "a", held: true}}, gateStart},
-		{"reopen leaves a loop stopped for another reason", hoursFinish, machine.State{}, gateOpenAt, []gateLoop{{name: "a"}}, gateNone},
-		{"reopen leaves a paused loop", hoursFinish, machine.State{}, gateOpenAt, []gateLoop{{name: "a", held: true, paused: true}}, gateNone},
-		{"closed leaves a paused loop", hoursFinish, machine.State{}, gateClosedAt, []gateLoop{{name: "a", paused: true}}, gateNone},
-		{"runtime switch recycles when idle", poolTwo, exhausted("c"), gateOpenAt, []gateLoop{{name: "a", up: true, runtime: "claude-code"}}, gateRecycleIdle},
-		{"same runtime is left alone", poolTwo, machine.State{}, gateOpenAt, []gateLoop{{name: "a", up: true, runtime: "claude-code"}}, gateNone},
-		{"a loop that is stopping is not recycled", poolTwo, exhausted("c"), gateOpenAt, []gateLoop{{name: "a", runtime: "claude-code"}}, gateNone},
-		{"removing the pool recycles", "", machine.State{}, gateOpenAt, []gateLoop{{name: "a", up: true, runtime: "pi"}}, gateRecycleIdle},
-		{"no hours and no pool does nothing", "", machine.State{}, gateClosedAt, []gateLoop{up}, gateNone},
+		{"reopen starts a held loop", gateInputs{}, gateOpenAt, []gateLoop{{name: "a", held: true}}, gateStart},
+		{"reopen leaves a loop stopped for another reason", gateInputs{}, gateOpenAt, []gateLoop{{name: "a"}}, gateNone},
+		{"reopen leaves a paused loop", gateInputs{}, gateOpenAt, []gateLoop{{name: "a", held: true, paused: true}}, gateNone},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, _, acts := gateDecide(gateInputs{machine: gateCfg(t, c.cfg), state: c.st}, c.now, c.loops)
+			_, acts := gateDecide(c.in, c.now, c.loops)
 			got := gateNone
 			if len(acts) > 0 {
 				got = acts[0].action
@@ -99,22 +64,6 @@ func TestGateDecide(t *testing.T) {
 				t.Errorf("actions %v, want %v", acts, c.want)
 			}
 		})
-	}
-}
-
-func TestGateViewHold(t *testing.T) {
-	cfg := gateCfg(t, hoursFinish+poolTwo)
-	st := machine.State{Agents: map[string]machine.EntryState{
-		"c": {ExhaustedUntil: gateOpenAt.Add(time.Hour)},
-		"p": {ExhaustedUntil: gateOpenAt.Add(2 * time.Hour)},
-	}}
-	v := gateEval(cfg, st, gateOpenAt)
-	if v.Open || v.Reason != gatePool || !strings.Contains(v.hold(), "no agent account available until "+gateOpenAt.Add(time.Hour).Format(time.RFC3339)) {
-		t.Errorf("pool hold: %+v %q", v, v.hold())
-	}
-	v = gateEval(cfg, machine.State{}, gateClosedAt)
-	if v.Open || v.Reason != gateHours || v.hold() != "outside working hours" {
-		t.Errorf("hours hold: %+v %q", v, v.hold())
 	}
 }
 
@@ -247,7 +196,7 @@ func TestWorkGateDecide(t *testing.T) {
 			}
 			in := gateWorkCfg(t, c.cfg, c.st)
 			in.engine = c.gate
-			_, views, acts := gateDecide(in, c.now, c.loops)
+			views, acts := gateDecide(in, c.now, c.loops)
 			lv := views["plan"]
 			if lv.Open != c.open || lv.Agent != c.agent || lv.Reason != c.reason || !lv.ETA.Equal(c.eta) {
 				t.Errorf("view %+v, want open=%v agent=%q reason=%q eta=%v", lv, c.open, c.agent, c.reason, c.eta)
@@ -301,7 +250,7 @@ func TestWorkGateWindowWrapsMidnightAcrossDST(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, views, _ := gateDecide(in, c.now, []gateLoop{{name: "plan", up: true}})
+			views, _ := gateDecide(in, c.now, []gateLoop{{name: "plan", up: true}})
 			lv := views["plan"]
 			if lv.Open != c.open || lv.Reason != c.reason || !lv.ETA.Equal(c.eta) {
 				t.Errorf("at %v: %+v, want open=%v reason=%q eta=%v", c.now, lv, c.open, c.reason, c.eta)
@@ -334,7 +283,7 @@ func TestWorkGateTimezones(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, views, _ := gateDecide(in, c.now, []gateLoop{{name: "plan", up: true}})
+			views, _ := gateDecide(in, c.now, []gateLoop{{name: "plan", up: true}})
 			lv := views["plan"]
 			if lv.Open != c.open || lv.Reason != c.reason || !lv.ETA.Equal(c.eta) {
 				t.Errorf("at %v: %+v, want open=%v reason=%q eta=%v", c.now, lv, c.open, c.reason, c.eta)
@@ -348,7 +297,7 @@ func TestGateLoopsOfOneWorkEntryAreIndependent(t *testing.T) {
 	in := gateWorkCfg(t, agentPlainA+workPlan, machine.State{})
 	res := in.work["plan"]
 	in.work = map[string]config.Resolved{"plan": res, "plan-build": res}
-	_, views, acts := gateDecide(in, gateOpenAt, []gateLoop{
+	views, acts := gateDecide(in, gateOpenAt, []gateLoop{
 		{name: "plan", up: true},
 		{name: "plan-build", held: true},
 	})
@@ -368,30 +317,24 @@ type gateRig struct {
 	envFile string
 }
 
-func newGateRig(t *testing.T, machineYAML string) *gateRig {
+func newGateRig(t *testing.T, opHours string) *gateRig {
 	t.Helper()
 	sup, root := startedSup(t, "echo \"${SORTIE_AGENT_KIND-unset}|${SORTIE_AGENT_COMMAND-unset}\" > agentenv\nwhile true; do sleep 1; done\n")
 	r := &gateRig{sup: sup, root: root, now: gateOpenAt, envFile: filepath.Join(root, "agentenv")}
 	sup.clock = func() time.Time { return r.now }
 	sup.sessions = func(string) (bool, bool) { return r.active, true }
-	r.setMachine(t, machineYAML)
-	return r
-}
-
-func (r *gateRig) setMachine(t *testing.T, body string) {
-	t.Helper()
-	mustWrite(t, r.sup.machinePath, body)
-	if err := os.Chmod(r.sup.machinePath, 0o600); err != nil {
-		t.Fatal(err)
+	if opHours != "" {
+		mustWrite(t, filepath.Join(root, ".jigz", "config.yaml"), "repo: owner/name\n"+opHours)
 	}
-	r.sup.refreshMachine(r.now, true)
+	sup.refreshState(r.now, true)
+	return r
 }
 
 // setConfig replaces the repo's .jigz/config.yaml and reloads it.
 func (r *gateRig) setConfig(t *testing.T, body string) {
 	t.Helper()
 	mustWrite(t, filepath.Join(r.root, ".jigz", "config.yaml"), "repo: owner/name\n"+body)
-	r.sup.refreshMachine(r.now, true)
+	r.sup.refreshState(r.now, true)
 }
 
 func (r *gateRig) step(t *testing.T, d time.Duration) {
@@ -462,7 +405,7 @@ func (r *gateRig) feed(t *testing.T, lines ...string) {
 }
 
 func TestGateStopEndsLoopsNowAndReopenStartsThem(t *testing.T) {
-	r := newGateRig(t, hoursStop)
+	r := newGateRig(t, opHoursStop)
 	r.active = true
 	r.step(t, time.Minute)
 	if r.sup.empty() {
@@ -474,11 +417,8 @@ func TestGateStopEndsLoopsNowAndReopenStartsThem(t *testing.T) {
 	if !r.sup.empty() {
 		t.Fatal("end: stop left the loop running")
 	}
-	if w := r.workflow(t); w.State != "offline" || w.OfflineReason != "outside working hours" {
+	if w := r.workflow(t); w.State != "offline" || w.OfflineReason != "outside operating hours" {
 		t.Errorf("status %+v", w)
-	}
-	if g := readStatus(t, r.root).Gate; g == nil || g.Open || g.HoursOpen || g.NextChange == nil {
-		t.Errorf("gate status %+v", g)
 	}
 	r.now = time.Date(2026, 10, 22, 10, 0, 0, 0, time.UTC)
 	r.step(t, 0)
@@ -491,14 +431,14 @@ func TestGateStopEndsLoopsNowAndReopenStartsThem(t *testing.T) {
 }
 
 func TestGateFinishWaitsForTheSessionNotTheRetry(t *testing.T) {
-	r := newGateRig(t, hoursFinish)
+	r := newGateRig(t, opHoursFinish)
 	r.now = gateClosedAt
 	r.active = true
 	r.step(t, 0)
 	if r.sup.empty() {
 		t.Fatal("finish stopped a loop with a running session")
 	}
-	if w := r.workflow(t); w.State != "draining" || w.OfflineReason != "outside working hours" {
+	if w := r.workflow(t); w.State != "draining" || w.OfflineReason != "outside operating hours" {
 		t.Errorf("status while draining %+v", w)
 	}
 	r.active = false
@@ -519,7 +459,7 @@ const (
 // stop ends the loop at once.
 func TestGateSeveralSessionsWhenTheGateCloses(t *testing.T) {
 	t.Run("finish waits", func(t *testing.T) {
-		r := newGateRig(t, hoursFinish)
+		r := newGateRig(t, opHoursFinish)
 		r.sup.sessions = r.sup.loopSessions
 		r.feed(t, dispatched7, dispatched8, tickTwo)
 		r.now = gateClosedAt
@@ -538,7 +478,7 @@ func TestGateSeveralSessionsWhenTheGateCloses(t *testing.T) {
 		}
 	})
 	t.Run("stop ends at once", func(t *testing.T) {
-		r := newGateRig(t, hoursStop)
+		r := newGateRig(t, opHoursStop)
 		r.sup.sessions = r.sup.loopSessions
 		r.feed(t, dispatched7, dispatched8, tickTwo)
 		r.now = gateClosedAt
@@ -553,7 +493,7 @@ func TestGateSeveralSessionsWhenTheGateCloses(t *testing.T) {
 // A loop whose tick reports more sessions than the tracker saw start is
 // never treated as idle.
 func TestGateUnaccountedSessionsKeepTheLoopBusy(t *testing.T) {
-	r := newGateRig(t, hoursFinish)
+	r := newGateRig(t, opHoursFinish)
 	r.sup.sessions = r.sup.loopSessions
 	r.feed(t, tickTwo)
 	r.now = gateClosedAt
@@ -611,7 +551,7 @@ func TestGateWorkEntryAgentHoursCloseAndReopen(t *testing.T) {
 }
 
 func TestGateDoesNotStartAPausedLoop(t *testing.T) {
-	r := newGateRig(t, hoursFinish)
+	r := newGateRig(t, opHoursFinish)
 	r.sup.pauseLoop("plan", "manual")
 	r.settle(t)
 	r.now = gateClosedAt
@@ -627,7 +567,7 @@ func TestGateDoesNotStartAPausedLoop(t *testing.T) {
 }
 
 func TestGateHoldsLoopsAtBootAndWake(t *testing.T) {
-	r := newGateRig(t, hoursFinish)
+	r := newGateRig(t, opHoursFinish)
 	r.sup.stopAll(false, false)
 	r.settle(t)
 	r.now = gateClosedAt
@@ -649,86 +589,31 @@ func TestGateHoldsLoopsAtBootAndWake(t *testing.T) {
 	}
 }
 
-func TestGateRecyclesOnRuntimeChangeWhenIdle(t *testing.T) {
-	r := newGateRig(t, poolTwo)
-	r.sup.stopAll(false, false)
-	r.settle(t)
-	_ = os.Remove(r.envFile)
-	r.sup.mu.Lock()
-	r.sup.gateHeld["plan"] = true
-	r.sup.mu.Unlock()
-	r.step(t, 0)
-	if got := r.agentEnv(t); !strings.HasPrefix(got, "claude-code|") || !strings.HasSuffix(got, " agent-exec claude-code") {
-		t.Fatalf("child env %q", got)
-	}
-
-	if err := machine.MarkExhausted(machine.StatePath(r.root), "c", r.now.Add(time.Hour), "limit"); err != nil {
-		t.Fatal(err)
-	}
-	r.active = true
-	r.step(t, 11*time.Second)
-	if p := r.sup.procs["plan"]; p == nil || p.stopping || p.runtime != "claude-code" {
-		t.Fatalf("a busy loop was recycled: %+v", p)
-	}
-	r.active = false
-	r.step(t, 2*time.Second)
-	r.settle(t)
-	if got := r.agentEnv(t); !strings.HasPrefix(got, "pi|") || !strings.HasSuffix(got, " agent-exec pi") {
-		t.Fatalf("recycled child env %q", got)
-	}
-	if p := r.sup.procs["plan"]; p == nil || p.runtime != "pi" {
-		t.Fatalf("recycled loop %+v", p)
+// The supervisor never injects agent overrides: the document carries
+// the agent kind and command, and the engine reads them from the file.
+func TestNoAgentOverridesAreInjected(t *testing.T) {
+	r := newGateRig(t, opHoursFinish)
+	if got := r.agentEnv(t); got != "unset|unset" {
+		t.Errorf("child env %q, want unset|unset", got)
 	}
 }
 
-func TestEmptyPoolLeavesTheAgentEnvironmentAlone(t *testing.T) {
-	t.Setenv("SORTIE_AGENT_KIND", "keep")
-	r := newGateRig(t, hoursFinish)
-	if got := r.agentEnv(t); got != "keep|unset" {
-		t.Errorf("child env %q, want keep|unset", got)
-	}
-}
-
-func TestAPoolNeedsAPathWithoutWhitespace(t *testing.T) {
-	r := newGateRig(t, poolTwo)
-	old := selfExe
-	selfExe = func() (string, error) { return "/opt/my tools/jig", nil }
-	t.Cleanup(func() { selfExe = old })
-	_, _, _, err := r.sup.childEnv("plan")
-	if err == nil || !strings.Contains(err.Error(), "whitespace") {
-		t.Errorf("error %v, want a whitespace error", err)
-	}
-}
-
-func TestAnInvalidMachineFileFailsTheStart(t *testing.T) {
-	sup := newTestSup(t, t.TempDir(), "plan")
-	mustWrite(t, sup.machinePath, "hours: [\n")
-	sup.bootErr = sup.refreshMachine(time.Now(), true)
+func TestInvalidConfigFailsTheStart(t *testing.T) {
+	root := t.TempDir()
+	sup := newTestSup(t, root, "plan")
+	mustWrite(t, filepath.Join(root, ".jigz", "config.yaml"), "work: [unclosed\n")
+	mustWrite(t, filepath.Join(root, ".jigz", "workflows", "WORKFLOW.plan.md"), "---\n---\n")
 	if err := sup.startAll([]string{"plan"}); err == nil {
-		t.Error("startAll accepted an invalid machine file")
+		t.Error("startAll accepted an invalid config")
 	}
 }
 
-func TestMachineFileReloadsWhenItChanges(t *testing.T) {
-	r := newGateRig(t, "")
-	r.step(t, 0)
-	mustWrite(t, r.sup.machinePath, hoursFinish)
-	if err := os.Chmod(r.sup.machinePath, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	r.now = gateClosedAt
-	r.active = false
-	r.step(t, 0)
-	r.settle(t)
-	if !r.sup.empty() {
-		t.Error("a new machine file was not picked up")
-	}
-}
-
-const poolDaily = "pool:\n  - name: c\n    runtime: claude-code\n    hours:\n      timezone: UTC\n      windows:\n        - {days: [mon, tue, wed, thu, fri, sat, sun], start: \"09:00\", end: \"18:00\"}\n"
+const agentDaily = "agents:\n  a:\n    runtime: claude-code\n    model: m\n    schedule:\n      timezone: UTC\n      windows:\n        - {days: [wed, thu], start: \"09:00\", end: \"18:00\"}\nwork:\n  plan:\n    agent: a\n    query_filter: \"label:x\"\n    rules:\n      - { name: r, match: { labels: [x] }, prompt: p.md }\n"
 
 func TestAnAccountClosingBetweenDecisionAndStartHoldsTheLoop(t *testing.T) {
-	r := newGateRig(t, poolDaily)
+	r := newGateRig(t, "")
+	mustWrite(t, filepath.Join(r.root, ".jigz", "config.yaml"), "repo: owner/name\n"+agentDaily)
+	r.sup.refreshState(r.now, true)
 	r.sup.stopAll(false, false)
 	r.settle(t)
 
@@ -759,52 +644,5 @@ func TestAnAccountClosingBetweenDecisionAndStartHoldsTheLoop(t *testing.T) {
 	r.step(t, 0)
 	if r.sup.empty() {
 		t.Fatal("the account opening did not start the held loop")
-	}
-}
-
-func TestAWhitespacePathStaysFatalAtStart(t *testing.T) {
-	r := newGateRig(t, poolTwo)
-	r.sup.stopAll(false, false)
-	r.settle(t)
-	old := selfExe
-	selfExe = func() (string, error) { return "/opt/my tools/jig", nil }
-	t.Cleanup(func() { selfExe = old })
-	if err := r.sup.startOne("plan"); err == nil {
-		t.Error("a whitespace path did not fail the start")
-	}
-}
-
-func TestGateStatusStaysCurrent(t *testing.T) {
-	cfg := gateCfg(t, hoursFinish)
-	open := gateEval(cfg, machine.State{}, gateOpenAt)
-	s := &supervisor{}
-	s.gateHeld = map[string]bool{}
-	if s.noteGate(open, cfg) {
-		t.Fatal("first open evaluation reported a change")
-	}
-	if s.noteGate(open, cfg) {
-		t.Error("an identical view reported a change")
-	}
-	nextDay := open
-	nextDay.Next = open.Next.Add(24 * time.Hour)
-	if !s.noteGate(nextDay, cfg) {
-		t.Error("a new next_change was not reported")
-	}
-	hours := nextDay
-	hours.HoursOpen = false
-	if !s.noteGate(hours, cfg) {
-		t.Error("a new hours_open was not reported")
-	}
-}
-
-func TestGateStatusRepublishesNextChange(t *testing.T) {
-	r := newGateRig(t, hoursFinish)
-	r.step(t, 0)
-	r.now = time.Date(2026, 10, 22, 10, 0, 0, 0, time.UTC)
-	r.step(t, 0)
-	g := readStatus(t, r.root).Gate
-	want := time.Date(2026, 10, 22, 18, 0, 0, 0, time.UTC)
-	if g == nil || g.NextChange == nil || !g.NextChange.Equal(want) {
-		t.Errorf("next_change %+v, want %v", g, want)
 	}
 }
