@@ -11,6 +11,7 @@ import (
 
 	"github.com/kinged007/jigz/internal/config"
 	"github.com/kinged007/jigz/internal/engine"
+	"github.com/kinged007/jigz/internal/gen"
 	"github.com/kinged007/jigz/internal/machine"
 )
 
@@ -381,13 +382,18 @@ type machineState struct {
 	stateErr    string
 	workStamp   string
 	work        map[string]config.Resolved
-	agents      map[string]config.Agent
-	refs        config.RefStatus
-	operating   machine.Hours
-	gateHeld    map[string]bool
-	gateSeen    bool
-	gateLast    gateView
-	recorded    map[string]machine.LoopState
+	// queries holds the tracker query of every loop by loop name: the
+	// narrowed query for split loops, the entry query otherwise. The
+	// engine reads the filter only at start, so a change needs a drain
+	// and restart.
+	queries   map[string]string
+	agents    map[string]config.Agent
+	refs      config.RefStatus
+	operating machine.Hours
+	gateHeld  map[string]bool
+	gateSeen  bool
+	gateLast  gateView
+	recorded  map[string]machine.LoopState
 }
 
 func (s *supervisor) initMachine() {
@@ -500,7 +506,10 @@ func (s *supervisor) refreshMachine(now time.Time, force bool) (loadErr error) {
 // refreshWork re-reads .jigz/config.yaml and resolves the work entries
 // the gate evaluates. A config that does not load keeps the previous
 // resolution; the load fails the start, so this only guards a bad edit
-// during a run.
+// during a run. Entries split into one resolved value per loop, keyed
+// by loop name; unmanaged entries resolve to an empty candidate list,
+// so the gate leaves them open and the manager only starts and stops
+// them.
 func (s *supervisor) refreshWork(stamp string) {
 	cfg, err := config.Load(s.root)
 	s.mu.Lock()
@@ -510,10 +519,64 @@ func (s *supervisor) refreshWork(stamp string) {
 		fmt.Fprintln(os.Stderr, "jig: work config:", err)
 		return
 	}
-	s.work = cfg.Resolve()
+	work := map[string]config.Resolved{}
+	queries := map[string]string{}
+	resolved := cfg.Resolve()
+	for _, slug := range sortedKeys(resolved) {
+		res := resolved[slug]
+		if !res.Managed {
+			r := config.Resolved{Slug: res.Slug, Managed: false, QueryFilter: res.QueryFilter, OperatingHours: res.OperatingHours}
+			work[res.Slug] = r
+			queries[res.Slug] = res.QueryFilter
+			continue
+		}
+		for _, l := range gen.Split(res, cfg.Agents) {
+			r := res
+			r.Slug = l.Name
+			r.Agents = l.Agents
+			r.Rules = l.Rules
+			r.QueryFilter = l.Query
+			work[l.Name] = r
+			queries[l.Name] = l.Query
+		}
+	}
+	s.work = work
+	s.queries = queries
 	s.agents = cfg.Agents
 	s.refs = cfg.UnresolvedRefs()
 	s.operating = cfg.OperatingHours
+}
+
+// queryFor reports the loop's tracker query for the launch override.
+func (s *supervisor) queryFor(name string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	q, ok := s.queries[name]
+	return q, ok
+}
+
+// querySnapshot copies the loop queries for change detection.
+func (s *supervisor) querySnapshot() map[string]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[string]string, len(s.queries))
+	for n, q := range s.queries {
+		out[n] = q
+	}
+	return out
+}
+
+// recycleDrain stops a loop once idle and starts it again: the query
+// filter is read only at start, so a changed query needs a restart.
+// A loop that is not running is held for the gate to start.
+func (s *supervisor) recycleDrain(name string) {
+	s.mu.Lock()
+	if p := s.procs[name]; p != nil {
+		p.stopping, p.drain, p.recycle = true, true, true
+	} else if _, ok := s.defs[name]; ok {
+		s.gateHeld[name] = true
+	}
+	s.mu.Unlock()
 }
 
 // gateInputsLocked assembles the gate decision inputs. The caller holds

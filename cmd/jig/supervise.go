@@ -187,13 +187,16 @@ func (s *supervisor) childEnv(name string) (envFile string, env []string, runtim
 	if envFile, err = writeEnvFile(s.root, cfg); err != nil {
 		return "", nil, "", err
 	}
-	// The env override replaces the workflow's query_filter, so
-	// defaultFilters must mirror each loop's label clauses (the github-pr
-	// adapter sends a non-empty filter to GitHub search); a filters: entry narrows
-	// further, it does not add to the default.
+	// The env override replaces the workflow's query_filter; a filters:
+	// entry narrows further, it does not add to the default. For
+	// generated loops the query is the loop's narrowed filter, which
+	// keeps split loops from claiming each other's items; otherwise the
+	// legacy lookup by loop name applies.
 	env = append(os.Environ(), cfg.Env()...)
 	env = append(env, "JIG_STATE_PATH="+machine.StatePath(s.root))
-	if filter := cfg.FilterFor(name); filter != "" {
+	if q, ok := s.queryFor(name); ok && strings.TrimSpace(q) != "" {
+		env = append(env, "SORTIE_TRACKER_QUERY_FILTER="+q+" assignee:@me")
+	} else if filter := cfg.FilterFor(name); filter != "" {
 		env = append(env, "SORTIE_TRACKER_QUERY_FILTER="+filter)
 	}
 	agentEnv, runtime, err := s.agentEnv()
@@ -350,8 +353,10 @@ func (s *supervisor) terminate(name string) {
 	}
 }
 
-// run supervises the loops until the process should end, and returns the
-// exit code.
+// reload re-reads the configuration, picks up new loop documents, and
+// restarts the loops whose query changed: the engine reads the filter
+// only at start. A changed loop drains first, so in-flight work
+// finishes; a loop that is not running is held for the gate to start.
 func (s *supervisor) reload() {
 	cfg, err := config.Load(s.root)
 	if err != nil {
@@ -379,9 +384,35 @@ func (s *supervisor) reload() {
 	s.mu.Unlock()
 	s.reloadBudgets(cfg.Budgets())
 	s.reloadCleanup(cfg)
+	old := s.querySnapshot()
 	s.refreshMachine(s.clock(), true)
+	for name, q := range s.querySnapshot() {
+		if oq, ok := old[name]; ok && oq != q {
+			fmt.Fprintf(os.Stderr, "jig: %s: query changed, draining and restarting\n", name)
+			s.recycleDrain(name)
+		}
+	}
+	s.mergeDiscoveredDefs()
 	s.republish()
 	fmt.Fprintln(os.Stderr, "jig: reloaded config")
+}
+
+// mergeDiscoveredDefs picks up loop documents that appeared since boot:
+// generation on reload writes them, and the supervisor starts them
+// through the gate like any other loop. Removed documents keep their
+// running loops; deleting a loop is a stop.
+func (s *supervisor) mergeDiscoveredDefs() {
+	for _, d := range listWorkflows(s.root) {
+		s.mu.Lock()
+		_, ok := s.defs[d.name]
+		if !ok {
+			s.defs[d.name] = d
+		}
+		s.mu.Unlock()
+		if !ok {
+			fmt.Fprintf(os.Stderr, "jig: %s: new loop document, starting\n", d.name)
+		}
+	}
 }
 
 func (s *supervisor) reloadBudgets(budgets map[string]config.Budget) {
