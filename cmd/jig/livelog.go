@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"io"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -91,9 +92,22 @@ func (w *lineWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// engineLogLines are the engine log messages the live view depends
+// on. The contract test searches each engine binary for them; a rename
+// breaks the live view and history, so it must update this list, the
+// log fixtures and the replay test together.
+var engineLogLines = []string{
+	"issue dispatched",
+	"retried issue dispatched",
+	"turn completed",
+	"worker exiting",
+	"worker run failed, scheduling retry",
+	"tick completed",
+}
+
 func (t *liveTracker) line(line string) {
 	msg, ok := logField(line, "msg")
-	if !ok {
+	if !ok || !slices.Contains(engineLogLines, msg) {
 		return
 	}
 	var changed bool
