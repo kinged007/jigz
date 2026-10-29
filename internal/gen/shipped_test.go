@@ -177,7 +177,7 @@ func filterShippedNoise(lines []string) []string {
 			t == "default:",
 			strings.Contains(l, "prompts/default.md"):
 			continue
-		case t == "db_path: jigz-issues.db" || t == "db_path: jigz-prs.db":
+		case strings.Contains(l, "db_path:"):
 			continue
 		}
 		out = append(out, l)

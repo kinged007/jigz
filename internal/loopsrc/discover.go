@@ -36,7 +36,7 @@ func Discover(roots map[string]string) []rollup.Loop {
 			claimed[path] = true
 			out = append(out, rollup.Loop{Repo: p, Loop: name, DBPath: path})
 		}
-		dbs, _ := filepath.Glob(filepath.Join(dir, "jigz-*.db"))
+		dbs, _ := filepath.Glob(filepath.Join(roots[p], ".jigz", "data", "jigz-*.db"))
 		slices.Sort(dbs)
 		for _, path := range dbs {
 			if claimed[path] {

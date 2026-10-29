@@ -88,7 +88,7 @@ func Render(p Profile, l Loop, agents map[string]config.Agent, jigPath, defaultP
 		Skeleton:            skeletonName(l),
 		Profile:             p,
 		LoopName:            l.Name,
-		DBPath:              "jigz-" + l.Name + ".db",
+		DBPath:              "../data/jigz-" + l.Name + ".db",
 		QueryFilter:         l.Query,
 		Tracker:             t,
 		Hooks:               hooksOf(l),

@@ -1,5 +1,5 @@
 ---
-# jig:generated v1 skeleton=issues engine=kinged007/sortie@v1.28.1 sha256=e1651584a0b5a8479014e93d0a3de9efb16148761417c0f442fed91f3900e911
+# jig:generated v1 skeleton=issues engine=kinged007/sortie@v1.28.1 sha256=65df6a87ea8c541b65d250b3984eb59fe16029e1205ac650e0ab692b4e45c5bb
 tracker:
   kind: github
   api_key: $JIG_TRACKER_TOKEN
@@ -26,7 +26,7 @@ tracker:
 polling:
   interval_ms: 60000
 
-db_path: jigz-issues.db
+db_path: ../data/jigz-issues.db
 
 workspace:
   root: $JIG_WORKSPACES/issues

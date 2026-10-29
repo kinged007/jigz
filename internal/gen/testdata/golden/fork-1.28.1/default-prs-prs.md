@@ -1,5 +1,5 @@
 ---
-# jig:generated v1 skeleton=prs engine=kinged007/sortie@v1.28.1 sha256=8bde8a9556ef1e9cde6c7873f05f53dec804210ec8f50e0aeaeac40ecbe91edd
+# jig:generated v1 skeleton=prs engine=kinged007/sortie@v1.28.1 sha256=ca33e867d2f6a32d8c1c2634fcdc97a6afe4b6554beb0dc00d40423c3ac927c7
 tracker:
   kind: github-pr
   api_key: $JIG_TRACKER_TOKEN
@@ -25,7 +25,7 @@ tracker:
 polling:
   interval_ms: 60000
 
-db_path: jigz-prs.db
+db_path: ../data/jigz-prs.db
 
 workspace:
   root: $JIG_WORKSPACES/prs

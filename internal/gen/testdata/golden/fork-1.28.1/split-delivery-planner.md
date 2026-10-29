@@ -1,5 +1,5 @@
 ---
-# jig:generated v1 skeleton=delivery-planner engine=kinged007/sortie@v1.28.1 sha256=320c745254cc1fab19e15f4a549080729fc98b894ff20ea61d188eadb390bdca
+# jig:generated v1 skeleton=delivery-planner engine=kinged007/sortie@v1.28.1 sha256=604b92f75b2bfa5e63c78ab38328805799fe559de2e9c9a89efeaba7427e5713
 tracker:
   kind: github
   api_key: $JIG_TRACKER_TOKEN
@@ -26,7 +26,7 @@ tracker:
 polling:
   interval_ms: 60000
 
-db_path: jigz-delivery-planner.db
+db_path: ../data/jigz-delivery-planner.db
 
 workspace:
   root: $JIG_WORKSPACES/delivery-planner
