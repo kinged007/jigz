@@ -300,6 +300,39 @@ work:
 	}
 }
 
+// TestGenerateSkipsUnsupportedKinds leaves loops whose kind the engine
+// profile does not register without a document: Example 2 on upstream,
+// where pi-api is skipped with the reason shown.
+func TestGenerateSkipsUnsupportedKinds(t *testing.T) {
+	root := writeGenConfig(t, `repo: owner/repo
+engine: { repo: sortie-ai/sortie, version: v1.29.0 }
+tracker:
+  kind: github
+  api_key: { from_env: JIG_TEST_TOKEN }
+  project: owner/repo
+  in_progress_state: in-progress
+  handoff_state: agent:done
+agents:
+  pi-api: { runtime: pi, model: sonnet }
+work:
+  issues:
+    query_filter: "label:agent:build,in-progress -label:needs-human"
+    agent: pi-api
+    rules:
+      - { name: build, match: { labels: [agent:build] }, prompt: prompts/build.md }
+`)
+	docs, warnings, err := generateDocs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(docs) != 0 {
+		t.Errorf("unsupported agent generated %d docs", len(docs))
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "does not support") {
+		t.Errorf("warnings = %v, want the skip reason", warnings)
+	}
+}
+
 // TestValidateDocsEngine runs the rendered document through the real
 // fork engine: valid with no warnings.
 func TestValidateDocsEngine(t *testing.T) {

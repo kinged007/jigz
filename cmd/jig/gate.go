@@ -851,6 +851,9 @@ func (s *supervisor) rewriteAgent(name, agent, prev string, loop gen.Loop, p gen
 		return
 	}
 	trigger, usable := fallbackTrigger(in, res, prev, now)
+	if agent == primaryCandidate(res) {
+		trigger, usable = "primary usable again", now
+	}
 	s.mu.Lock()
 	s.docAgent[name] = agent
 	if agent == primaryCandidate(res) {
