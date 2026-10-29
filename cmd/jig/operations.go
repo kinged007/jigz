@@ -26,11 +26,18 @@ type opsLoop struct {
 	// Paused marks a workflow whose budget holds it, and PausedBy why.
 	Paused   bool
 	PausedBy string
-	// Hold is the reason the machine gate or capability detection keeps
-	// this loop down, and
-	// Runtime the agent runtime the gate selected.
-	Hold    string
-	Runtime string
+	// OfflineReason is why the machine gate, capability detection or the
+	// work entry keeps this loop down; ETA its estimated start. Runtime
+	// is the agent runtime the machine gate selected and Agent the agent
+	// the work entry selected. Primary is the first candidate and
+	// FallbackReason the trigger of the standby switch, set while the
+	// loop runs a non-primary agent.
+	OfflineReason  string
+	ETA            string
+	Runtime        string
+	Agent          string
+	Primary        string
+	FallbackReason string
 }
 
 // cleanupView is a project's last cleanup run.
@@ -96,8 +103,8 @@ func workflowChip(w loopsrc.WorkflowInfo) (state, class string) {
 		return "failed", "failed"
 	case w.State == "exited":
 		return "exited", "stopped"
-	case w.State == "stopping":
-		return "stopping", "draining"
+	case w.State == "stopping" || w.State == "draining":
+		return w.State, "draining"
 	}
 	return w.State, w.State
 }
@@ -129,7 +136,13 @@ func loopRow(l *rollup.Loop, p *opsProject) opsLoop {
 		row.Runtime = p.Status.Gate.Runtime
 	}
 	if hasDoc {
-		row.Hold = w.Hold
+		row.OfflineReason = w.OfflineReason
+		row.Agent = w.Agent
+		row.Primary = w.Primary
+		row.FallbackReason = w.FallbackReason
+		if w.ETA != nil {
+			row.ETA = localText(*w.ETA)
+		}
 		row.Hint = loopHint(w)
 		if b := w.Budget; b != nil {
 			row.Paused, row.PausedBy = b.Paused, b.PausedBy

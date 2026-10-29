@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/kinged007/jigz/internal/dirs"
 	"github.com/kinged007/jigz/internal/hubstate"
@@ -131,6 +132,9 @@ func statusSummary(doc statusDoc, liveness string) string {
 		}
 		fmt.Fprintf(&b, "  %s: %s, pid %d, restarts %d, last exit %s\n",
 			w.Name, w.State, w.PID, w.RestartCount, exit)
+		if line := loopSummary(w); line != "" {
+			b.WriteString("    " + line + "\n")
+		}
 		if line := budgetSummary(w.Budget); line != "" {
 			b.WriteString("    " + line + "\n")
 		}
@@ -144,8 +148,41 @@ func statusSummary(doc statusDoc, liveness string) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// budgetSummary is the one-line form of a workflow's budget, empty when it
-// has none.
+// loopSummary is the one-line form of a workflow's gate decision and
+// document state, empty when there is nothing beyond the state line.
+func loopSummary(w workflowStatus) string {
+	var parts []string
+	if w.Agent != "" {
+		agent := w.Agent
+		if w.Primary != "" && w.Primary != w.Agent {
+			agent += " (primary " + w.Primary + ")"
+		}
+		parts = append(parts, "agent: "+agent)
+	}
+	if w.OfflineReason != "" {
+		off := "offline: " + w.OfflineReason
+		if w.ETA != nil && !w.ETA.IsZero() {
+			off += ", starts " + w.ETA.Format(time.RFC3339)
+		}
+		parts = append(parts, off)
+	}
+	if w.FallbackReason != "" {
+		parts = append(parts, "fallback: "+w.FallbackReason)
+	}
+	if w.Drift != "" {
+		parts = append(parts, "drift: "+truncateDrift(w.Drift))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// truncateDrift keeps a drift report to its first line for the summary.
+func truncateDrift(d string) string {
+	line, _, _ := strings.Cut(d, "\n")
+	if len(line) > 120 {
+		return line[:120] + "..."
+	}
+	return line
+}
 func budgetSummary(b *budgetStatus) string {
 	if b == nil || b.Cap == 0 {
 		return ""

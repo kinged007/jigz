@@ -35,7 +35,6 @@ import (
 	"github.com/kinged007/jigz/internal/fakegithub"
 	"github.com/kinged007/jigz/internal/fakehub"
 	"github.com/kinged007/jigz/internal/hubproto"
-	"github.com/kinged007/jigz/internal/machine"
 	"github.com/kinged007/jigz/internal/rollup"
 )
 
@@ -140,16 +139,21 @@ func TestAcceptance(t *testing.T) {
 	waitFor, assertHandedOff := run.waitFor, run.assertHandedOff
 	dash := fmt.Sprintf("http://127.0.0.1:%d", dashPort)
 
-	writeMachine := func(content string) {
+	repoConfig := filepath.Join(repoDir, ".jigz", "config.yaml")
+	writeOperatingHours := func(from, to string) {
 		t.Helper()
-		path := filepath.Join(home, ".config", "jigz", "machine.yaml")
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		raw, err := os.ReadFile(repoConfig)
+		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(path+".tmp", []byte(content), 0o600); err != nil {
+		if i := strings.Index(string(raw), "operating_hours:"); i >= 0 {
+			raw = raw[:i]
+		}
+		body := fmt.Sprintf("%soperating_hours:\n  timezone: UTC\n  windows:\n    - {days: [mon, tue, wed, thu, fri, sat, sun], start: %q, end: %q}\n", raw, from, to)
+		if err := os.WriteFile(repoConfig+".tmp", []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Rename(path+".tmp", path); err != nil {
+		if err := os.Rename(repoConfig+".tmp", repoConfig); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -345,22 +349,33 @@ func TestAcceptance(t *testing.T) {
 		t.Logf("scenario c: %s, schema %d, run %+v", time.Since(t0).Round(time.Millisecond), schema, r)
 	})
 
-	t.Run("d_no_claim_outside_working_hours", func(t *testing.T) {
+	t.Run("d_no_claim_outside_operating_hours", func(t *testing.T) {
 		t0 := time.Now()
 		now := time.Now().UTC()
-		window := func(from, to time.Time) string {
-			return fmt.Sprintf("hours:\n  timezone: UTC\n  windows:\n    - days: [mon, tue, wed, thu, fri, sat, sun]\n      start: %q\n      end: %q\n",
-				from.Format("15:04"), to.Format("15:04"))
+		window := func(from, to time.Time) (string, string) {
+			return from.Format("15:04"), to.Format("15:04")
 		}
+		defer func() {
+			raw, err := os.ReadFile(repoConfig)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if i := strings.Index(string(raw), "operating_hours:"); i >= 0 {
+				if err := os.WriteFile(repoConfig, raw[:i], 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}()
 		// A one-minute window twelve hours away is closed for the whole test.
-		writeMachine(window(now.Add(12*time.Hour), now.Add(12*time.Hour+time.Minute)))
+		from, to := window(now.Add(12*time.Hour), now.Add(12*time.Hour+time.Minute))
+		writeOperatingHours(from, to)
 		waitFor("the gate to hold the loop outside the window", 60*time.Second, func() bool {
 			doc := status()
-			return doc.Gate != nil && !doc.Gate.HoursOpen && len(doc.Workflows) == 1 && doc.Workflows[0].State == "held"
+			return len(doc.Workflows) == 1 && doc.Workflows[0].State == "offline"
 		})
 		doc := status()
-		if doc.Gate.Open || doc.Gate.Hold != "outside working hours" || doc.Workflows[0].Hold != doc.Gate.Hold {
-			t.Errorf("gate %+v, workflow hold %q, want closed with hold %q", *doc.Gate, doc.Workflows[0].Hold, "outside working hours")
+		if doc.Workflows[0].OfflineReason != "outside operating hours" {
+			t.Errorf("workflow offline reason %q, want outside operating hours", doc.Workflows[0].OfflineReason)
 		}
 
 		held := gh.Add(fakegithub.Item{Repo: slug, Title: "Outside hours", Body: "Wait for the window.",
@@ -376,95 +391,81 @@ func TestAcceptance(t *testing.T) {
 			t.Errorf("the engine polled %d times while the gate was closed", n-searches)
 		}
 
-		writeMachine(window(now.Add(-time.Hour), now.Add(time.Hour)))
+		from, to = window(now.Add(-time.Hour), now.Add(time.Hour))
+		writeOperatingHours(from, to)
 		assertHandedOff(t, held, 90*time.Second)
-		if doc := status(); doc.Gate == nil || !doc.Gate.HoursOpen || !doc.Gate.Open {
-			t.Errorf("gate %+v after the window opened, want open", doc.Gate)
+		if doc := status(); len(doc.Workflows) != 1 || doc.Workflows[0].State != "running" || doc.Workflows[0].OfflineReason != "" {
+			t.Errorf("workflow %+v after the window opened, want running", doc.Workflows)
 		}
 		t.Logf("scenario d: %s", time.Since(t0).Round(time.Millisecond))
 	})
 
-	t.Run("e_usage_limit_moves_to_the_next_pool_entry", func(t *testing.T) {
+	t.Run("d2_offline_reason_and_estimate", func(t *testing.T) {
 		t0 := time.Now()
-		fakes := filepath.Join(root, "fakes")
-		if err := os.MkdirAll(fakes, 0o755); err != nil {
+		now := time.Now().UTC()
+		cfgFile := filepath.Join(repoDir, ".jigz", "config.yaml")
+		base, err := os.ReadFile(cfgFile)
+		if err != nil {
 			t.Fatal(err)
 		}
-		calls := filepath.Join(fakes, "calls")
-		reset := time.Now().Add(2 * time.Hour).Truncate(time.Second)
-		fakeClaude := func(name, result string, isError bool, exit int) string {
-			path := filepath.Join(fakes, name)
-			script := fmt.Sprintf("#!/bin/sh\necho %s >> %s\necho '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"%s\"}'\n"+
-				"echo '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":%t,\"result\":\"%s\",\"usage\":{\"input_tokens\":100,\"output_tokens\":50}}'\nexit %d\n",
-				name, calls, name, isError, result, exit)
-			if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		defer func() {
+			if werr := os.WriteFile(cfgFile, base, 0o644); werr != nil {
+				t.Errorf("restore config: %v", werr)
+			}
+		}()
+		writeConfig := func(from, to time.Time) {
+			t.Helper()
+			body := fmt.Sprintf(`%sagents:
+  a:
+    runtime: pi
+    schedule:
+      timezone: UTC
+      windows:
+        - {days: [mon, tue, wed, thu, fri, sat, sun], start: %q, end: %q}
+work:
+  issues:
+    agent: a
+`, base, from.Format("15:04"), to.Format("15:04"))
+			if err := os.WriteFile(cfgFile+".tmp", []byte(body), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			return path
+			if err := os.Rename(cfgFile+".tmp", cfgFile); err != nil {
+				t.Fatal(err)
+			}
 		}
-		limitMsg := fmt.Sprintf("Claude AI usage limit reached|%d", reset.Unix())
-		a := fakeClaude("claude-a", limitMsg, true, 1)
-		b := fakeClaude("claude-b", "All done.", false, 0)
-		writeMachine(fmt.Sprintf("pool:\n  - name: claude-a\n    runtime: claude-code\n    command: %q\n  - name: claude-b\n    runtime: claude-code\n    command: %q\n", a, b))
-
-		// The loop has to restart with the pool environment before the issue
-		// exists, or a loop without the pool could take it.
-		before := status().Workflows[0].PID
-		waitFor("the loop to restart with the pool", 90*time.Second, func() bool {
+		// A one-minute window twelve hours away is closed for the whole
+		// test. The machine hours stay open: only the work entry closes.
+		writeConfig(now.Add(12*time.Hour), now.Add(12*time.Hour+time.Minute))
+		waitFor("the work entry to go offline outside the window", 60*time.Second, func() bool {
 			doc := status()
-			return doc.Gate != nil && doc.Gate.Runtime == "claude-code" && len(doc.Workflows) == 1 &&
-				doc.Workflows[0].State == "running" && doc.Workflows[0].PID != before
+			return len(doc.Workflows) == 1 && doc.Workflows[0].State == "offline"
 		})
-		pooled := gh.Add(fakegithub.Item{Repo: slug, Title: "Hit a limit", Body: "Switch accounts.",
+		doc := status()
+		w := doc.Workflows[0]
+		if w.OfflineReason != "agent a is outside its working hours" || w.Agent != "a" {
+			t.Errorf("workflow %+v, want agent a offline outside its working hours", w)
+		}
+		if w.ETA == nil {
+			t.Errorf("workflow %+v has no estimated start", w)
+		} else if d := time.Until(*w.ETA); d < 11*time.Hour || d > 13*time.Hour {
+			t.Errorf("estimated start %v, want about 12h from now", *w.ETA)
+		}
+
+		held := gh.Add(fakegithub.Item{Repo: slug, Title: "Offline", Body: "Wait for the window.",
 			Labels: []string{"agent:plan"}, Assignees: []string{owner}})
-		assertHandedOff(t, pooled, 90*time.Second)
-
-		raw, _ := os.ReadFile(calls)
-		// The engine first runs a credential check through the agent command,
-		// so claude-a hits its limit there and claude-b answers the check and
-		// then the turn.
-		got := strings.Fields(string(raw))
-		if len(got) < 2 || got[0] != "claude-a" || slices.Contains(got[1:], "claude-a") {
-			t.Errorf("fake claude calls %v, want one claude-a call and then only claude-b", got)
-		}
-		st, err := machine.LoadState(filepath.Join(home, ".local", "state", "jigz", "pool.json"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		sa, sb := st["claude-a"], st["claude-b"]
-		if !sa.ExhaustedUntil.Equal(reset) || !strings.Contains(sa.Reason, "usage limit reached") || sa.LastUsed.IsZero() {
-			t.Errorf("claude-a state %+v, want exhausted until %s with the limit message and last_used set", sa, reset)
-		}
-		if !sb.ExhaustedUntil.IsZero() || sb.LastUsed.IsZero() {
-			t.Errorf("claude-b state %+v, want not exhausted and last_used set", sb)
+		run.focus = held
+		time.Sleep(5 * time.Second)
+		it, _ := gh.Get(slug, held)
+		if ev := labelLog(gh, slug, held); len(ev) != 0 || slices.Contains(it.Labels, "in-progress") {
+			t.Errorf("issue #%d was claimed while the work entry was offline: events %v, labels %v", held, ev, it.Labels)
 		}
 
-		db, err := sql.Open("sqlite", "file:"+filepath.Join(repoDir, ".jigz", "workflows", "jigz-issues.db")+"?mode=ro")
-		if err != nil {
-			t.Fatal(err)
+		writeConfig(now.Add(-time.Hour), now.Add(time.Hour))
+		assertHandedOff(t, held, 90*time.Second)
+		if doc := status(); len(doc.Workflows) != 1 || doc.Workflows[0].State != "running" || doc.Workflows[0].OfflineReason != "" {
+			t.Errorf("workflow %+v after the window opened, want running", doc.Workflows)
 		}
-		defer db.Close()
-		rows, err := db.Query(`SELECT attempt, agent_adapter, status FROM run_history WHERE display_identifier = ? ORDER BY id`,
-			fmt.Sprintf("%s#%d", slug, pooled))
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer rows.Close()
-		var attempts []string
-		for rows.Next() {
-			var attempt int
-			var adapter, status string
-			if err := rows.Scan(&attempt, &adapter, &status); err != nil {
-				t.Fatal(err)
-			}
-			attempts = append(attempts, fmt.Sprintf("%d:%s:%s", attempt, adapter, status))
-		}
-		if len(attempts) != 2 || !strings.HasPrefix(attempts[0], "1:claude-code:") || strings.HasSuffix(attempts[0], ":succeeded") ||
-			!strings.HasSuffix(attempts[1], ":claude-code:succeeded") {
-			t.Errorf("engine run history %v, want a failed attempt then a succeeded one on claude-code", attempts)
-		}
-		it, _ := gh.Get(slug, pooled)
-		t.Logf("scenario e: %s, runs %v, %d comments, claude-a %+v", time.Since(t0).Round(time.Millisecond), attempts, len(it.Comments), sa)
+		t.Logf("scenario d2: %s", time.Since(t0).Round(time.Millisecond))
 	})
 
 	t.Run("f_blocking_question_stops_and_answer_resumes", func(t *testing.T) {
@@ -871,7 +872,7 @@ func TestAcceptanceUpstreamEngine(t *testing.T) {
 		if w := states["issues"]; w.State != "running" {
 			t.Errorf("issues loop state %q, want running: %+v", w.State, doc.Workflows)
 		}
-		if w := states["prs"]; w.State != "disabled" || w.Hold != wantOff || w.PID != 0 {
+		if w := states["prs"]; w.State != "disabled" || w.OfflineReason != wantOff || w.PID != 0 {
 			t.Errorf("PR loop %+v, want state disabled, pid 0, hold %q (workflows %+v)", w, wantOff, doc.Workflows)
 		}
 		for _, r := range gh.Requests() {

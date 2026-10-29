@@ -77,8 +77,18 @@ type WorkflowInfo struct {
 	// Budget is the loop's spend for the current period, absent when the
 	// workflow configures none.
 	Budget *BudgetInfo `json:"budget,omitempty"`
-	// Hold is why the machine gate keeps this workflow down.
-	Hold string `json:"hold,omitempty"`
+	// OfflineReason is why the gate keeps this loop down. ETA is its
+	// estimated start, absent without an estimate. Agent is the agent the
+	// manager selected. Drift is the document drift report.
+	OfflineReason string     `json:"offline_reason,omitempty"`
+	ETA           *time.Time `json:"eta,omitempty"`
+	Agent         string     `json:"agent,omitempty"`
+	Drift         string     `json:"drift,omitempty"`
+	// Primary is the first candidate agent. FallbackReason names the
+	// trigger of the standby switch and when the primary is usable
+	// again, set while the loop runs a non-primary agent.
+	Primary        string `json:"primary,omitempty"`
+	FallbackReason string `json:"fallback_reason,omitempty"`
 	// Sessions are the agent sessions the supervisor has seen start and
 	// not end. SessionsKnown is false while the supervisor cannot account
 	// for every session the engine runs; a reader then treats the loop as
@@ -154,7 +164,7 @@ func (s StatusInfo) FailedWorkflows() []WorkflowInfo {
 	}
 	var out []WorkflowInfo
 	for _, w := range s.Workflows {
-		if w.State == "stopping" {
+		if w.State == "stopping" || w.State == "draining" {
 			return nil
 		}
 		if w.Failed() {

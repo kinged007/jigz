@@ -6,10 +6,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/kinged007/jigz/internal/config"
 	"github.com/kinged007/jigz/internal/engine"
+	"github.com/kinged007/jigz/internal/gen"
 	"github.com/kinged007/jigz/internal/plan"
 )
 
@@ -38,6 +40,9 @@ func collectValidateChecks(root string) ([]validateCheck, []string, []string) {
 	}
 	checks = append(checks, validateCheck{Name: "config", OK: true})
 
+	checks = append(checks, engineProfileCheck(cfg))
+	checks = append(checks, generationChecks(root)...)
+
 	if err := cfg.CheckCleanup(); err != nil {
 		checks = append(checks, validateCheck{Name: "cleanup", OK: false, Error: err.Error()})
 	} else {
@@ -51,15 +56,69 @@ func collectValidateChecks(root string) ([]validateCheck, []string, []string) {
 	if err := cfg.CheckToken(); err != nil {
 		warnings = append(warnings, err.Error())
 	}
-	for name, b := range cfg.Budgets {
+	for name, b := range cfg.Budgets() {
 		if b.MaxUSD > 0 {
-			warnings = append(warnings, fmt.Sprintf("workflows.%s.budget.max_usd is ignored: the engine records no cost per run", name))
+			warnings = append(warnings, fmt.Sprintf("work.%s.budget.max_usd is ignored: the engine records no cost per run", name))
 		}
 	}
 
 	wfChecks, files := workflowValidateChecks(root, cfg)
 	checks = append(checks, wfChecks...)
 	return checks, files, warnings
+}
+
+// engineProfileCheck resolves every work entry against the engine
+// profile table: an unsupported engine or a version older than the
+// minimum fails, a version newer than the newest entry warns that the
+// release has no contract tests.
+func engineProfileCheck(cfg *config.Config) validateCheck {
+	resolved := cfg.Resolve()
+	if len(resolved) == 0 {
+		return validateCheck{Name: "engine", OK: true}
+	}
+	seen := map[string]bool{}
+	for _, slug := range sortedKeys(resolved) {
+		res := resolved[slug]
+		key := res.Engine.Repo + "@" + res.Engine.Version
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		p, _, err := gen.ProfileFor(res.Engine.Repo, res.Engine.Version)
+		if err != nil {
+			return validateCheck{Name: "engine", OK: false, Error: fmt.Sprintf("work.%s: %v", slug, err)}
+		}
+		if res.Engine.Version != "" && res.Engine.Version != p.Version {
+			return validateCheck{Name: "engine", OK: true, Output: fmt.Sprintf("work.%s: engine %s has no contract tests; using the %s profile", slug, key, p.Version)}
+		}
+	}
+	return validateCheck{Name: "engine", OK: true}
+}
+
+// generationChecks compares a dry generation with the files on disk:
+// a hand edit in a managed document is drift and fails.
+func generationChecks(root string) []validateCheck {
+	reports, err := driftReports(root)
+	if err != nil {
+		return []validateCheck{{Name: "generation", OK: false, Error: err.Error()}}
+	}
+	names := make([]string, 0, len(reports))
+	for n := range reports {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	var checks []validateCheck
+	for _, n := range names {
+		switch r := reports[n]; {
+		case r == "":
+			checks = append(checks, validateCheck{Name: "generation:" + n, OK: true})
+		case r == "unmanaged":
+			checks = append(checks, validateCheck{Name: "generation:" + n, OK: true, Output: "unmanaged: Jigz neither generates nor overwrites this document"})
+		default:
+			checks = append(checks, validateCheck{Name: "generation:" + n, OK: false, Error: r})
+		}
+	}
+	return checks
 }
 
 func listWorkflows(root string) []loopDef {

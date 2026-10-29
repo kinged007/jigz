@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kinged007/jigz/internal/config"
+	"github.com/kinged007/jigz/internal/engine"
 	fleetconfig "github.com/kinged007/jigz/internal/fleetconfig"
 	"github.com/kinged007/jigz/internal/machine"
 	"github.com/kinged007/jigz/internal/plan"
@@ -36,26 +38,32 @@ type agentsView struct {
 	Columns []agentColumn
 	Span    int
 	Rows    []agentRow
-	Machine machineView
+	Fleets  []fleetView
 }
 
-type poolRow struct {
-	Name, Runtime, Command, CostClass, Hours string
-	State, Class, Reason, LastUsed           string
+// fleetView is one repository's configured fleet: operating hours, the
+// agents with their availability, and the pools with their members.
+type fleetView struct {
+	Repo      string
+	Error     string
+	Operating string
+	Agents    []fleetAgentRow
+	Pools     []fleetPoolRow
 }
 
-// machineView is the machine file as the page shows it. Path is set and
-// Present false when there is no file or it cannot be read.
-type machineView struct {
-	Path, Err  string
-	Present    bool
-	Warnings   []string
-	Timezone   string
-	Windows    []string
-	End        string
-	OpenNow    bool
-	NextChange string
-	Pool       []poolRow
+type fleetAgentRow struct {
+	Name    string
+	Runtime string
+	Model   string
+	Hours   string
+	State   string
+	Reason  string
+	Loops   []string
+}
+
+type fleetPoolRow struct {
+	Name   string
+	Agents []string
 }
 
 func (a *app) agents(w http.ResponseWriter, r *http.Request) {
@@ -77,82 +85,77 @@ func (a *app) agents(w http.ResponseWriter, r *http.Request) {
 			}
 			v.Rows = append(v.Rows, row)
 		}
-	}
-	v.Machine = loadMachineView(time.Now())
-	g := a.gate()
-	for i, row := range v.Machine.Pool {
-		if off := g.RuntimeOff(row.Runtime); off != "" {
-			v.Machine.Pool[i].State, v.Machine.Pool[i].Class, v.Machine.Pool[i].Reason = "unavailable on this engine", "failed", off
+		if f := fleetViewFor(p, a.gate(), time.Now()); f.Repo != "" {
+			v.Fleets = append(v.Fleets, f)
 		}
 	}
 	execPage(w, "agents", v)
 }
 
-func loadMachineView(now time.Time) machineView {
-	var mv machineView
-	path, err := machine.DefaultPath()
+// fleetViewFor describes one repository's configured fleet: operating
+// hours, every agent with its availability, and the pools with their
+// members. A repository without a config file is skipped.
+func fleetViewFor(p fleetconfig.Resolved, g engine.Gate, now time.Time) fleetView {
+	v := fleetView{Repo: p.Repo.Repo}
+	cfg, err := config.Load(p.Dir)
 	if err != nil {
-		mv.Err = err.Error()
-		return mv
+		v.Error = err.Error()
+		return v
 	}
-	mv.Path = path
-	if _, err := os.Stat(path); err != nil {
-		return mv
+	if len(cfg.OperatingHours.Windows) == 0 {
+		v.Operating = "24/7"
+	} else {
+		v.Operating = strings.Join(windowTexts(cfg.OperatingHours), "; ") + ", end " + endOrFinish(cfg.OperatingHours.End)
 	}
-	cfg, err := machine.Load(path)
-	if err != nil {
-		mv.Err = err.Error()
-		return mv
+	var st machine.State
+	if sp := machine.StatePath(p.Dir); sp != "" {
+		st, _ = machine.LoadState(sp)
 	}
-	var state machine.State
-	if sp, err := machine.StatePath(); err == nil {
-		if state, err = machine.LoadState(sp); err != nil {
-			mv.Err = err.Error()
-		}
-	}
-	mv.Present, mv.Warnings = true, cfg.Warnings
-	mv.Timezone = cfg.Hours.Timezone
-	if mv.Timezone == "" {
-		mv.Timezone = "local time"
-	}
-	mv.Windows = windowTexts(cfg.Hours)
-	mv.End = cfg.Hours.End
-	if mv.End == "" {
-		mv.End = machine.EndFinish
-	}
-	mv.OpenNow = cfg.Hours.Open(now)
-	mv.NextChange = "—"
-	if next := cfg.NextChange(state, now); !next.IsZero() {
-		mv.NextChange = localText(next)
-	}
-	for _, e := range cfg.Pool {
-		row := poolRow{Name: e.Name, Runtime: e.Runtime, Command: e.Command, CostClass: e.CostClass,
-			Hours: "always", State: "available", Class: "running"}
-		if row.Command == "" {
-			row.Command = e.Runtime
-			if e.Runtime == "claude-code" {
-				row.Command = "claude"
+	refs := cfg.UnresolvedRefs()
+	served := map[string][]string{}
+	for slug, res := range cfg.Resolve() {
+		names := res.Agents
+		if len(names) == 0 {
+			for _, r := range res.Rules {
+				names = append(names, r.Agents...)
 			}
 		}
-		if w := windowTexts(e.Hours); len(w) > 0 {
-			row.Hours = strings.Join(w, "; ")
+		for _, n := range names {
+			served[n] = append(served[n], slug)
 		}
-		es := state[e.Name]
-		switch {
-		case now.Before(es.ExhaustedUntil):
-			row.State, row.Class = "exhausted until "+localText(es.ExhaustedUntil), "failed"
-			row.Reason = es.Reason
-		case !e.Hours.Open(now):
-			row.State, row.Class = "outside its hours", "paused"
-		}
-		if !es.LastUsed.IsZero() {
-			row.LastUsed = agoText(es.LastUsed)
-		}
-		mv.Pool = append(mv.Pool, row)
 	}
-	return mv
+	for _, name := range sortedKeys(cfg.Agents) {
+		a := cfg.Agents[name]
+		row := fleetAgentRow{Name: name, Runtime: a.Runtime, Model: a.Model, Hours: "always", State: "available"}
+		if len(a.Schedule.Windows) > 0 {
+			row.Hours = strings.Join(windowTexts(a.Schedule), "; ")
+		}
+		switch {
+		case a.Runtime != "" && g.RuntimeOff(a.Runtime) != "":
+			row.State, row.Reason = "unavailable", g.RuntimeOff(a.Runtime)
+		case len(refs.Agents[name]) > 0:
+			row.State, row.Reason = "unavailable", "unresolved references: "+strings.Join(refs.Agents[name], ", ")
+		case now.Before(st.Agents[name].ExhaustedUntil):
+			row.State, row.Reason = "exhausted", exhaustionText(st.Agents[name])
+		case !a.Schedule.Open(now):
+			row.State = "outside working hours"
+		}
+		row.Loops = served[name]
+		sort.Strings(row.Loops)
+		v.Agents = append(v.Agents, row)
+	}
+	for _, name := range sortedKeys(cfg.Pools) {
+		v.Pools = append(v.Pools, fleetPoolRow{Name: name, Agents: cfg.Pools[name]})
+	}
+	return v
 }
 
+func exhaustionText(es machine.EntryState) string {
+	if es.Reason == "" {
+		return "usage limit, usable again " + es.ExhaustedUntil.Format(time.RFC3339)
+	}
+	return es.Reason + ", usable again " + es.ExhaustedUntil.Format(time.RFC3339)
+}
 func windowTexts(h machine.Hours) []string {
 	var out []string
 	for _, w := range h.Windows {

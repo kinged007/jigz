@@ -1,0 +1,17 @@
+time=2026-10-29T14:57:58.752Z level=INFO msg="issue dispatched" issue_id=1 issue_identifier=1 agent_kind=claude-code rule_name=build model=claude-sonnet-5-5 effort=""
+time=2026-10-29T14:57:58.756Z level=INFO msg="issue dispatched" issue_id=2 issue_identifier=2 agent_kind=claude-code rule_name=build model=claude-sonnet-5-5 effort=""
+time=2026-10-29T14:57:58.757Z level=INFO msg="tick completed" candidates=2 dispatched=2 dispatched_by_rule=2 dispatched_by_default=0 dispatched_by_fallback=0 running=2 retrying=0 held_by_blockers=0 blockers_unresolved=0 blockers_not_read=0 blockers_incomplete=0 budget_exhausted=0
+time=2026-10-29T14:57:58.851Z level=WARN msg="worker run failed, scheduling retry" issue_id=1 issue_identifier=1 error="agent session start: agent: credential_unverified: the agent runtime did not complete a credential verification request: boom" next_attempt=1 delay_ms=10000
+time=2026-10-29T14:57:59.769Z level=INFO msg="tick completed" candidates=2 dispatched=0 dispatched_by_rule=0 dispatched_by_default=0 dispatched_by_fallback=0 running=1 retrying=1 held_by_blockers=0 blockers_unresolved=0 blockers_not_read=0 blockers_incomplete=0 budget_exhausted=0
+time=2026-10-29T14:58:03.845Z level=INFO msg="agent session started" issue_id=2 issue_identifier=2 session_id=582d883a-07dc-48f0-9fb8-c2fc37f8fc7f
+time=2026-10-29T14:58:08.858Z level=INFO msg="retried issue dispatched" issue_id=1 issue_identifier=1 attempt=1 agent_kind=claude-code rule_name=build model=claude-sonnet-5-5 effort=""
+time=2026-10-29T14:58:09.007Z level=INFO msg="turn completed" issue_id=2 issue_identifier=2 session_id=582d883a-07dc-48f0-9fb8-c2fc37f8fc7f turn_number=1 max_turns=10
+time=2026-10-29T14:58:09.207Z level=INFO msg="tick completed" candidates=2 dispatched=0 dispatched_by_rule=0 dispatched_by_default=0 dispatched_by_fallback=0 running=2 retrying=0 held_by_blockers=0 blockers_unresolved=0 blockers_not_read=0 blockers_incomplete=0 budget_exhausted=0
+time=2026-10-29T14:58:13.940Z level=INFO msg="agent session started" issue_id=1 issue_identifier=1 session_id=d648df16-390e-42e9-bbdd-99f15f8b6d8f
+time=2026-10-29T14:58:14.083Z level=INFO msg="turn completed" issue_id=2 issue_identifier=2 session_id=582d883a-07dc-48f0-9fb8-c2fc37f8fc7f turn_number=2 max_turns=10
+time=2026-10-29T14:58:19.050Z level=INFO msg="turn completed" issue_id=1 issue_identifier=1 session_id=d648df16-390e-42e9-bbdd-99f15f8b6d8f turn_number=1 max_turns=10
+time=2026-10-29T14:58:19.135Z level=INFO msg="turn completed" issue_id=2 issue_identifier=2 session_id=582d883a-07dc-48f0-9fb8-c2fc37f8fc7f turn_number=3 max_turns=10
+time=2026-10-29T14:58:54.584Z level=INFO msg="worker exiting" issue_id=2 issue_identifier=2 session_id=582d883a-07dc-48f0-9fb8-c2fc37f8fc7f exit_kind=normal turns_completed=10
+time=2026-10-29T14:58:55.307Z level=INFO msg="tick completed" candidates=1 dispatched=0 dispatched_by_rule=0 dispatched_by_default=0 dispatched_by_fallback=0 running=1 retrying=0 held_by_blockers=0 blockers_unresolved=0 blockers_not_read=0 blockers_incomplete=0 budget_exhausted=0
+time=2026-10-29T14:59:04.661Z level=INFO msg="worker exiting" issue_id=1 issue_identifier=1 session_id=d648df16-390e-42e9-bbdd-99f15f8b6d8f exit_kind=normal turns_completed=10
+time=2026-10-29T14:59:05.464Z level=INFO msg="tick completed" candidates=0 dispatched=0 dispatched_by_rule=0 dispatched_by_default=0 dispatched_by_fallback=0 running=0 retrying=0 held_by_blockers=0 blockers_unresolved=0 blockers_not_read=0 blockers_incomplete=0 budget_exhausted=0

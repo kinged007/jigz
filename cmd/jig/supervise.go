@@ -18,6 +18,8 @@ import (
 
 	"github.com/kinged007/jigz/internal/config"
 	"github.com/kinged007/jigz/internal/engine"
+	"github.com/kinged007/jigz/internal/gen"
+	"github.com/kinged007/jigz/internal/machine"
 	"github.com/kinged007/jigz/internal/plan"
 	"github.com/kinged007/jigz/internal/rollup"
 )
@@ -146,6 +148,16 @@ type supervisor struct {
 	// sessions reports whether a loop has a session running; retries do
 	// not count.
 	sessions func(name string) (active, known bool)
+	// docAgent is the agent the on-disk document was rendered for, by
+	// loop. genLoops and genProf re-render it when the gate picks a
+	// standby agent. pickCnt counts consecutive ticks with the same
+	// pick, so the return to the primary waits out flapping.
+	// fallback records the last standby switch per loop for status.
+	docAgent map[string]string
+	genLoops map[string]gen.Loop
+	genProf  map[string]gen.Profile
+	pickCnt  map[string]pickStable
+	fallback map[string]fallbackInfo
 }
 
 func newSupervisor(root, bin string, defs []loopDef) *supervisor {
@@ -161,9 +173,14 @@ func newSupervisor(root, bin string, defs []loopDef) *supervisor {
 		budgetUse: map[string]budgetUsage{}, budgetPolled: map[string]time.Time{},
 		budgetReadErr: map[string]string{},
 		disabled:      map[string]string{},
+		docAgent:      map[string]string{},
+		genLoops:      map[string]gen.Loop{},
+		genProf:       map[string]gen.Profile{},
+		pickCnt:       map[string]pickStable{},
+		fallback:      map[string]fallbackInfo{},
 	}
 	s.quiet, s.sessions = s.loopQuiet, s.loopSessions
-	s.initMachine()
+	s.initState()
 	for _, d := range defs {
 		s.defs[d.name] = d
 	}
@@ -172,7 +189,10 @@ func newSupervisor(root, bin string, defs []loopDef) *supervisor {
 
 // childEnv resolves everything a child needs that is not the workflow
 // itself: the env file written from the current config, and the
-// environment to launch it with.
+// environment to launch it with. The gate is re-evaluated here because
+// the decision and the start read the clock separately, so an agent
+// that became unavailable between them holds the loop instead of
+// starting a child that would fail at once.
 //
 // Both are read from disk on every call rather than once at boot. A
 // supervisor rewrites config.yaml and the env file and then asks for a
@@ -186,19 +206,40 @@ func (s *supervisor) childEnv(name string) (envFile string, env []string, runtim
 	if envFile, err = writeEnvFile(s.root, cfg); err != nil {
 		return "", nil, "", err
 	}
-	// The env override replaces the workflow's query_filter, so
-	// defaultFilters must mirror each loop's label clauses (the github-pr
-	// adapter sends a non-empty filter to GitHub search); a filters: entry narrows
-	// further, it does not add to the default.
+	s.refreshState(s.clock(), false)
+	s.mu.Lock()
+	in := s.gateInputsLocked()
+	res, ok := s.work[name]
+	agents := s.agents
+	s.mu.Unlock()
+	now := s.clock()
+	if ok {
+		if lv := in.workView(res, now); !lv.Open {
+			reason := lv.Reason
+			if reason == "" {
+				reason = "no agent available"
+			}
+			return "", nil, "", fmt.Errorf("the gate holds the loop: %s: %w", reason, errNoAgent)
+		}
+		if len(res.Agents) > 0 {
+			if a, known := agents[res.Agents[0]]; known {
+				runtime = a.Runtime
+			}
+		}
+	}
+	// The env override replaces the workflow's query_filter; a filters:
+	// entry narrows further, it does not add to the default. For
+	// generated loops the query is the loop's narrowed filter, which
+	// keeps split loops from claiming each other's items; otherwise the
+	// legacy lookup by loop name applies.
 	env = append(os.Environ(), cfg.Env()...)
-	if filter := cfg.FilterFor(name); filter != "" {
+	env = append(env, "JIG_STATE_PATH="+machine.StatePath(s.root))
+	if q, ok := s.queryFor(name); ok && strings.TrimSpace(q) != "" {
+		env = append(env, "SORTIE_TRACKER_QUERY_FILTER="+q+" assignee:@me")
+	} else if filter := cfg.FilterFor(name); filter != "" {
 		env = append(env, "SORTIE_TRACKER_QUERY_FILTER="+filter)
 	}
-	agentEnv, runtime, err := s.agentEnv()
-	if err != nil {
-		return "", nil, "", err
-	}
-	return envFile, append(env, agentEnv...), runtime, nil
+	return envFile, env, runtime, nil
 }
 
 // lastEnv returns the last value set for key, as a child would see it.
@@ -225,7 +266,7 @@ func (s *supervisor) startOne(name string) error {
 		s.gateHeld[name] = true
 		s.mu.Unlock()
 		if first {
-			fmt.Fprintf(os.Stderr, "jig: %s: no agent account available, the gate holds the loop\n", name)
+			fmt.Fprintf(os.Stderr, "jig: %s: %v\n", name, err)
 		}
 		s.republish()
 		return nil
@@ -301,9 +342,6 @@ func (s *supervisor) startOne(name string) error {
 // startAll launches every loop in the run except the paused ones and
 // the ones the machine gate keeps down.
 func (s *supervisor) startAll(names []string) error {
-	if err := s.machineErr(); err != nil {
-		return err
-	}
 	for _, n := range names {
 		if !s.startable(n) {
 			continue
@@ -348,8 +386,10 @@ func (s *supervisor) terminate(name string) {
 	}
 }
 
-// run supervises the loops until the process should end, and returns the
-// exit code.
+// reload re-reads the configuration, picks up new loop documents, and
+// restarts the loops whose query changed: the engine reads the filter
+// only at start. A changed loop drains first, so in-flight work
+// finishes; a loop that is not running is held for the gate to start.
 func (s *supervisor) reload() {
 	cfg, err := config.Load(s.root)
 	if err != nil {
@@ -367,19 +407,45 @@ func (s *supervisor) reload() {
 		s.republish()
 		return
 	}
-	for name, b := range cfg.Budgets {
+	for name, b := range cfg.Budgets() {
 		if b.MaxUSD > 0 {
-			fmt.Fprintf(os.Stderr, "jig: workflows.%s.budget.max_usd is ignored: the engine records no cost per run\n", name)
+			fmt.Fprintf(os.Stderr, "jig: work.%s.budget.max_usd is ignored: the engine records no cost per run\n", name)
 		}
 	}
 	s.mu.Lock()
 	s.sleepCfg = cfg.Sleep
 	s.mu.Unlock()
-	s.reloadBudgets(cfg.Budgets)
+	s.reloadBudgets(cfg.Budgets())
 	s.reloadCleanup(cfg)
-	s.refreshMachine(s.clock(), true)
+	old := s.querySnapshot()
+	s.refreshState(s.clock(), true)
+	for name, q := range s.querySnapshot() {
+		if oq, ok := old[name]; ok && oq != q {
+			fmt.Fprintf(os.Stderr, "jig: %s: query changed, draining and restarting\n", name)
+			s.recycleDrain(name)
+		}
+	}
+	s.mergeDiscoveredDefs()
 	s.republish()
 	fmt.Fprintln(os.Stderr, "jig: reloaded config")
+}
+
+// mergeDiscoveredDefs picks up loop documents that appeared since boot:
+// generation on reload writes them, and the supervisor starts them
+// through the gate like any other loop. Removed documents keep their
+// running loops; deleting a loop is a stop.
+func (s *supervisor) mergeDiscoveredDefs() {
+	for _, d := range listWorkflows(s.root) {
+		s.mu.Lock()
+		_, ok := s.defs[d.name]
+		if !ok {
+			s.defs[d.name] = d
+		}
+		s.mu.Unlock()
+		if !ok {
+			fmt.Fprintf(os.Stderr, "jig: %s: new loop document, starting\n", d.name)
+		}
+	}
 }
 
 func (s *supervisor) reloadBudgets(budgets map[string]config.Budget) {
@@ -651,22 +717,48 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 		Cleanup:              readCleanupRecord(s.root),
 		Sleep:                s.sleepStatusLocked(),
 	}
-	gate := s.gateStatusLocked()
-	doc.Gate = gate
+	in := s.gateInputsLocked()
+	drifts, derr := driftReports(s.root)
+	if derr != nil {
+		fmt.Fprintln(os.Stderr, "jig: drift:", derr)
+	}
+	now := s.clock()
+	primaryOf := func(name string) string {
+		return primaryCandidate(s.work[name])
+	}
+	fallbackOf := func(name string) string {
+		fb, ok := s.fallback[name]
+		if !ok {
+			return ""
+		}
+		return fb.String(primaryOf(name))
+	}
+	loopInfo := func(name string, bs *budgetStatus) loopView {
+		lv := in.loopView(name, now)
+		if bs != nil && bs.Paused {
+			lv.Reason, lv.ETA = "", time.Time{}
+		}
+		return lv
+	}
 	add := func(p *loopProc) {
-		st := "running"
 		bs := s.budgetStatusLocked(p.def.name)
+		lv := loopInfo(p.def.name, bs)
+		st := "running"
 		switch {
 		case bs != nil && bs.Paused:
 			st = "paused"
 		case s.gateHeld[p.def.name] && p.exitCode != nil:
-			st = "held"
+			st = "offline"
 		case s.sleeping:
 			st = "sleeping"
 		case p.exitCode != nil:
 			st = "exited"
+		case p.stopping && p.drain:
+			st = "draining"
 		case p.stopping:
 			st = "stopping"
+		case !lv.Open:
+			st = "draining"
 		}
 		pid := 0
 		if p.cmd != nil && p.cmd.Process != nil {
@@ -677,10 +769,20 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 			PID: pid, State: st, StartedAt: p.since.UTC(),
 			RestartCount: p.restarts, LastExitCode: p.exitCode, ConfigHash: p.configHash,
 			LogPath: childLogPath(s.root, p.def.name), Budget: bs,
-			Hold: gate.holdFor(bs),
+			OfflineReason: lv.Reason, ETA: timePtr(lv.ETA), Agent: lv.Agent,
+			Drift:   drifts[p.def.name],
+			Primary: primaryOf(p.def.name), FallbackReason: fallbackOf(p.def.name),
 		}
 		if p.exitCode == nil {
 			w.Sessions, w.SessionsKnown = p.live.snapshot()
+			// One loop runs one agent at a time: agent changes happen at
+			// idle, so every running session belongs to the current agent.
+			for i := range w.Sessions {
+				w.Sessions[i].Agent = lv.Agent
+				if w.Sessions[i].Agent == "" {
+					w.Sessions[i].Agent = p.runtime
+				}
+			}
 		}
 		doc.Workflows = append(doc.Workflows, w)
 	}
@@ -696,17 +798,20 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 		}
 		wf, _ := os.ReadFile(filepath.Join(s.root, ".jigz", "workflows", def.file))
 		bs := s.budgetStatusLocked(name)
-		st, hold := "paused", gate.holdFor(bs)
+		lv := loopInfo(name, bs)
+		st, offline := "paused", lv.Reason
 		if s.gateHeld[name] && (bs == nil || !bs.Paused) {
-			st = "held"
+			st = "offline"
 		}
 		if why, ok := s.disabled[name]; ok {
-			st, hold = "disabled", why
+			st, offline = "disabled", why
 		}
 		doc.Workflows = append(doc.Workflows, workflowStatus{
 			Name: name, WorkflowFile: def.file, LoopType: loopTypeOf(wf),
 			State: st, StartedAt: s.startedAt.UTC(), LogPath: childLogPath(s.root, name),
-			Budget: bs, Hold: hold,
+			Budget: bs, OfflineReason: offline, ETA: timePtr(lv.ETA), Agent: lv.Agent,
+			Drift:   drifts[name],
+			Primary: primaryOf(name), FallbackReason: fallbackOf(name),
 		})
 	}
 	sort.Slice(doc.Workflows, func(i, j int) bool { return doc.Workflows[i].Name < doc.Workflows[j].Name })

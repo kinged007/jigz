@@ -25,7 +25,7 @@ supported engine registers, so the shipped workflows run without extra
 setup. The one feature the workflows need that an engine may lack is the
 `github-pr` tracker (which treats pull requests as work items). The `pi`
 agent adapter is optional: an engine only needs it when a workflow or
-pool entry uses `pi`.
+agent uses `pi`.
 
 **The agent** is Claude Code (`claude`), a coding agent that runs in a terminal the same
 way you would: it reads files, edits code, runs checks, and shells out
@@ -61,11 +61,9 @@ There is no queue and no webhook. Every loop polls GitHub roughly every
    so an item left mid-run by a crashed process is re-picked by the loop
    that started it. The loop's dispatch rules choose the job from the
    trigger label; the first matching rule wins.
-2. **Assignee scope** — by default every query ends in `assignee:@me`,
+2. **Assignee scope** — every query ends in `assignee:@me`,
    meaning only items assigned to the token owner are picked up. This
-   keeps several people (or bots) from fighting over one backlog. Set
-   `assignee: ""` in config for a shared backlog where anyone's issue
-   is fair game.
+   keeps several people (or bots) from fighting over one backlog.
 3. **Escalation guard** — every query excludes `-label:needs-human`,
    so anything an agent flagged for a person stays parked until a
    human removes the label.
@@ -188,7 +186,11 @@ warning on stderr says so. To migrate:
    do not need the run history.
 2. Rerun `jig setup` to install the two new files.
 3. In `.jigz/config.yaml`, rename old loop names to `issues` or `prs` in
-   the `filters:` and `workflows:` (budget) keys.
+   the `filters:` key, and move each `workflows:<name>.budget` block to
+   `work:<name>.budget`. The keys `milestone`, `assignee` and `workflows`
+   are no longer accepted: there is no milestone scope, the assignee
+   scope is always `assignee:@me`, and budgets live under
+   `work.<slug>.budget`.
 4. Existing installs keep their old `prompts/plan.md` and `prompts/build.md`,
    because setup never overwrites a file. Diff them against the shipped
    copies or delete them and rerun `setup`. An old `build.md` that does not
@@ -355,8 +357,7 @@ loopback names; a wildcard bind accepts any `Host`.
 
 The dashboard has no authentication, so hiding content is its only built-in
 protection when it is reachable beyond localhost. The `dashboard.hide` block
-of `machine.yaml` (see [Working hours and agent accounts](#working-hours-and-agent-accounts))
-lists the pages and sections to hide:
+of `machine.yaml` lists the pages and sections to hide:
 
 ```yaml
 dashboard:
@@ -451,7 +452,7 @@ The workflows need one feature an engine may not ship: the **github-pr
 tracker**, which treats pull requests as work items so a review loop can
 watch a pull request rather than an issue. Every supported engine
 registers the **claude-code** agent adapter, and the `pi` adapter is only
-needed when a workflow or pool entry uses `pi`. A repository you configure
+needed when a workflow or agent uses `pi`. A repository you configure
 should carry the tracker; the next section says what is switched off when
 it does not.
 
@@ -485,8 +486,7 @@ The repository and version are read in this order, first match wins:
 
 1. `JIG_ENGINE_BIN`: use this binary. No repository or version applies.
 2. The environment variables `JIG_ENGINE_REPO` and `JIG_ENGINE_VERSION`.
-3. The `engine:` block of `machine.yaml` (see
-   [Working hours and agent accounts](#working-hours-and-agent-accounts)).
+3. The `engine:` block of `machine.yaml`.
 4. The defaults.
 
 Each of the repository and the version is resolved on its own. A release
@@ -579,8 +579,11 @@ in time, it prints the last log lines and exits non-zero. Stop the run with
 differs from the shipped one. It never changes an existing workflow file.
 
 `jig status [--json] [repo-root]` reports the run serving the
-repo-root: version, pid, state, and per workflow its state, pid,
-restart count and last exit code. `--json` prints the status document
+repo-root: version, pid, state, and per workflow its state (`running`,
+`draining`, `offline`, `paused`, `sleeping`, `exited`, `stopping` or
+`disabled`), pid, restart count, last exit code, the agent it runs
+with, its running sessions, and, when it is not running, the offline
+reason and the estimated start time. `--json` prints the status document
 with an added `liveness` field: `running` when the pid is alive, `stale`
 when the document says running but the pid is dead, `exited` when the
 run ended. The command reads the document from the repo-root and does not
@@ -691,7 +694,7 @@ all. It applies to `jig` and `jig start`. This is how Jigz picks a per-repo work
 
 ```
 .jigz/
-  config.yaml      # repo:, token:, milestone:, cleanup:, sleep:, workflows: (all optional — see below)
+  config.yaml      # repo:, token:, work:, agents:, cleanup:, sleep: (all optional — see below)
   workflows/       # installed by setup from the binary; edit freely, loop runs these
   .env.loop        # generated each run (resolved tracker, token, clone URL; mode 0600)
   workspaces/      # per-item agent checkouts (one subdir per loop)
@@ -711,14 +714,13 @@ replace `.jigz/` with:
 jigz-*.db
 ```
 
-`.jigz/config.yaml`. An unknown key at any level is an error that names the
-file, the line and the key:
+`.jigz/config.yaml`. An unknown key at any level is an error that names
+the field path of the key (for example
+`unknown key "work.issues.rules[0].effort"`):
 
 ```yaml
 repo: ""        # empty = detect from git remote; or pin owner/name
 token: ""       # empty = JIG_TOKEN, then GITHUB_TOKEN / GH_TOKEN env
-milestone: ""   # optional milestone title to restrict all loops to
-assignee: "@me" # token owner only; "" = shared backlog
 # per-loop query-filter overrides, keyed by WORKFLOW.*.md stem
 # (read on every run — no setup re-run needed):
 #filters:
@@ -746,6 +748,65 @@ for l in agent:plan-needed agent:quick agent:pr-fix agent:needs-review \
   gh label delete "$l" --repo owner/name --yes
 done
 ```
+
+### Fleet and work
+
+The same file holds the engine target, the operating hours, the tracker
+and hook defaults, the agent fleet and the work entries
+(`plans/jigz/engine-interface.md` has the design). Secrets are never
+stored in the file: a credential is a reference to an environment
+variable of the supervising process, `{from_env: NAME}`. A key whose
+name ends in `TOKEN`, `KEY`, `SECRET` or `PASSWORD` (in any case) must
+be a reference; a literal is rejected. An unresolved reference does not
+fail the load; it makes the agent unavailable, and the unresolved names
+are retrievable (`Config.UnresolvedRefs`). `max_concurrent_agents`
+counts the running sessions of one work entry; `0` (or omitted) means
+no limit.
+
+```yaml
+engine: { repo: kinged007/sortie, version: v1.28.1 } # empty fields = engine defaults
+operating_hours: {}          # omitted or empty = 24/7; windows use days mon..sun and "HH:MM"
+tracker:                     # defaults for every work entry; work.<slug>.tracker overrides
+  kind: github
+  api_key: { from_env: JIG_TRACKER_TOKEN }  # credential: reference only
+  project: owner/repo                       # a reference or a plain string
+hooks:                       # defaults; work.<slug>.hooks overrides
+  after_create: ./hooks/create.sh
+  before_run: ./hooks/before.sh
+  after_run: ./hooks/after.sh
+  timeout_ms: 60000
+agents:
+  builder:
+    runtime: claude-code     # claude-code | pi
+    model: claude-sonnet-5-5 # passed to the runtime unvalidated
+    schedule:                # omitted = always available
+      timezone: Europe/Madrid
+      end: finish            # finish | stop
+      windows: [{ days: [mon, tue, wed, thu, fri], start: "09:00", end: "18:00" }]
+    env:                     # environment of the agent process
+      ANTHROPIC_OAUTH_TOKEN: { from_env: CLAUDE_SUB_1 }
+pools:
+  build-pool: [builder]      # ordered fallback; agent and pool names share one space
+work:
+  issues:
+    query_filter: "label:agent:build,in-progress -label:needs-human"  # the complete query
+    budget: { period: monthly, max_tokens: 5000000 }
+    agent: builder           # an agent, a pool, or an ordered list of names
+    rules:
+    - { name: build, match: { labels: [agent:build] }, prompt: prompts/build.md }
+```
+
+A work entry's `query_filter` is the complete tracker query and wins over
+the `filters:` override and the shipped defaults; `assignee:@me` is
+appended at launch. `max_concurrent_agents`, `max_turns` and
+`polling_interval_ms` sit next to `budget`. A rule's `agent` may be a
+name, a list of names, or `{use: ..., model: ..., schedule: ...}` to
+override the fleet agent for that rule; `stage` and `next` are the
+engine's stage chaining. Work names are letters, digits and `-`; rule
+names within one entry are unique, and `next` names a later rule of the
+same entry. Loops still run the shipped `WORKFLOW.*.md` documents; the
+supervisor reads `work.<slug>.query_filter` and `work.<slug>.budget` at
+launch and validates and resolves the remaining sections.
 
 ### Workspace cleanup
 
@@ -951,12 +1012,12 @@ until others leave the list.
 
 ### Spend controls
 
-`workflows:` in `.jigz/config.yaml` caps the tokens one workflow may use
-per period. The key is the loop name (the `WORKFLOW.<name>.md` stem); a name
-without a workflow file is an error at startup.
+`work:<slug>.budget` in `.jigz/config.yaml` caps the tokens one loop may
+use per period. The key is the work slug (the `WORKFLOW.<name>.md` stem);
+a name without a workflow file is an error at startup.
 
 ```yaml
-workflows:
+work:
   issues:
     budget:
       period: weekly          # weekly (ISO week, Monday start) or monthly (calendar month)
@@ -991,9 +1052,7 @@ to the status document. Idle sleep does not start paused workflows at wake.
 A manual pause is kept across periods; the override and the warning reset at
 each period.
 
-Env overrides: `JIG_REPO`, `JIG_TOKEN`,
-`JIG_MILESTONE` (plus `GH_MILESTONE` as a legacy alias),
-`JIG_ASSIGNEE` (overrides `assignee:`).
+Env overrides: `JIG_REPO`, `JIG_TOKEN`.
 
 ### Other environment variables
 
@@ -1002,80 +1061,101 @@ Env overrides: `JIG_REPO`, `JIG_TOKEN`,
 | `JIG_WORKSPACES` | Directory that holds the agent checkouts. `jig` sets it for each loop (`.jigz/workspaces` by default) and the shipped workflows use it as `workspace.root: $JIG_WORKSPACES/<loop>`. Set it by hand only when validating a workflow file with the engine directly. |
 | `JIG_BIN` | Path of the `jig` binary that the supervisor starts for each loop. Without it, `jig` uses a `jig` binary next to the running one, then `jig` on `PATH`. |
 | `JIG_REGISTRY_DIR` | Directory for the project registry and status files. Unset, they are kept in the shared user cache directory, so several `jig` processes on one machine see each other. `jig daemon` sets it for its loop children so their files stay apart from the shared ones. |
-| `JIG_MODEL` | Model name the agent adapter receives. `jig` sets it from the `model` agent setting of a repository in `jigz.yaml`; a workflow file refers to it as `model: $JIG_MODEL`. |
-| `JIG_MODEL_<WORKFLOW>` | Model for one workflow when `jigz.yaml` overrides `model` for that workflow, for example `JIG_MODEL_BUILD` for `WORKFLOW.build.md` and `JIG_MODEL_REVIEW` for `WORKFLOW.review.md`. `jig` sets these; `-` in a workflow name becomes `_`. |
 
 ### Working hours and agent accounts
 
-The optional file `<user config dir>/jigz/machine.yaml` (Linux:
-`$XDG_CONFIG_HOME/jigz/machine.yaml` or `~/.config/jigz/machine.yaml`)
-applies to the loops of every repository on the machine. Without it, loops run
-without an hours limit and without a pool. The Agents page of the dashboard
-shows the hours and the pool.
+Working hours and agent accounts live in the repository's
+`.jigz/config.yaml`, so every repository has its own. Without a
+schedule the hours are always open. The Agents page of the dashboard
+shows the agents and the pools.
 
 ```yaml
-hours:
-  timezone: Europe/Madrid     # IANA name; empty = local time
-  end: finish                 # finish | stop; default finish
+operating_hours:                # gates every loop; omitted = 24/7
+  timezone: Europe/Madrid       # IANA name; empty = local time
+  end: finish                   # finish | stop; default finish
   windows:
     - days: [mon, tue, wed, thu, fri]
       start: "09:00"
-      end: "18:00"            # an end earlier than start wraps past midnight
-pool:
-  - name: claude-work
-    runtime: claude-code      # claude-code | pi
-    command: claude           # default "claude" or "pi" by runtime
-    env:
-      CLAUDE_CONFIG_DIR: ~/.claude-work
-    hours:                    # optional; windows only, same shape as above
-      windows: []
-    cost_class: subscription  # free-text label shown in the dashboard
-  - name: pi-api
-    runtime: pi
-    env:
-      ANTHROPIC_API_KEY: ...
-limits:
-  default_reset: 1h           # used when the CLI message has no reset time
-  patterns: []                # extra case-insensitive regexes
-engine:
-  repo: ""               # owner/name of the engine's GitHub repository; empty = the default
-  version: v1.28.1       # release tag, vX.Y.Z; empty = the default
-dashboard:
-  hide:
-    pages: []            # pages to hide; see Hiding pages and sections
-    sections: []         # page sections to hide
+      end: "18:00"               # an end earlier than start wraps past midnight
+
+agents:
+  claude-main:  { runtime: claude-code, model: claude-sonnet-5-5 }
+  claude-spare: { runtime: claude-code, model: claude-sonnet-5-5,
+                  env: { ANTHROPIC_OAUTH_TOKEN: { from_env: CLAUDE_SUB_2 } } }
+  pi-api:       { runtime: pi, model: sonnet,
+                  env: { ANTHROPIC_API_KEY: { from_env: ANTHROPIC_API_KEY } } }
+
+pools:
+  build-pool: [claude-main, claude-spare, pi-api]   # ordered fallback
 ```
 
-The `engine` block selects the engine release and is optional; an empty
-field uses the default. `JIG_ENGINE_REPO` and `JIG_ENGINE_VERSION`
-override it (see [The engine](#the-engine)). A problem in the hours or pool
-settings does not stop the engine from being resolved.
+A credential is always a reference to an environment variable of the
+supervising process (`{ from_env: NAME }`); a literal secret is
+rejected. An unset variable makes the agent unavailable, with the
+reason shown.
 
-Without windows the hours are always open. `env` values expand a leading `~/`
-and `$VAR` or `${VAR}`. The file can hold API keys, so keep it readable by you
-only (`chmod 600`); loading warns when it is not.
+The machine file (`<user config dir>/jigz/machine.yaml`) now carries
+only the `engine:` block (which release to run; `JIG_ENGINE_REPO` and
+`JIG_ENGINE_VERSION` override it, see [The engine](#the-engine)) and
+the `dashboard:` block (pages and sections to hide, see Hiding pages
+and sections). It no longer holds hours or a pool.
 
-`end: finish` makes loops claim nothing new when the window closes and stops
-each loop once it has no running session. `end: stop` stops the loops when the
-window closes; the engine aborts the turn, the issue keeps its in-progress
-label and is dispatched again when the next window opens.
+Hours gate every loop on its own. A loop's candidates are the agents of
+its work entry (`work.<slug>.agent`, falling back to the rule's own
+list), evaluated in order together with the operating hours and each
+candidate's own `schedule`: a candidate is available when the operating
+hours and its hours are open, it is not marked exhausted and its
+environment references resolve. The first available candidate is the
+loop's agent, shown by `jig status` and the dashboard. A blocked loop
+goes offline with the reason in the status document — outside
+operating hours, `agent <name> is outside its working hours`, every
+agent is exhausted, every agent has unresolved environment references,
+or no agent runtime is registered on the engine — and an estimated
+start: the earliest of the next working-hours start of its candidates,
+their usage-limit resets and the next operating-hours window; without a
+future input the estimate is empty. A paused loop is never started.
+
+When the gate closes, the end behaviour is the `end` of the
+`operating_hours` block when operating hours closed it, otherwise the
+`schedule.end` of the candidate whose hours closed it, and `finish` in
+every other case.
 
 With a pool, the supervisor starts each loop with the agent command set to
-`jig agent-exec <runtime>`. `agent-exec` runs the CLI of the first
-available entry of that runtime (not exhausted and inside its own hours), passes
-stdout through unchanged and exits with the CLI's exit code. When the CLI output
-reports a usage limit, the entry is marked exhausted until the reset time in
-the message, or for `limits.default_reset`. The state is stored in
-`<state dir>/jigz/pool.json`. Without an available entry, `agent-exec`
-exits 75. When the active runtime changes, loops are restarted once they have
-no running session.
+`jig agent-exec <agent>`. `agent-exec` runs the CLI of that fleet agent
+with its `env` mapping resolved from the supervisor's environment, passes
+stdout through unchanged and exits with the CLI's exit code. An unset
+credential reference makes the agent unavailable and `agent-exec` exits
+75 without running anything. When the CLI output
+reports a usage limit, the agent is marked exhausted until the reset time in
+the message, or one hour later when the message carries none. The state is stored in
+`<repo root>/.jigz/data/state.json`, created by `jig setup` and kept out
+of commits by the `.jigz/` gitignore rule. A `pool.json` written by an
+older jig in the per-user state directory is still read and never
+written again. Without an available agent, `agent-exec`
+exits 75. When the active agent changes, the loop document is rewritten
+once the loop has no running session; the engine re-reads it live.
+A bare runtime (`jig agent-exec <runtime>`) runs the first available
+fleet agent with that runtime — same availability rules, no pool file.
+
+Each loop runs its first candidate agent. When the gate picks another
+candidate — a usage limit, closed hours, unresolved credentials or an
+unregistered runtime — the supervisor rewrites the loop document for
+that agent once the loop has no running session and the engine
+re-reads it live; no restart follows. The return to the primary waits
+until the pick survives consecutive ticks, so a flapping limit does
+not rewrite the document twice. `jig status` shows the agent, the
+primary and the fallback reason per loop, and the Operations page
+alerts while a loop runs a standby agent.
 
 A usage limit is usually detected by `agent-exec` during the engine's credential
 check, which runs before each worker run. The run then fails before the turn
 starts, the engine posts no failure comment, and it retries after about 10
-seconds with the next available entry. A limit reached in the middle of a turn
+seconds with the next available agent. A limit reached in the middle of a turn
 fails that engine session: the engine posts a session-failure comment on
-the issue and retries the same way.
+the issue and retries the same way. A message naming an unknown model
+(`model not found`, `unknown model` and similar from either CLI) marks the
+agent exhausted the same way, so a misconfigured model fails over to the
+standby instead of retrying forever.
 
 The dashboard, the CSV export and the JSON API class each finished run as
 `succeeded`, `failed_agent`, `failed_workspace`, `failed_limit`, `cancelled`,
@@ -1128,7 +1208,7 @@ enrollment token is used once and not stored.
 | `~/.local/state/jigz/jigd.log` | daemon log |
 | `~/.local/share/jigz/hub/loops/<owner>/<name>/<workflow>/` | one root per project and workflow: the files served by the hub, the loop's workspaces and its engine database |
 
-`machine.yaml`, `pool.json`, the agent CLIs and their logins stay on the
+`machine.yaml`, the state file, the agent CLIs and their logins stay on the
 machine. The hub receives their status (pool entry names and runtimes,
 working hours), not the credentials.
 
@@ -1285,10 +1365,11 @@ block and a `pi:` block; the engine reads only the block named by
 `agent.kind: pi` and `agent.command: pi`. To use another model, edit the
 `model:` line of the block the agent kind names; the value passes
 through to `claude --model` unvalidated, so only use aliases your
-installed CLI accepts. The account pool in `machine.yaml` (see
-[Working hours and agent accounts](#working-hours-and-agent-accounts))
-overrides `agent.kind` and `agent.command` at run time, so the same
-workflows can run with another runtime without touching the files. The
+installed CLI accepts. Generated documents point `agent.command` at
+`jig agent-exec <agent>` instead, and the supervisor rewrites the kind,
+command and model when the gate picks another fleet agent (see
+[Working hours and agent accounts](#working-hours-and-agent-accounts)).
+The
 pinned engine only knows `pi` and `claude-code` (plus a few others);
 other adapters need a newer or upstream engine binary, and a loop whose
 agent kind the engine lacks does not start (see [Engine

@@ -1,10 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"os"
-	"slices"
+	"sort"
 	"strings"
 
+	"github.com/kinged007/jigz/internal/config"
 	"github.com/kinged007/jigz/internal/engine"
 	"github.com/kinged007/jigz/internal/machine"
 	"github.com/kinged007/jigz/internal/plan"
@@ -25,26 +27,29 @@ type loopFile struct{ project, name, text string }
 // capabilityAlerts are the alerts for the features the engine cannot run.
 func (a *app) capabilityAlerts() []alert {
 	var files []loopFile
+	var runtimes []string
+	seenRuntime := map[string]bool{}
 	for _, p := range a.projects() {
 		for _, wf := range installedWorkflows(p) {
 			if text, err := os.ReadFile(a.workflowPath(p, wf)); err == nil {
 				files = append(files, loopFile{p.Repo.Repo, wf, string(text)})
 			}
 		}
-	}
-	var pool []string
-	if path, err := machine.DefaultPath(); err == nil {
-		if cfg, err := machine.Load(path); err == nil {
-			for _, e := range cfg.Pool {
-				pool = append(pool, e.Runtime)
+		if cfg, err := config.Load(p.Dir); err == nil {
+			for _, name := range sortedKeys(cfg.Agents) {
+				rt := cfg.Agents[name].Runtime
+				if !seenRuntime[name+rt] {
+					seenRuntime[name+rt] = true
+					runtimes = append(runtimes, rt+"|"+name)
+				}
 			}
 		}
 	}
-	return capAlerts(a.gate(), files, os.Environ(), pool)
+	return capAlerts(a.gate(), files, os.Environ(), runtimes)
 }
 
 // capAlerts has one alert for each distinct reason a feature is off.
-func capAlerts(g engine.Gate, files []loopFile, env, pool []string) []alert {
+func capAlerts(g engine.Gate, files []loopFile, env, runtimes []string) []alert {
 	var out []alert
 	seen := map[string]bool{}
 	add := func(sev, kind, msg string) {
@@ -69,8 +74,15 @@ func capAlerts(g engine.Gate, files []loopFile, env, pool []string) []alert {
 		}
 	}
 	for _, rt := range machine.Runtimes {
-		if off := g.RuntimeOff(rt); off != "" && slices.Contains(pool, rt) {
-			add("warn", "Pool", off)
+		var names []string
+		for _, rn := range runtimes {
+			if r, n, ok := strings.Cut(rn, "|"); ok && r == rt {
+				names = append(names, n)
+			}
+		}
+		if off := g.RuntimeOff(rt); off != "" && len(names) > 0 {
+			sort.Strings(names)
+			add("warn", "Pool", fmt.Sprintf("agents %s use runtime %s, which the engine does not register", strings.Join(names, ", "), rt))
 		}
 	}
 	return out
