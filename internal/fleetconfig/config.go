@@ -16,7 +16,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -464,99 +463,6 @@ func (c *Config) Resolve() ([]Resolved, error) {
 	return out, nil
 }
 
-// Enabled returns the repositories that should be running.
-func Enabled(all []Resolved) []Resolved {
-	var out []Resolved
-	for _, r := range all {
-		if r.Enabled() {
-			out = append(out, r)
-		}
-	}
-	return out
-}
-
-// Token returns this repository's tracker token. token_env names the
-// variable when a fleet loops over several bot accounts; otherwise the
-// engine's own GITHUB_TOKEN/GH_TOKEN fallback applies. The token only
-// ever travels in a process environment, never in a file.
-func (r Resolved) Token() string {
-	if name := r.TokenEnv; name != "" {
-		return os.Getenv(name)
-	}
-	if v := os.Getenv("GITHUB_TOKEN"); v != "" {
-		return v
-	}
-	return os.Getenv("GH_TOKEN")
-}
-
-// ValidateEnv returns the environment for a direct `sortie validate` of
-// this repository's workflow files, on top of Env.
-//
-// The child process is Jigz, which derives the tracker project,
-// token, clone URL and workspace root from its own config at launch.
-// Validation calls the engine directly and so has to supply them
-// itself: without them the workflow's $SORTIE_TRACKER_PROJECT and
-// $JIG_WORKSPACES references expand to empty, and validation
-// rejects a repository that would run correctly under the child.
-func (r Resolved) ValidateEnv() ([]string, error) {
-	env, err := r.Env()
-	if err != nil {
-		return nil, err
-	}
-	return append(env,
-		"SORTIE_TRACKER_PROJECT="+r.Repo.Repo,
-		"SORTIE_TRACKER_API_KEY="+r.Token(),
-		"JIG_WORKSPACES="+filepath.Join(r.Dir, ".jigz", "workspaces"),
-	), nil
-}
-
-// Env returns the environment additions for one repository's
-// Jigz child. The child passes its own environment on to every
-// loop it starts, so these reach the engine too. An unset knob
-// contributes nothing and leaves the engine's default alone.
-//
-// A knob any workflow overrides is deliberately absent, because the
-// engine applies the environment over front matter and that
-// environment is shared by every loop: putting it here would silently
-// beat the override on all of them. Those knobs are written into each
-// workflow's file instead; see FileSettings.
-func (r Resolved) Env() ([]string, error) {
-	overridden := r.OverriddenKnobs()
-	env := map[string]string{}
-	for k, v := range r.Knobs {
-		if overridden[k] {
-			continue
-		}
-		if name := knobEnv[k]; name != "" {
-			env[name] = v
-		}
-	}
-	if len(r.Workflows) > 0 {
-		env["JIG_ONLY"] = strings.Join(r.Workflows, ",")
-	}
-	if name := r.TokenEnv; name != "" {
-		tok := r.Token()
-		if tok == "" {
-			return nil, fmt.Errorf("%s: token_env %s is unset or empty", r.Repo.Repo, name)
-		}
-		// The highest-precedence override in Jigz's config, so
-		// the token stays in the environment and out of every file.
-		env["JIG_TOKEN"] = tok
-	}
-	keys := make([]string, 0, len(env))
-	for k := range env {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	out := make([]string, 0, len(keys))
-	for _, k := range keys {
-		out = append(out, k+"="+env[k])
-	}
-	return out, nil
-}
-
-// mergeAgent fills r's unset fields from d. Set fields win, including
-// a field set to zero, which is why the numeric knobs are pointers.
 func mergeAgent(d, r Agent) Agent {
 	m := r
 	if m.Kind == "" {
@@ -604,6 +510,20 @@ func expandHome(p string) string {
 		return home
 	}
 	return filepath.Join(home, p[2:])
+}
+
+// Token returns this repository's tracker token. token_env names the
+// variable when a fleet loops over several bot accounts; otherwise the
+// engine's own GITHUB_TOKEN/GH_TOKEN fallback applies. The token only
+// ever travels in a process environment, never in a file.
+func (r Resolved) Token() string {
+	if name := r.TokenEnv; name != "" {
+		return os.Getenv(name)
+	}
+	if v := os.Getenv("GITHUB_TOKEN"); v != "" {
+		return v
+	}
+	return os.Getenv("GH_TOKEN")
 }
 
 // Where a cascaded value was set.
