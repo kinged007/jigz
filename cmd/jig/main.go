@@ -327,6 +327,12 @@ func run() (code int) {
 	if err != nil {
 		fatal(err)
 	}
+	// Generation runs before discovery: managed documents, prompts and
+	// the data directory exist before any loop starts. Without work
+	// entries this is a no-op and the installed documents run.
+	if _, err := generateAll(abs); err != nil {
+		fatal(err)
+	}
 	// JIG_ONLY selects a subset of the installed loops, for a
 	// supervisor driving several repos. Unset starts every loop, so a
 	// plain Jigz run is unchanged.

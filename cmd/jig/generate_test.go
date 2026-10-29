@@ -181,6 +181,60 @@ func TestGenerateMissing(t *testing.T) {
 	}
 }
 
+// TestGenerateAllEndToEnd renders, validates, promotes and ensures
+// prompts in one call.
+func TestGenerateAllEndToEnd(t *testing.T) {
+	t.Setenv("JIG_ENGINE_BIN", testEngineBin(t))
+	root := writeGenConfig(t, genBase()+`work:
+  issues:
+    query_filter: "label:agent:build,in-progress -label:needs-human"
+    agent: builder
+    rules:
+      - { name: build, match: { labels: [agent:build] }, prompt: prompts/build.md }
+`)
+	sum, err := generateAll(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sum.Generated) != 1 || len(sum.Prompts) == 0 {
+		t.Errorf("summary = %+v", sum)
+	}
+	if _, err := os.Stat(gen.DocPath(root, "issues")); err != nil {
+		t.Errorf("doc missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".jigz", "data")); err != nil {
+		t.Errorf("data dir missing: %v", err)
+	}
+}
+
+// TestGenerateAllWritesNothingOnError promotes no document when
+// rendering fails: a cross-group next rejects the whole generation.
+func TestGenerateAllWritesNothingOnError(t *testing.T) {
+	root2 := writeGenConfig(t, `repo: owner/repo
+tracker:
+  kind: github
+  api_key: { from_env: JIG_TEST_TOKEN }
+  project: owner/repo
+  in_progress_state: in-progress
+  handoff_state: agent:done
+agents:
+  planner: { runtime: claude-code, model: claude-sonnet-5-5 }
+  builder: { runtime: claude-code, model: claude-haiku-5-5 }
+work:
+  delivery:
+    query_filter: "label:in-progress -label:needs-human"
+    rules:
+      - { name: plan, match: { labels: [agent:plan] }, prompt: prompts/plan.md, agent: planner, next: chain }
+      - { name: chain, stage: stage-build, prompt: prompts/build.md, agent: builder }
+`)
+	if _, err := generateAll(root2); err == nil {
+		t.Fatalf("cross-group next generated")
+	}
+	if _, err := os.Stat(gen.DocPath(root2, "delivery-planner")); !os.IsNotExist(err) {
+		t.Errorf("doc written despite generation failure")
+	}
+}
+
 // TestValidateDocsEngine runs the rendered document through the real
 // fork engine: valid with no warnings.
 func TestValidateDocsEngine(t *testing.T) {
@@ -199,12 +253,12 @@ func TestValidateDocsEngine(t *testing.T) {
 	if _, err := ensurePrompts(root, docs); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateDocs(root, docs); err != nil {
-		t.Errorf("validate: %v", err)
+	if warn, err := validateDocs(root, docs); err != nil || warn != "" {
+		t.Errorf("validate: %v %q", err, warn)
 	}
 	// A broken render fails validation instead of being promoted.
 	bad := []generatedDoc{{Loop: "issues", Text: []byte("---\nnot: [valid\n"), Managed: true}}
-	if err := validateDocs(root, bad); err == nil {
+	if _, err := validateDocs(root, bad); err == nil {
 		t.Errorf("broken document validated")
 	}
 }

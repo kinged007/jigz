@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/kinged007/jigz/internal/config"
+	"github.com/kinged007/jigz/internal/gen"
 	"github.com/kinged007/jigz/internal/source"
 )
 
@@ -123,6 +124,9 @@ func warnStaleWorkflows(root string) {
 		}
 		cur, err := os.ReadFile(filepath.Join(dir, e.Name()))
 		if err != nil {
+			continue
+		}
+		if gen.Managed(cur) {
 			continue
 		}
 		want, err := embeddedWorkflows.ReadFile("workflows/" + e.Name())

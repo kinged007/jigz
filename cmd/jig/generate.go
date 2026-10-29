@@ -88,40 +88,42 @@ func generateDocs(root string) ([]generatedDoc, []string, error) {
 
 // validateDocs engine-validates rendered documents. Prompts resolve
 // against the repository, so the renders go to a scratch directory
-// with the prompts symlinked in; nothing is written to the repo.
-func validateDocs(root string, docs []generatedDoc) error {
+// with the prompts copied in; nothing is written to the repo. Without
+// an installed engine there is nothing to validate against, which is
+// a warning and not an error: setup works engine-less.
+func validateDocs(root string, docs []generatedDoc) (string, error) {
 	if len(docs) == 0 {
-		return nil
+		return "", nil
 	}
 	cfg, err := config.Load(root)
 	if err != nil {
-		return err
+		return "", err
 	}
 	bin, err := resolveSortieBin()
 	if err != nil {
-		return fmt.Errorf("engine not installed: generated documents not validated: %w", err)
+		return "engine not installed: generated documents not validated", nil
 	}
 	tmp, err := os.MkdirTemp("", "jigz-validate-*")
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer os.RemoveAll(tmp)
 	prompts := filepath.Join(root, ".jigz", "workflows", "prompts")
 	if _, err := os.Stat(prompts); err == nil {
 		if err := copyDir(prompts, filepath.Join(tmp, "prompts")); err != nil {
-			return err
+			return "", err
 		}
 	}
 	for _, d := range docs {
 		file := "WORKFLOW." + d.Loop + ".md"
 		if err := os.WriteFile(filepath.Join(tmp, file), d.Text, 0o644); err != nil {
-			return err
+			return "", err
 		}
 		if out, err := runSortieValidate(bin, tmp, loopDef{d.Loop, file}, cfg); err != nil {
-			return fmt.Errorf("loop %s: %w%s", d.Loop, err, validateOutputSuffix(out))
+			return "", fmt.Errorf("loop %s: %w%s", d.Loop, err, validateOutputSuffix(out))
 		}
 	}
-	return nil
+	return "", nil
 }
 
 func validateOutputSuffix(out string) string {
@@ -353,10 +355,11 @@ func keys(m map[string]bool) []string {
 	return out
 }
 
-// generateAll renders, validates and promotes the managed documents,
-// then ensures the prompts exist. It is what setup, start and reload
-// run before anything else. The engine validation runs before any
-// file is written.
+// generateAll renders the managed documents, ensures the prompts they
+// point at, engine-validates the renders and then promotes them. It is
+// what setup, start and reload run before anything else. A document on
+// disk is replaced only when every render validates; missing prompts
+// are additive and never overwrite.
 func generateAll(root string) (genSummary, error) {
 	var sum genSummary
 	docs, warnings, err := generateDocs(root)
@@ -364,18 +367,21 @@ func generateAll(root string) (genSummary, error) {
 		return sum, err
 	}
 	sum.Warnings = warnings
-	if err := validateDocs(root, docs); err != nil {
-		return sum, err
-	}
-	sum, err = promoteDocs(root, docs)
-	if err != nil {
-		return sum, err
-	}
 	created, err := ensurePrompts(root, docs)
 	if err != nil {
 		return sum, err
 	}
 	sum.Prompts = created
-	sum.Warnings = append(sum.Warnings, warnings...)
-	return sum, nil
+	if warn, err := validateDocs(root, docs); err != nil {
+		return sum, err
+	} else if warn != "" {
+		sum.Warnings = append(sum.Warnings, warn)
+	}
+	promoted, err := promoteDocs(root, docs)
+	if err != nil {
+		return sum, err
+	}
+	promoted.Prompts = sum.Prompts
+	promoted.Warnings = append(sum.Warnings, promoted.Warnings...)
+	return promoted, nil
 }

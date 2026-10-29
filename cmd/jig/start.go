@@ -116,6 +116,9 @@ func runStart(args []string) int {
 	if err != nil {
 		fatal(err)
 	}
+	if _, err := generateAll(abs); err != nil {
+		fatal(err)
+	}
 	if err := defaultStarter().start(c, abs); err != nil {
 		fatal(err)
 	}
