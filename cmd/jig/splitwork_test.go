@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kinged007/jigz/internal/gen"
 )
 
 func writeSplitConfig(t *testing.T) string {
@@ -134,4 +136,44 @@ func workKeys[V any](m map[string]V) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// TestStatusCarriesDrift fills the phase-2-empty Drift field: clean
+// documents report nothing, hand edits report the diff.
+func TestStatusCarriesDrift(t *testing.T) {
+	root := writeGenConfig(t, genBase()+`work:
+  issues:
+    query_filter: "label:agent:build,in-progress -label:needs-human"
+    agent: builder
+    rules:
+      - { name: build, match: { labels: [agent:build] }, prompt: prompts/build.md }
+`)
+	docs, _, err := generateDocs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := promoteDocs(root, docs); err != nil {
+		t.Fatal(err)
+	}
+	s := testSupervisor(t, root)
+	s.refreshWork("test")
+	for _, d := range listWorkflows(root) {
+		s.defs[d.name] = d
+	}
+	doc := s.statusDoc("running")
+	if len(doc.Workflows) != 1 {
+		t.Fatalf("workflows = %+v", doc.Workflows)
+	}
+	if doc.Workflows[0].Drift != "" {
+		t.Errorf("fresh doc drifts: %q", doc.Workflows[0].Drift)
+	}
+	path := gen.DocPath(root, "issues")
+	raw, _ := os.ReadFile(path)
+	if err := os.WriteFile(path, append(raw, []byte("# owner tweak\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	doc = s.statusDoc("running")
+	if !strings.Contains(doc.Workflows[0].Drift, "owner tweak") {
+		t.Errorf("drift = %q, want the hand edit", doc.Workflows[0].Drift)
+	}
 }

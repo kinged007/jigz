@@ -687,6 +687,10 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 	gate := s.gateStatusLocked()
 	doc.Gate = gate
 	in := s.gateInputsLocked()
+	drifts, derr := driftReports(s.root)
+	if derr != nil {
+		fmt.Fprintln(os.Stderr, "jig: drift:", derr)
+	}
 	now := s.clock()
 	mv := gateEval(in.machine, in.state, now)
 	loopInfo := func(name string, bs *budgetStatus) loopView {
@@ -726,6 +730,7 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 			RestartCount: p.restarts, LastExitCode: p.exitCode, ConfigHash: p.configHash,
 			LogPath: childLogPath(s.root, p.def.name), Budget: bs,
 			OfflineReason: lv.Reason, ETA: timePtr(lv.ETA), Agent: lv.Agent,
+			Drift: drifts[p.def.name],
 		}
 		if p.exitCode == nil {
 			w.Sessions, w.SessionsKnown = p.live.snapshot()
@@ -764,6 +769,7 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 			Name: name, WorkflowFile: def.file, LoopType: loopTypeOf(wf),
 			State: st, StartedAt: s.startedAt.UTC(), LogPath: childLogPath(s.root, name),
 			Budget: bs, OfflineReason: offline, ETA: timePtr(lv.ETA), Agent: lv.Agent,
+			Drift: drifts[name],
 		})
 	}
 	sort.Slice(doc.Workflows, func(i, j int) bool { return doc.Workflows[i].Name < doc.Workflows[j].Name })
