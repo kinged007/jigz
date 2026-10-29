@@ -12,7 +12,6 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -21,14 +20,8 @@ import (
 	"strings"
 	"time"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/kinged007/jigz/internal/dirs"
 )
-
-// FileName is the config file Jigz looks for in the working
-// directory when no path is given.
-const FileName = "jigz.yaml"
 
 // Agent holds the agent settings one repository's loops run with. A
 // nil field is unset and inherits from Defaults, or from the engine's
@@ -375,61 +368,6 @@ type FieldError struct {
 func (e *FieldError) Error() string { return e.Err.Error() }
 func (e *FieldError) Unwrap() error { return e.Err }
 
-// Load reads and validates a config file.
-func Load(path string) (*Config, error) {
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("no %s (create one, or pass -config PATH)", path)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read config: %w", err)
-	}
-	var c Config
-	dec := yaml.NewDecoder(strings.NewReader(string(raw)))
-	dec.KnownFields(true)
-	if err := dec.Decode(&c); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
-	}
-	if len(c.Repos) == 0 {
-		return nil, fmt.Errorf("%s lists no repos", path)
-	}
-	if fe := c.GitHub.validate(); fe != nil {
-		return nil, fe
-	}
-	seen := map[string]bool{}
-	for i := range c.Repos {
-		r := &c.Repos[i]
-		if err := r.validate(); err != nil {
-			return nil, &FieldError{Path: fmt.Sprintf("repos.%d.repo", i), Err: fmt.Errorf("%s: repo %d: %w", path, i+1, err)}
-		}
-		if seen[r.Repo] {
-			return nil, &FieldError{Path: fmt.Sprintf("repos.%d.repo", i), Err: fmt.Errorf("%s: %s listed twice", path, r.Repo)}
-		}
-		seen[r.Repo] = true
-		for name := range r.Filters {
-			if strings.TrimSpace(name) == "" {
-				return nil, fmt.Errorf("%s: %s has a filter with no loop name", path, r.Repo)
-			}
-		}
-		// A per-workflow override for a workflow that is not selected
-		// would never be applied, and the value would look configured
-		// while changing nothing. Only checked against an explicit
-		// workflow list: Jigz does not know the installed set.
-		if len(r.Workflows) > 0 {
-			selected := map[string]bool{}
-			for _, w := range r.Workflows {
-				selected[w] = true
-			}
-			for name := range r.Overrides {
-				if !selected[name] {
-					return nil, &FieldError{Path: fmt.Sprintf("repos.%d.workflows", i), Err: fmt.Errorf("%s: workflow_overrides names %q, which is not in its workflows list", path, name)}
-				}
-			}
-		}
-	}
-	return &c, nil
-}
-
 // validate rejects a repository Jigz cannot run. These are checked
 // at load time so a typo in a config that supervises live issue
 // backlogs surfaces immediately rather than at the first claim.
@@ -537,25 +475,6 @@ func Enabled(all []Resolved) []Resolved {
 	return out
 }
 
-// modelVar is the variable an unmodified workflow's front matter is
-// pointed at for its model.
-const modelVar = "JIG_MODEL"
-
-// ModelVar returns the environment variable one workflow's front matter
-// should reference for its model. A workflow that overrides the model
-// needs its own variable, because a file can name only one and the
-// repository's value would otherwise be written into it.
-func (r Resolved) ModelVar(workflow string) string {
-	if _, ok := r.Overrides[workflow]["model"]; ok {
-		return modelVar + "_" + envName(workflow)
-	}
-	return modelVar
-}
-
-func envName(s string) string {
-	return strings.ToUpper(strings.NewReplacer("-", "_", ".", "_", "/", "_", " ", "_").Replace(s))
-}
-
 // Token returns this repository's tracker token. token_env names the
 // variable when a fleet loops over several bot accounts; otherwise the
 // engine's own GITHUB_TOKEN/GH_TOKEN fallback applies. The token only
@@ -614,17 +533,6 @@ func (r Resolved) Env() ([]string, error) {
 	}
 	if len(r.Workflows) > 0 {
 		env["JIG_ONLY"] = strings.Join(r.Workflows, ",")
-	}
-	// model has no engine entry, so it never travels as an override: the
-	// workflow file names a variable and the engine expands it. The
-	// variable is set here, per workflow where the model is overridden.
-	if v, ok := r.Knobs["model"]; ok {
-		env[modelVar] = v
-	}
-	for name, s := range r.Overrides {
-		if v, ok := s["model"]; ok {
-			env[r.ModelVar(name)] = v
-		}
 	}
 	if name := r.TokenEnv; name != "" {
 		tok := r.Token()
