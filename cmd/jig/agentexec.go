@@ -22,8 +22,8 @@ const exitNoAgent = 75
 
 // runAgentExec is the agent command the supervisor sets for the engine.
 // A fleet agent name runs that agent with its own env mapping; a
-// runtime keeps the legacy account-pool behaviour. Either way output
-// passes through unchanged.
+// runtime runs the first available fleet agent with that runtime.
+// Either way output passes through unchanged.
 func runAgentExec(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, "usage: jig agent-exec <agent|runtime> [args...]")
@@ -43,62 +43,49 @@ func runAgentExec(args []string, stdin io.Reader, stdout, stderr io.Writer) int 
 	if err != nil {
 		return fail(2, "%v", err)
 	}
-	if code, ok := execFleetAgent(name, childArgs, stdin, stdout, stderr, fail, statePath); ok {
-		return code
-	}
-
-	cfgPath, err := machine.DefaultPath()
-	if err != nil {
-		return fail(2, "%v", err)
-	}
-	cfg, err := machine.Load(cfgPath)
-	if err != nil {
-		return fail(2, "%v", err)
-	}
-	for _, w := range cfg.Warnings {
-		fmt.Fprintln(stderr, "jig agent-exec: warning:", w)
-	}
-	if !slices.Contains(machine.Runtimes, name) {
-		return fail(2, "unknown runtime %q", name)
-	}
-	if !slices.ContainsFunc(cfg.Pool, func(e machine.Entry) bool { return e.Runtime == name }) {
-		return fail(2, "no %s entry in the pool of %s", name, cfgPath)
-	}
-	now := time.Now()
-	entry, ok := cfg.Pick(state, name, now)
-	if !ok {
-		if next := cfg.NextChange(state, now); !next.IsZero() {
-			return fail(exitNoAgent, "no %s entry is available until %s", name, next.Format(time.RFC3339))
+	var cfg *config.Config
+	if root := agentExecRoot(); root != "" {
+		if c, err := config.Load(root); err == nil {
+			cfg = c
 		}
-		return fail(exitNoAgent, "no %s entry is available", name)
 	}
-	detect := func(line string, isStderr bool) (time.Time, string, bool) {
-		return cfg.DetectLimit(entry.Runtime, line, isStderr, time.Now())
+	if cfg == nil {
+		return fail(2, "unknown agent %q: fleet agents live in .jigz/config.yaml", name)
 	}
-	return spawnAgentChild(stdin, stdout, stderr, fail, entry.Command, childArgs,
-		append(os.Environ(), entry.ExpandedEnv()...), detect, entry.Name, entry.Name, statePath, now)
+	if _, ok := cfg.Agents[name]; ok {
+		return runAgentTarget(cfg, state, statePath, fail, name, childArgs, stdin, stdout, stderr)
+	}
+	if slices.Contains(machine.Runtimes, name) {
+		now := time.Now()
+		in := gateInputs{agents: cfg.Agents, refs: cfg.UnresolvedRefs(), state: state, operating: cfg.OperatingHours}
+		for _, aname := range sortedKeys(cfg.Agents) {
+			a := cfg.Agents[aname]
+			if a.Runtime != name {
+				continue
+			}
+			if in.block(aname, nil, now) != "" {
+				continue
+			}
+			return runAgentTarget(cfg, state, statePath, fail, aname, childArgs, stdin, stdout, stderr)
+		}
+		return fail(exitNoAgent, "no %s agent is available", name)
+	}
+	return fail(2, "unknown agent %q: fleet agents live in .jigz/config.yaml", name)
 }
 
-// execFleetAgent runs a fleet agent from .jigz/config.yaml by name: the
-// agent's runtime with its env mapping resolved from this process's
-// environment. It reports whether the name was a fleet agent; anything
-// else falls through to the runtime pool. An unset credential reference
-// makes the agent unavailable.
-func execFleetAgent(name string, childArgs []string, stdin io.Reader, stdout, stderr io.Writer, fail func(int, string, ...any) int, statePath string) (int, bool) {
-	root := agentExecRoot()
-	if root == "" {
-		return 0, false
-	}
-	cfg, err := config.Load(root)
-	if err != nil {
-		return 0, false
-	}
+// runAgentTarget runs one fleet agent: its runtime with its env mapping
+// resolved from this process's environment. An unset credential
+// reference makes the agent unavailable.
+func runAgentTarget(cfg *config.Config, state machine.State, statePath string, fail func(int, string, ...any) int, name string, childArgs []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	a, ok := cfg.Agents[name]
 	if !ok {
-		return 0, false
+		return fail(2, "unknown agent %q", name)
 	}
 	if !slices.Contains(machine.Runtimes, a.Runtime) {
-		return fail(2, "agent %s has unknown runtime %q", name, a.Runtime), true
+		return fail(2, "agent %s has unknown runtime %q", name, a.Runtime)
+	}
+	if until := state.Agents[name].ExhaustedUntil; time.Now().Before(until) {
+		return fail(exitNoAgent, "agent %s is exhausted until %s", name, until.Format(time.RFC3339))
 	}
 	var env []string
 	for _, k := range sortedKeys(a.Env) {
@@ -107,7 +94,7 @@ func execFleetAgent(name string, childArgs []string, stdin io.Reader, stdout, st
 			if s := os.Getenv(v.FromEnv); s != "" {
 				env = append(env, k+"="+s)
 			} else {
-				return fail(exitNoAgent, "agent %s needs %s, which is not set", name, v.FromEnv), true
+				return fail(exitNoAgent, "agent %s needs %s, which is not set", name, v.FromEnv)
 			}
 			continue
 		}
@@ -119,8 +106,11 @@ func execFleetAgent(name string, childArgs []string, stdin io.Reader, stdout, st
 	detect := func(line string, isStderr bool) (time.Time, string, bool) {
 		return mine.DetectLimit(a.Runtime, line, isStderr, time.Now())
 	}
+	modelDetect := func(line string, isStderr bool) (string, bool) {
+		return machine.IsModelError(a.Runtime, line, isStderr)
+	}
 	return spawnAgentChild(stdin, stdout, stderr, fail, machine.DefaultCommand(a.Runtime), childArgs,
-		append(os.Environ(), env...), detect, name, name, statePath, time.Now()), true
+		append(os.Environ(), env...), detect, modelDetect, name, name, statePath, time.Now())
 }
 
 // agentExecRoot finds the repository the loop runs in: agent-exec runs
@@ -157,7 +147,7 @@ func isRepoRoot(dir string) bool {
 // spawnAgentChild runs the agent executable with the engine's arguments
 // and environment, marks the entry used, and exhausts it when the
 // output matches a usage-limit pattern. markName is the state key.
-func spawnAgentChild(stdin io.Reader, stdout, stderr io.Writer, fail func(int, string, ...any) int, command string, childArgs, env []string, detect func(string, bool) (time.Time, string, bool), markName, displayName, statePath string, now time.Time) int {
+func spawnAgentChild(stdin io.Reader, stdout, stderr io.Writer, fail func(int, string, ...any) int, command string, childArgs, env []string, detect func(string, bool) (time.Time, string, bool), modelDetect func(string, bool) (string, bool), markName, displayName, statePath string, now time.Time) int {
 	if err := machine.MarkUsed(statePath, markName, now); err != nil {
 		fmt.Fprintln(stderr, "jig agent-exec: warning:", err)
 	}
@@ -191,18 +181,27 @@ func spawnAgentChild(stdin io.Reader, stdout, stderr io.Writer, fail func(int, s
 
 	var once sync.Once
 	limited := false
+	modelCooldown := now.Add(time.Hour)
 	onLine := func(line string, isStderr bool) {
-		until, reason, hit := detect(line, isStderr)
-		if !hit {
+		if until, reason, hit := detect(line, isStderr); hit {
+			once.Do(func() {
+				limited = true
+				if err := machine.MarkExhausted(statePath, markName, until, reason); err != nil {
+					fmt.Fprintln(stderr, "jig agent-exec: warning:", err)
+				}
+				fmt.Fprintf(stderr, "jig agent-exec: %s hit a usage limit; exhausted until %s\n", displayName, until.Format(time.RFC3339))
+			})
 			return
 		}
-		once.Do(func() {
-			limited = true
-			if err := machine.MarkExhausted(statePath, markName, until, reason); err != nil {
-				fmt.Fprintln(stderr, "jig agent-exec: warning:", err)
-			}
-			fmt.Fprintf(stderr, "jig agent-exec: %s hit a usage limit; exhausted until %s\n", displayName, until.Format(time.RFC3339))
-		})
+		if msg, ok := modelDetect(line, isStderr); ok {
+			once.Do(func() {
+				limited = true
+				if err := machine.MarkExhausted(statePath, markName, modelCooldown, "model unavailable: "+msg); err != nil {
+					fmt.Fprintln(stderr, "jig agent-exec: warning:", err)
+				}
+				fmt.Fprintf(stderr, "jig agent-exec: %s: model unavailable, exhausted until %s\n", displayName, modelCooldown.Format(time.RFC3339))
+			})
+		}
 	}
 	var wg sync.WaitGroup
 	wg.Add(2)

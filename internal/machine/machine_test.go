@@ -286,6 +286,28 @@ func TestNextChange(t *testing.T) {
 	}
 }
 
+func TestIsModelError(t *testing.T) {
+	cases := []struct {
+		name, runtime, line string
+		stderr              bool
+		hit                 bool
+	}{
+		{"claude json", "claude-code", `{"type":"result","is_error":true,"result":"model not found: sonnet-x"}`, false, true},
+		{"stderr text", "claude-code", "Error: unknown model xyz", true, true},
+		{"pi nested", "pi", `{"type":"message_end","message":{"role":"assistant","stopReason":"error","errorMessage":"invalid model foo"}}`, false, true},
+		{"usage text is not a model error", "claude-code", `{"type":"result","is_error":true,"result":"usage limit reached"}`, false, false},
+		{"plain output is not a model error", "pi", "hello", false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, ok := IsModelError(tc.runtime, tc.line, tc.stderr)
+			if ok != tc.hit {
+				t.Errorf("hit = %v, want %v", ok, tc.hit)
+			}
+		})
+	}
+}
+
 func TestDetectLimit(t *testing.T) {
 	c := mustLoad(t, "hours: {timezone: UTC}\nlimits:\n  patterns: [\"slow down forever\"]\n")
 	now := at(t, "UTC", "2026-10-19 12:00")
