@@ -35,8 +35,10 @@ jobs:
       - name: test
         run: go test ./...
 
-  # Separate from check: downloads both engines (~25 MB each) and runs ~3 min.
-  acceptance:
+  # Default-engine acceptance: the main scenario, the fallback scenario
+  # and the connected-hub scenario. The upstream engine runs separately
+  # below.
+  acceptance-default:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -45,8 +47,30 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: acceptance
-        run: make acceptance
+      - uses: actions/cache@v4
+        with:
+          path: ~/.local/share/jigz
+          key: engine-binaries-v1
+      - name: acceptance (default engine)
+        run: go test -tags acceptance -count=1 -timeout 14m -run '^TestAcceptance' -skip '^TestAcceptanceUpstreamEngine$' -v ./cmd/jig
+
+  # Upstream-engine acceptance: the issues scenario on sortie-ai/sortie,
+  # with the prs loop offline for its missing github-pr tracker.
+  acceptance-upstream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/cache@v4
+        with:
+          path: ~/.local/share/jigz
+          key: engine-binaries-v1
+      - name: acceptance (upstream engine)
+        run: go test -tags acceptance -count=1 -timeout 14m -run '^TestAcceptanceUpstreamEngine$' -v ./cmd/jig
 
   build:
     runs-on: ubuntu-latest
