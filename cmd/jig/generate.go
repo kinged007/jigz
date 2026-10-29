@@ -66,7 +66,11 @@ func generateDocs(root string) ([]generatedDoc, []string, error) {
 		if res.Engine.Version != "" && res.Engine.Version != p.Version {
 			warnings = append(warnings, fmt.Sprintf("work.%s: engine %s@%s has no contract tests; using the %s profile", slug, res.Engine.Repo, res.Engine.Version, p.Version))
 		}
-		for _, l := range gen.Split(res, cfg.Agents) {
+		loops := gen.Split(res, cfg.Agents)
+		if err := gen.CheckOverlap(loops); err != nil {
+			return nil, nil, fmt.Errorf("work.%s: %w", slug, err)
+		}
+		for _, l := range loops {
 			if !p.SupportsTracker(l.Entry.Tracker.Kind) {
 				warnings = append(warnings, fmt.Sprintf("work.%s: loop %s uses tracker kind %q, which %s does not support; the loop stays offline", slug, l.Name, l.Entry.Tracker.Kind, p.EngineVersion()))
 				continue
@@ -284,7 +288,11 @@ func driftReports(root string) (map[string]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("work.%s: %w", slug, err)
 		}
-		for _, l := range gen.Split(res, cfg.Agents) {
+		split := gen.Split(res, cfg.Agents)
+		if err := gen.CheckOverlap(split); err != nil {
+			return nil, fmt.Errorf("work.%s: %w", slug, err)
+		}
+		for _, l := range split {
 			loop := l
 			if !p.SupportsTracker(l.Entry.Tracker.Kind) || (l.Runtime != "" && !p.SupportsAgent(l.Runtime)) {
 				out[l.Name] = "offline: unsupported kind"
