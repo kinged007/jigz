@@ -828,8 +828,8 @@ plan; this section records what is done.
 | 0 Documentation fix | `feat/engine-interface` | done | README `JIG_MODEL` rows removed (a7c7d4c) |
 | 1 Config model and loader | `feat/engine-interface` | done | merged 4c0ac2b; `internal/config/{work,strict}.go`, `Config.Resolve()`, `UnresolvedRefs()` |
 | 2 Hours and offline handling | `feat/engine-interface` | done | merged 0a2ba54; `gateDecide` per loop, `.jigz/data/state.json`, `d2_offline_reason_and_estimate` |
-| 3 Document generation | `feat/engine-interface` | in progress | generator built directly on the integration branch after two dispatch failures (see work log); golden, shipped-diff and runtime checks below |
-| 4 Fallback | | not started | |
+| 3 Document generation | `feat/engine-interface` | done (3b wired; 3a generator) | `internal/gen` renders, splits and validates; `cmd/jig/generate.go` drives setup/validate/reload/start; supervisor resolves per-loop inputs, drains on query change, reports drift in status |
+| 4 Fallback | `feat/engine-interface` | done | `agent-exec` runs a fleet agent by name; supervisor rewrites the managed document at idle on a standby pick, returns to the primary after consecutive stable ticks; status carries primary and fallback reason, ops page alerts, dashboard marks fallback agents | Rig tests on the fake clock plus agent-exec unit tests (see deviations) |
 | 5 Contract tests and CI | | not started | |
 | 6 Cleanup | | not started | |
 | 7 Model-unavailable trigger | | not started | |
@@ -926,7 +926,29 @@ plan; this section records what is done.
 
 ### 12.3 Deviations from the plan
 
-None so far.
+- Byte equality with the shipped documents (section 4.1) is structural,
+  not literal, until phase 3b rewires the CLI: comments and trailing
+  routing bodies are ignored, and the `agent-exec` command, the second
+  runtime block, `dispatch.default` and the `db_path` move are
+  allowlisted. The `defaultFixture` stays section 3.5 Example 1
+  verbatim; a separate `shippedFixture` feeds the shipped-diff test.
+- `Validate` rejects a cross-group `next` only in the loop that holds
+  it: the builder loop renders clean, so the test expects the planner
+  loop alone to error with the `replacing the label with` prompt fix.
+- An entry with no `active_states` renders the rule labels plus the
+  in-progress state: the engine rejects a document whose in-progress
+  state is not an active state, so Example 1 verbatim needs the
+  derivation.
+- `ProfileFor` returns the profile name, not the no-contract-tests
+  warning; the caller derives the warning from the version mismatch.
+- Phase 4 acceptance runs at the supervisor rig level (fake clock, fake
+  engine child, real config/state/documents) instead of the engine
+  acceptance suite: a generated document cannot carry the fakegithub
+  endpoint because the config tracker has no endpoint field, and the
+  daemon boot would overwrite a hand-tweaked endpoint as drift. The
+  engine half of the path (limit text to exhaustion) is covered by the
+  existing pool-path acceptance scenario and the new agent-path unit
+  tests.
 
 ### 12.4 Interpretation recorded during execution
 
@@ -973,3 +995,22 @@ None so far.
   in `agent.command` is rejected (`expected string or list, got mapping`),
   so section 4.5 item 5 and section 4.6 record that the generator writes one
   string.
+
+- 2026-10-29: phase 3b wired the generator into the CLI on
+  `feat/engine-interface` and the suite is green (`gofmt`, `go vet`,
+  `go build ./...`, all packages pass). `cmd/jig/generate.go` holds the
+  pipeline (`generateDocs`, engine validation in a scratch directory,
+  `promoteDocs` with `.bak`, `ensurePrompts`, `driftReports`); `jig
+  setup` generates after ensuring the config and warns about rule
+  labels outside the labels list; `jig validate` gains the engine
+  profile check and per-loop `generation:` checks; `jig reload`
+  regenerates and validates before signalling, leaving running loops
+  alone on failure; `jig start` and the daemon boot generate first.
+  The supervisor resolves one gate input per loop (split-aware work
+  map and narrowed launch queries), drains and restarts loops whose
+  query changed on reload, picks up new loop documents, and reports
+  drift per loop in status. Databases move to `.jigz/data/`
+  (`db_path: ../data/jigz-<loop>.db`, `discover` reads the data dir).
+  Real-engine check repeated after every skeleton change: shipped
+  renders, Example 1 goldens and a split loop all validate
+  `{"valid":true}` with empty warnings on the fork engine.
