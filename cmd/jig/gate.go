@@ -521,6 +521,8 @@ func (s *supervisor) refreshWork(stamp string) {
 	}
 	work := map[string]config.Resolved{}
 	queries := map[string]string{}
+	loops := map[string]gen.Loop{}
+	profs := map[string]gen.Profile{}
 	resolved := cfg.Resolve()
 	for _, slug := range sortedKeys(resolved) {
 		res := resolved[slug]
@@ -530,6 +532,11 @@ func (s *supervisor) refreshWork(stamp string) {
 			queries[res.Slug] = res.QueryFilter
 			continue
 		}
+		p, _, err := gen.ProfileFor(res.Engine.Repo, res.Engine.Version)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "jig: work config:", err)
+			return
+		}
 		for _, l := range gen.Split(res, cfg.Agents) {
 			r := res
 			r.Slug = l.Name
@@ -538,13 +545,33 @@ func (s *supervisor) refreshWork(stamp string) {
 			r.QueryFilter = l.Query
 			work[l.Name] = r
 			queries[l.Name] = l.Query
+			loops[l.Name] = l
+			profs[l.Name] = p
 		}
 	}
 	s.work = work
 	s.queries = queries
+	s.genLoops = loops
+	s.genProf = profs
 	s.agents = cfg.Agents
 	s.refs = cfg.UnresolvedRefs()
 	s.operating = cfg.OperatingHours
+	// Drop per-loop memory of loops the config no longer defines.
+	for n := range s.docAgent {
+		if _, ok := work[n]; !ok {
+			delete(s.docAgent, n)
+		}
+	}
+	for n := range s.fallback {
+		if _, ok := work[n]; !ok {
+			delete(s.fallback, n)
+		}
+	}
+	for n := range s.pickCnt {
+		if _, ok := work[n]; !ok {
+			delete(s.pickCnt, n)
+		}
+	}
 }
 
 // queryFor reports the loop's tracker query for the launch override.
@@ -702,7 +729,171 @@ func (s *supervisor) gateStep() (int, bool) {
 			}
 		}
 	}
+	s.fallbackStep(in, views, now)
 	return 0, false
+}
+
+// fallbackStableTicks is how many consecutive ticks a new pick must
+// survive before the document is rewritten for it. A pick that replaces
+// an unavailable agent applies at once; the return to the primary waits
+// out flapping limits.
+const fallbackStableTicks = 2
+
+// pickStable counts consecutive ticks the gate picked the same agent.
+type pickStable struct {
+	agent string
+	n     int
+}
+
+// fallbackInfo records a standby switch for status: what drove the
+// previous agent out and when the primary is usable again.
+type fallbackInfo struct {
+	from, to, trigger string
+	at                time.Time
+	usable            time.Time
+}
+
+func (f fallbackInfo) String(primary string) string {
+	usable := "unknown"
+	if !f.usable.IsZero() {
+		usable = f.usable.Format(time.RFC3339)
+	}
+	return fmt.Sprintf("%s (since %s); %s usable again %s", f.trigger, f.at.Format(time.RFC3339), primary, usable)
+}
+
+// fallbackStep rewrites a managed document at idle when the gate picked
+// a different agent than the document runs. The engine re-reads the
+// document live, so no restart follows unless the query changed (which
+// reload handles separately).
+func (s *supervisor) fallbackStep(in gateInputs, views map[string]loopView, now time.Time) {
+	for _, l := range s.gateLoopsLocked() {
+		v, ok := views[l.name]
+		if !ok || !v.Open || v.Agent == "" {
+			continue
+		}
+		s.mu.Lock()
+		res := s.work[l.name]
+		loop, lok := s.genLoops[l.name]
+		prof, pok := s.genProf[l.name]
+		cur, seen := s.docAgent[l.name]
+		st := s.pickCnt[l.name]
+		s.mu.Unlock()
+		if !lok || !pok {
+			continue
+		}
+		if !seen {
+			cur = primaryCandidate(res)
+			s.mu.Lock()
+			if dup, ok := s.docAgent[l.name]; ok {
+				cur = dup
+			} else {
+				s.docAgent[l.name] = cur
+			}
+			s.mu.Unlock()
+		}
+		if v.Agent == cur {
+			if st.agent != "" {
+				s.mu.Lock()
+				delete(s.pickCnt, l.name)
+				s.mu.Unlock()
+			}
+			continue
+		}
+		if st.agent == v.Agent {
+			st.n++
+		} else {
+			st = pickStable{agent: v.Agent, n: 1}
+		}
+		s.mu.Lock()
+		s.pickCnt[l.name] = st
+		s.mu.Unlock()
+		_, over := candidates(res)
+		blocked := cur == "" || in.block(cur, over, now) != ""
+		if !blocked && st.n < fallbackStableTicks {
+			continue
+		}
+		s.mu.Lock()
+		_, running := s.procs[l.name]
+		s.mu.Unlock()
+		if running && !s.noSession(l.name) {
+			continue
+		}
+		s.rewriteAgent(l.name, v.Agent, cur, loop, prof, res, in, now)
+	}
+}
+
+// rewriteAgent renders the loop's document for the newly picked agent
+// and replaces the managed copy, keeping a .bak when the file differs.
+func (s *supervisor) rewriteAgent(name, agent, prev string, loop gen.Loop, p gen.Profile, res config.Resolved, in gateInputs, now time.Time) {
+	s.mu.Lock()
+	agents := s.agents
+	s.mu.Unlock()
+	newLoop, ok := loop.ForAgent(agents, agent)
+	if !ok {
+		return
+	}
+	if !p.SupportsAgent(newLoop.Runtime) {
+		fmt.Fprintf(os.Stderr, "jig: %s: agent kind %q is not supported, staying on %s\n", name, newLoop.Runtime, prev)
+		return
+	}
+	jigPath, err := selfExe()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "jig:", err)
+		return
+	}
+	text, err := gen.Render(p, newLoop, agents, jigPath, defaultPrompt)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "jig:", err)
+		return
+	}
+	if err := gen.AtomicWrite(gen.DocPath(s.root, name), text); err != nil {
+		fmt.Fprintln(os.Stderr, "jig:", err)
+		return
+	}
+	trigger, usable := fallbackTrigger(in, res, prev, now)
+	s.mu.Lock()
+	s.docAgent[name] = agent
+	if agent == primaryCandidate(res) {
+		delete(s.fallback, name)
+	} else {
+		s.fallback[name] = fallbackInfo{from: prev, to: agent, trigger: trigger, at: now, usable: usable}
+	}
+	delete(s.pickCnt, name)
+	s.mu.Unlock()
+	fmt.Fprintf(os.Stderr, "jig: %s: agent changed from %q to %q: %s\n", name, prev, agent, trigger)
+	s.republish()
+}
+
+// fallbackTrigger names what drove the previous agent out and when the
+// primary is usable again.
+func fallbackTrigger(in gateInputs, res config.Resolved, prev string, now time.Time) (string, time.Time) {
+	if _, ok := in.agents[prev]; !ok {
+		return "unknown agent", time.Time{}
+	}
+	_, over := candidates(res)
+	b := in.blockOf(prev, over, now)
+	switch {
+	case b.exhausted:
+		return "usage limit", in.state.Agents[prev].ExhaustedUntil
+	case b.hours:
+		return "outside working hours", in.schedule(prev, over).Next(now)
+	case b.refs:
+		return "unresolved environment references", time.Time{}
+	case b.runtime:
+		return "runtime not registered", time.Time{}
+	default:
+		return "not available", time.Time{}
+	}
+}
+
+// primaryCandidate is the loop's first candidate agent: the primary the
+// document is generated for and the gate prefers.
+func primaryCandidate(res config.Resolved) string {
+	names, _ := candidates(res)
+	if len(names) == 0 {
+		return ""
+	}
+	return names[0]
 }
 
 // recordLoops writes the per-loop decisions that changed to the state

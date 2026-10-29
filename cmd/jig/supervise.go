@@ -18,6 +18,7 @@ import (
 
 	"github.com/kinged007/jigz/internal/config"
 	"github.com/kinged007/jigz/internal/engine"
+	"github.com/kinged007/jigz/internal/gen"
 	"github.com/kinged007/jigz/internal/machine"
 	"github.com/kinged007/jigz/internal/plan"
 	"github.com/kinged007/jigz/internal/rollup"
@@ -147,6 +148,16 @@ type supervisor struct {
 	// sessions reports whether a loop has a session running; retries do
 	// not count.
 	sessions func(name string) (active, known bool)
+	// docAgent is the agent the on-disk document was rendered for, by
+	// loop. genLoops and genProf re-render it when the gate picks a
+	// standby agent. pickCnt counts consecutive ticks with the same
+	// pick, so the return to the primary waits out flapping.
+	// fallback records the last standby switch per loop for status.
+	docAgent map[string]string
+	genLoops map[string]gen.Loop
+	genProf  map[string]gen.Profile
+	pickCnt  map[string]pickStable
+	fallback map[string]fallbackInfo
 }
 
 func newSupervisor(root, bin string, defs []loopDef) *supervisor {
@@ -162,6 +173,11 @@ func newSupervisor(root, bin string, defs []loopDef) *supervisor {
 		budgetUse: map[string]budgetUsage{}, budgetPolled: map[string]time.Time{},
 		budgetReadErr: map[string]string{},
 		disabled:      map[string]string{},
+		docAgent:      map[string]string{},
+		genLoops:      map[string]gen.Loop{},
+		genProf:       map[string]gen.Profile{},
+		pickCnt:       map[string]pickStable{},
+		fallback:      map[string]fallbackInfo{},
 	}
 	s.quiet, s.sessions = s.loopQuiet, s.loopSessions
 	s.initMachine()
@@ -693,6 +709,16 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 	}
 	now := s.clock()
 	mv := gateEval(in.machine, in.state, now)
+	primaryOf := func(name string) string {
+		return primaryCandidate(s.work[name])
+	}
+	fallbackOf := func(name string) string {
+		fb, ok := s.fallback[name]
+		if !ok {
+			return ""
+		}
+		return fb.String(primaryOf(name))
+	}
 	loopInfo := func(name string, bs *budgetStatus) loopView {
 		lv := in.loopView(name, mv, now)
 		if bs != nil && bs.Paused {
@@ -730,7 +756,8 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 			RestartCount: p.restarts, LastExitCode: p.exitCode, ConfigHash: p.configHash,
 			LogPath: childLogPath(s.root, p.def.name), Budget: bs,
 			OfflineReason: lv.Reason, ETA: timePtr(lv.ETA), Agent: lv.Agent,
-			Drift: drifts[p.def.name],
+			Drift:   drifts[p.def.name],
+			Primary: primaryOf(p.def.name), FallbackReason: fallbackOf(p.def.name),
 		}
 		if p.exitCode == nil {
 			w.Sessions, w.SessionsKnown = p.live.snapshot()
@@ -769,7 +796,8 @@ func (s *supervisor) statusDoc(state string) statusDoc {
 			Name: name, WorkflowFile: def.file, LoopType: loopTypeOf(wf),
 			State: st, StartedAt: s.startedAt.UTC(), LogPath: childLogPath(s.root, name),
 			Budget: bs, OfflineReason: offline, ETA: timePtr(lv.ETA), Agent: lv.Agent,
-			Drift: drifts[name],
+			Drift:   drifts[name],
+			Primary: primaryOf(name), FallbackReason: fallbackOf(name),
 		})
 	}
 	sort.Slice(doc.Workflows, func(i, j int) bool { return doc.Workflows[i].Name < doc.Workflows[j].Name })

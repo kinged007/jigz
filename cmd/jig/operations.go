@@ -29,11 +29,15 @@ type opsLoop struct {
 	// OfflineReason is why the machine gate, capability detection or the
 	// work entry keeps this loop down; ETA its estimated start. Runtime
 	// is the agent runtime the machine gate selected and Agent the agent
-	// the work entry selected.
-	OfflineReason string
-	ETA           string
-	Runtime       string
-	Agent         string
+	// the work entry selected. Primary is the first candidate and
+	// FallbackReason the trigger of the standby switch, set while the
+	// loop runs a non-primary agent.
+	OfflineReason  string
+	ETA            string
+	Runtime        string
+	Agent          string
+	Primary        string
+	FallbackReason string
 }
 
 // cleanupView is a project's last cleanup run.
@@ -134,6 +138,8 @@ func loopRow(l *rollup.Loop, p *opsProject) opsLoop {
 	if hasDoc {
 		row.OfflineReason = w.OfflineReason
 		row.Agent = w.Agent
+		row.Primary = w.Primary
+		row.FallbackReason = w.FallbackReason
 		if w.ETA != nil {
 			row.ETA = localText(*w.ETA)
 		}

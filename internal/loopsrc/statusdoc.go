@@ -84,6 +84,11 @@ type WorkflowInfo struct {
 	ETA           *time.Time `json:"eta,omitempty"`
 	Agent         string     `json:"agent,omitempty"`
 	Drift         string     `json:"drift,omitempty"`
+	// Primary is the first candidate agent. FallbackReason names the
+	// trigger of the standby switch and when the primary is usable
+	// again, set while the loop runs a non-primary agent.
+	Primary        string `json:"primary,omitempty"`
+	FallbackReason string `json:"fallback_reason,omitempty"`
 	// Sessions are the agent sessions the supervisor has seen start and
 	// not end. SessionsKnown is false while the supervisor cannot account
 	// for every session the engine runs; a reader then treats the loop as

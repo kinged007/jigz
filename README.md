@@ -1158,6 +1158,16 @@ once the loop has no running session; the engine re-reads it live.
 A bare runtime (`jig agent-exec <runtime>`) keeps the legacy behaviour:
 the CLI of the first available pool entry of that runtime.
 
+Each loop runs its first candidate agent. When the gate picks another
+candidate — a usage limit, closed hours, unresolved credentials or an
+unregistered runtime — the supervisor rewrites the loop document for
+that agent once the loop has no running session and the engine
+re-reads it live; no restart follows. The return to the primary waits
+until the pick survives consecutive ticks, so a flapping limit does
+not rewrite the document twice. `jig status` shows the agent, the
+primary and the fallback reason per loop, and the Operations page
+alerts while a loop runs a standby agent.
+
 A usage limit is usually detected by `agent-exec` during the engine's credential
 check, which runs before each worker run. The run then fails before the turn
 starts, the engine posts no failure comment, and it retries after about 10

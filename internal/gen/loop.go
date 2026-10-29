@@ -64,6 +64,30 @@ func Split(res config.Resolved, agents map[string]config.Agent) []Loop {
 	return out
 }
 
+// ForAgent returns the loop set to run as the named active agent: the
+// same candidate list, rules and query, but the agent's kind and model.
+// The second result is false when the name is not a known agent. The
+// supervisor uses it to rewrite a managed document at idle when the
+// gate picks a standby agent; a restart is not needed, the engine
+// re-reads the document live.
+func (l Loop) ForAgent(agents map[string]config.Agent, name string) (Loop, bool) {
+	a, ok := agents[name]
+	if !ok {
+		return l, false
+	}
+	out := l
+	out.Agent = name
+	out.Runtime = a.Runtime
+	out.Model = a.Model
+	for _, r := range l.Rules {
+		if r.Model != "" {
+			out.Model = r.Model
+			break
+		}
+	}
+	return out, true
+}
+
 func newLoop(res config.Resolved, name string, names []string, rules []config.ResolvedRule, query string, active []string, agents map[string]config.Agent) Loop {
 	l := Loop{Name: name, Entry: res, Agents: names, Rules: rules, Query: query, Active: active}
 	if len(names) > 0 {
