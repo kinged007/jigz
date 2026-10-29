@@ -27,6 +27,12 @@ import (
 // Runtimes are the agent kinds a pool entry can use.
 var Runtimes = []string{"claude-code", "pi"}
 
+// DefaultCommand is the executable a runtime runs when a pool entry or
+// agent names no command.
+func DefaultCommand(runtime string) string {
+	return map[string]string{"claude-code": "claude", "pi": "pi"}[runtime]
+}
+
 const (
 	EndFinish = "finish"
 	EndStop   = "stop"
@@ -268,7 +274,7 @@ func (c *Config) validate() error {
 			return fmt.Errorf("%sruntime: unknown runtime %q (use %s)", key, e.Runtime, strings.Join(Runtimes, " or "))
 		}
 		if e.Command == "" {
-			e.Command = map[string]string{"claude-code": "claude", "pi": "pi"}[e.Runtime]
+			e.Command = DefaultCommand(e.Runtime)
 		}
 		if e.Hours.End != "" {
 			return fmt.Errorf("%shours.end: only the machine hours have an end mode", key)

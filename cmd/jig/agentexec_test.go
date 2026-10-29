@@ -14,13 +14,14 @@ import (
 	"github.com/kinged007/jigz/internal/machine"
 )
 
-func agentExecEnv(t *testing.T) {
+func agentExecEnv(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
 	t.Setenv("JIG_STATE_PATH", filepath.Join(home, "state.json"))
+	return home
 }
 
 func writeAgentScript(t *testing.T, body string) string {
@@ -63,6 +64,99 @@ func execAgentExec(args ...string) (int, string, string) {
 	var out, errb bytes.Buffer
 	code := runAgentExec(args, strings.NewReader(""), &out, &errb)
 	return code, out.String(), errb.String()
+}
+
+// A fleet agent name runs that agent with its own env mapping: the
+// runtime CLI from the runtime default, references resolved from the
+// supervisor's environment.
+func TestAgentExecAgentName(t *testing.T) {
+	home := agentExecEnv(t)
+	t.Setenv("AGENT_SUB", "sub-1")
+	mustWriteConfig(t, home, `repo: owner/repo
+agents:
+  builder:
+    runtime: claude-code
+    env: { FROM_PARENT: { from_env: AGENT_SUB }, LITERAL: lit }
+`)
+	t.Setenv("JIG_STATE_PATH", filepath.Join(home, ".jigz", "data", "state.json"))
+	t.Setenv("PATH", stubCommand(t, "claude", `printf 'args=%s\n' "$*"
+printf 'sub=%s lit=%s\n' "$FROM_PARENT" "$LITERAL"
+`)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	code, out, errs := execAgentExec("builder", "say", "hi")
+	if code != 0 || out != "args=say hi\nsub=sub-1 lit=lit\n" {
+		t.Fatalf("code=%d out=%q err=%q", code, out, errs)
+	}
+}
+
+// A usage-limit line from the agent's CLI exhausts the agent by name,
+// so the gate picks the next candidate.
+func TestAgentExecAgentLimitExhausts(t *testing.T) {
+	home := agentExecEnv(t)
+	mustWriteConfig(t, home, `repo: owner/repo
+agents:
+  builder: { runtime: claude-code }
+`)
+	t.Setenv("JIG_STATE_PATH", filepath.Join(home, ".jigz", "data", "state.json"))
+	epoch := time.Now().Add(2 * time.Hour).Unix()
+	t.Setenv("PATH", stubCommand(t, "claude", fmt.Sprintf(`printf '{"type":"result","is_error":true,"result":"usage limit reached|%d"}\n'
+`, epoch))+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if code, _, _ := execAgentExec("builder"); code != 1 {
+		t.Fatalf("code=%d", code)
+	}
+	if got := agentExhaustedUntil(t, "builder"); got.Unix() != epoch {
+		t.Fatalf("exhausted until %v, want %d", got, epoch)
+	}
+}
+
+// An unset credential reference makes the agent unavailable without
+// running anything.
+func TestAgentExecAgentUnresolvedEnv(t *testing.T) {
+	home := agentExecEnv(t)
+	mustWriteConfig(t, home, `repo: owner/repo
+agents:
+  builder: { runtime: claude-code, env: { TOK: { from_env: AGENT_MISSING } } }
+`)
+	t.Setenv("JIG_STATE_PATH", filepath.Join(home, ".jigz", "data", "state.json"))
+	marker := filepath.Join(t.TempDir(), "ran")
+	t.Setenv("PATH", stubCommand(t, "claude", "touch "+marker+"\n")+string(os.PathListSeparator)+os.Getenv("PATH"))
+	code, _, errs := execAgentExec("builder")
+	if code != exitNoAgent || !strings.Contains(errs, "AGENT_MISSING") {
+		t.Fatalf("code=%d err=%q", code, errs)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("child ran")
+	}
+}
+
+// A name that is neither a fleet agent nor a runtime keeps the legacy
+// error.
+func TestAgentExecUnknownName(t *testing.T) {
+	home := agentExecEnv(t)
+	mustWriteConfig(t, home, "repo: owner/repo\n")
+	t.Setenv("JIG_STATE_PATH", filepath.Join(home, ".jigz", "data", "state.json"))
+	if code, _, errs := execAgentExec("nope"); code != 2 || !strings.Contains(errs, "nope") {
+		t.Fatalf("code=%d err=%q", code, errs)
+	}
+}
+
+func mustWriteConfig(t *testing.T, home, body string) {
+	t.Helper()
+	dir := filepath.Join(home, ".jigz", "data")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".jigz", "config.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func stubCommand(t *testing.T, name, body string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
 }
 
 func TestAgentExecUsage(t *testing.T) {

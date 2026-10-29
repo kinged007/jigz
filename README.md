@@ -1142,17 +1142,21 @@ When the gate closes, the end behaviour is the `end` of the
 every other case.
 
 With a pool, the supervisor starts each loop with the agent command set to
-`jig agent-exec <runtime>`. `agent-exec` runs the CLI of the first
-available entry of that runtime (not exhausted and inside its own hours), passes
-stdout through unchanged and exits with the CLI's exit code. When the CLI output
-reports a usage limit, the entry is marked exhausted until the reset time in
+`jig agent-exec <agent>`. `agent-exec` runs the CLI of that fleet agent
+with its `env` mapping resolved from the supervisor's environment, passes
+stdout through unchanged and exits with the CLI's exit code. An unset
+credential reference makes the agent unavailable and `agent-exec` exits
+75 without running anything. When the CLI output
+reports a usage limit, the agent is marked exhausted until the reset time in
 the message, or for `limits.default_reset`. The state is stored in
 `<repo root>/.jigz/data/state.json`, created by `jig setup` and kept out
 of commits by the `.jigz/` gitignore rule. A `pool.json` written by an
 older jig in the per-user state directory is still read and never
 written again. Without an available entry, `agent-exec`
-exits 75. When the active runtime changes, loops are restarted once they have
-no running session.
+exits 75. When the active agent changes, the loop document is rewritten
+once the loop has no running session; the engine re-reads it live.
+A bare runtime (`jig agent-exec <runtime>`) keeps the legacy behaviour:
+the CLI of the first available pool entry of that runtime.
 
 A usage limit is usually detected by `agent-exec` during the engine's credential
 check, which runs before each worker run. The run then fails before the turn
