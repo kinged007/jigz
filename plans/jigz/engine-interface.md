@@ -1036,6 +1036,19 @@ plan; this section records what is done.
   four approved CI changes as separate commits. The canary already
   reports sortie-ai/sortie v1.30.0 as unprofiled; adding it is its own
   pull request per section 7.8 and out of scope here.
+- 2026-10-29: phase 6 removed the loop-side machine.yaml reads on
+  `feat/engine-interface` and the suite stays green. The supervisor
+  gate, agent selection and drift reporting run off
+  `.jigz/config.yaml` alone; `jig agent-exec <runtime>` resolves the
+  first available fleet agent with that runtime; the capability alerts
+  and the Agents page read config agents and show per-fleet hours,
+  models and loop assignments. Deleted: fleetconfig.Load and its fleet
+  tests, plan.Apply/Setup/Validate and the workflow patching, the
+  model-reference pruning, and the engine-pool machine tests. The hub
+  daemon keeps its own machine.yaml reads. Phase 7 adds the
+  model-unavailable trigger: agent-exec matches model-not-found text
+  and exhausts the agent so the standby takes over (builtin patterns;
+  the per-CLI catalog grows with recorded logs).
 - The phase-6 machine-file removal keeps the hub daemon's reads: the
   hub still configures hours, pool, limits and dashboard from
   machine.yaml. Only the loop supervisor side moved into
