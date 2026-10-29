@@ -166,6 +166,17 @@ work:
 	})
 	t.Logf("standby rewrite after %s", time.Since(start).Round(time.Second))
 
+	// The engine hit the limit through the primary first, then work
+	// proceeded through the standby.
+	waitFor("the limit to route around main", 60*time.Second, func() bool {
+		raw, err := os.ReadFile(filepath.Join(fakes, "calls"))
+		if err != nil {
+			return false
+		}
+		got := strings.Fields(string(raw))
+		return len(got) >= 2 && got[0] == "main" && slices.Contains(got, "spare")
+	})
+
 	log := assertHandedOff(t, item, 120*time.Second)
 	if !slices.Contains(log, "-agent:plan") {
 		t.Errorf("label events %v, want the plan trigger removed", log)
