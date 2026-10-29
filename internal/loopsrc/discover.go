@@ -38,6 +38,22 @@ func Discover(roots map[string]string) []rollup.Loop {
 		}
 		dbs, _ := filepath.Glob(filepath.Join(roots[p], ".jigz", "data", "jigz-*.db"))
 		slices.Sort(dbs)
+		// Databases left under .jigz/workflows/ predate the data
+		// directory; they are still listed so history survives the
+		// move, unless the data directory already holds the loop's
+		// database. The engine itself follows the document's db_path
+		// and never reads the stale copy.
+		legacy, _ := filepath.Glob(filepath.Join(dir, "jigz-*.db"))
+		slices.Sort(legacy)
+		dataNames := map[string]bool{}
+		for _, path := range dbs {
+			dataNames[filepath.Base(path)] = true
+		}
+		for _, path := range legacy {
+			if !dataNames[filepath.Base(path)] {
+				dbs = append(dbs, path)
+			}
+		}
 		for _, path := range dbs {
 			if claimed[path] {
 				continue
