@@ -70,3 +70,22 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: go build -trimpath ./...
+
+  # Contract tests against both pinned engine releases, in parallel with
+  # check and acceptance. The engines are cached between runs; a miss
+  # downloads the verified releases.
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/cache@v4
+        with:
+          path: ~/.local/share/jigz
+          key: engine-binaries-v1
+      - name: contract
+        run: go test -tags contract ./...
