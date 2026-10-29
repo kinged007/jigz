@@ -281,26 +281,6 @@ func endOrFinish(end string) string {
 	return end
 }
 
-// gateStatus is the `gate` object of the status document. It is absent
-// when the machine file sets neither working hours nor a pool.
-//
-//	open         false while the gate keeps loops down
-//	hours_open   the working-hours window is open
-//	runtime      the agent runtime the loops use, empty without a pool
-//	next_change  the next time the window or an account changes
-//	hold         why the gate is closed, empty when open
-//
-// Each workflow carries its own offline_reason and eta from the
-// per-loop decision. A workflow the gate stopped has state "offline";
-// one that capability detection disabled has state "disabled".
-type gateStatus struct {
-	Open       bool       `json:"open"`
-	HoursOpen  bool       `json:"hours_open"`
-	Runtime    string     `json:"runtime"`
-	NextChange *time.Time `json:"next_change"`
-	Hold       string     `json:"hold"`
-}
-
 // machineState is the supervisor's view of the work config and the
 // agent state: the resolved entries the gate evaluates, the per-loop
 // queries and generation data, and the state file agents write to. The
@@ -533,10 +513,6 @@ var selfExe = func() (string, error) {
 // moment a child starts. The gate decision and the start read the clock
 // separately, so a boundary can fall between them.
 var errNoAgent = errors.New("no agent account available")
-
-func (s *supervisor) gateStatusLocked() *gateStatus {
-	return nil
-}
 
 // gateStep runs on every tick. It applies the work entries to the loops
 // and republishes when a decision changed.

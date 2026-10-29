@@ -39,7 +39,6 @@ type statusDoc struct {
 	Workflows            []workflowStatus `json:"workflows"`
 	Cleanup              *cleanupRecord   `json:"cleanup,omitempty"`
 	Sleep                sleepStatus      `json:"sleep"`
-	Gate                 *gateStatus      `json:"gate,omitempty"`
 }
 
 type workflowStatus struct {
