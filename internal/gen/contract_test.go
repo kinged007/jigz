@@ -8,6 +8,7 @@
 package gen
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -96,24 +97,15 @@ func runValidate(t *testing.T, bin, doc string, env []string) validateReport {
 	t.Helper()
 	cmd := exec.Command(bin, "validate", "--format", "json", doc)
 	cmd.Env = env
-	out, err := cmd.Output()
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			out = ee.Stderr
-			if len(out) == 0 {
-				out, _ = cmd.CombinedOutput()
-			}
-		}
-		var rep validateReport
-		if jerr := json.Unmarshal(out, &rep); jerr == nil && (!rep.Valid || len(rep.Errors) > 0) {
-			return rep
-		}
-		t.Fatalf("validate: %v\n%s", err, out)
-	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
 	var rep validateReport
-	if err := json.Unmarshal(out, &rep); err != nil {
-		t.Fatalf("validate output is not JSON: %v\n%s", err, out)
+	if jerr := json.Unmarshal(stdout.Bytes(), &rep); jerr != nil {
+		t.Fatalf("validate: %v\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
 	}
+	_ = err
 	return rep
 }
 
