@@ -830,7 +830,7 @@ plan; this section records what is done.
 | 2 Hours and offline handling | `feat/engine-interface` | done | merged 0a2ba54; `gateDecide` per loop, `.jigz/data/state.json`, `d2_offline_reason_and_estimate` |
 | 3 Document generation | `feat/engine-interface` | done (3b wired; 3a generator) | `internal/gen` renders, splits and validates; `cmd/jig/generate.go` drives setup/validate/reload/start; supervisor resolves per-loop inputs, drains on query change, reports drift in status |
 | 4 Fallback | `feat/engine-interface` | done | `agent-exec` runs a fleet agent by name; supervisor rewrites the managed document at idle on a standby pick, returns to the primary after consecutive stable ticks; status carries primary and fallback reason, ops page alerts, dashboard marks fallback agents | Rig tests on the fake clock plus agent-exec unit tests (see deviations) |
-| 5 Contract tests and CI | | not started | |
+| 5 Contract tests and CI | `feat/engine-interface` | done | Golden set per target plus pool/pi/chain/hooks variants; schema fixtures from real runs with `make schema-fixture`; contract suite (goldens, CLI, dry-run, probe, rule-agent, log literals, newest-release canary); CI gains contract, split acceptance, docs-ignore and canary jobs | Sections 7.2 to 7.5, `go test -tags contract` |
 | 6 Cleanup | | not started | |
 | 7 Model-unavailable trigger | | not started | |
 
@@ -942,13 +942,12 @@ plan; this section records what is done.
 - `ProfileFor` returns the profile name, not the no-contract-tests
   warning; the caller derives the warning from the version mismatch.
 - Phase 4 acceptance runs at the supervisor rig level (fake clock, fake
-  engine child, real config/state/documents) instead of the engine
-  acceptance suite: a generated document cannot carry the fakegithub
-  endpoint because the config tracker has no endpoint field, and the
-  daemon boot would overwrite a hand-tweaked endpoint as drift. The
-  engine half of the path (limit text to exhaustion) is covered by the
-  existing pool-path acceptance scenario and the new agent-path unit
-  tests.
+  engine child, real config/state/documents) and, for the whole path,
+  as a real engine acceptance test: `SORTIE_TRACKER_ENDPOINT` in the
+  supervisor environment overrides the document's tracker endpoint, so
+  generated documents run unmodified against fakegithub. A generated
+  document still cannot carry a custom endpoint by itself because the
+  config tracker has no endpoint field; that stays out of scope.
 
 ### 12.4 Interpretation recorded during execution
 
@@ -1013,4 +1012,27 @@ plan; this section records what is done.
   (`db_path: ../data/jigz-<loop>.db`, `discover` reads the data dir).
   Real-engine check repeated after every skeleton change: shipped
   renders, Example 1 goldens and a split loop all validate
-  `{"valid":true}` with empty warnings on the fork engine.
+  `{"valid":true}` with empty warnings on the fork engine. The
+  phase-4 combine fix drops base labels from split queries (narrowing
+  by appending overlapped every loop), and `CheckOverlap` rejects
+  shared labels; the check passes for every golden after it.
+
+- 2026-10-29: phases 4 and 5 built on `feat/engine-interface`, suite
+  green throughout (`gofmt`, `go vet`, `go build ./...`, all packages;
+  contract tag against both cached engines; acceptance including the
+  new fallback scenario). Phase 4: `agent-exec` runs a fleet agent by
+  name (the generated `agent.command` form; the legacy runtime pool
+  path stays); the supervisor rewrites a managed document at idle when
+  the gate picks a standby and returns to the primary after stable
+  ticks; status carries primary and fallback reason, the operations
+  page alerts and the dashboard marks fallback loops. The acceptance
+  fallback test runs the whole path on the fork engine: limit on the
+  credential check, rewrite to the standby at idle, handoff under the
+  standby's model, return after the reset. Phase 5: schema fixtures
+  recorded from real runs (`make schema-fixture ENGINE=<repo>@<tag>`),
+  golden set per target plus pool/pi/chain/hooks variants, contract
+  suite (golden validation, CLI flags and shape, dry-run, probe kinds,
+  rule-agent behaviour, log literals, newest-release canary), and the
+  four approved CI changes as separate commits. The canary already
+  reports sortie-ai/sortie v1.30.0 as unprofiled; adding it is its own
+  pull request per section 7.8 and out of scope here.
