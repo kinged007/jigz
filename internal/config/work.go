@@ -29,6 +29,20 @@ func (v StringOrRef) set() bool { return v.Str != "" || v.FromEnv != "" }
 // ref reports whether the value is a {from_env: NAME} reference.
 func (v StringOrRef) ref() bool { return v.FromEnv != "" }
 
+// Unresolved returns the referenced variable name when the value is a
+// {from_env: NAME} reference that does not resolve against the process
+// environment. An empty variable counts as unresolved. It returns ""
+// when the value needs no variable.
+func (v StringOrRef) Unresolved() string {
+	if v.FromEnv == "" {
+		return ""
+	}
+	if s := os.Getenv(v.FromEnv); s != "" {
+		return ""
+	}
+	return v.FromEnv
+}
+
 // resolve returns the referenced value from the process environment. An
 // empty variable counts as unresolved.
 func (v StringOrRef) resolve() (string, bool) {

@@ -19,9 +19,9 @@ target in the config and running the tests, which show what breaks.
 Terms: an **agent** is a named profile of runtime, model, working hours and
 credential mapping. A **pool** is a named ordered list of agents (the fallback
 order). **Work** is a named unit with a query, agents and dispatch rules. A
-**loop** is one engine process running one **engine workflow document**; a work
-entry produces one loop or several (section 4.5). `agents` and `pools` are the
-fleet.
+**loop** is one engine process running one **engine workflow document**; a
+work entry produces one loop or several, each with its own document
+(section 4.5). `agents` and `pools` are the fleet.
 
 ### Non-goals
 
@@ -55,9 +55,10 @@ fleet.
 
 ### 2.2 What the shipped workflow documents contain
 
-`cmd/jig/workflows/WORKFLOW.issues.md` and `WORKFLOW.prs.md` are complete
-engine files: tracker settings, `db_path` (`jigz-issues.db`, relative to the
-workflows directory `.jigz/workflows/`), `workspace.root` (`$JIG_WORKSPACES/<name>`, which is
+`cmd/jig/workflows/WORKFLOW.issues.md` and `WORKFLOW.prs.md` (the two
+skeleton variants of section 4.1) are complete engine files: tracker settings,
+`db_path` (`jigz-issues.db`, relative to the workflows directory
+`.jigz/workflows/`), `workspace.root` (`$JIG_WORKSPACES/<name>`, which is
 `.jigz/workspaces/<name>`; `internal/config/config.go` line 428), `hooks`, an
 `agent:` block (`claude-code`, `max_turns: 10`, `max_concurrent_agents: 1`), a
 `pi:` and a `claude-code:` block with a model, and `dispatch.rules`. The
@@ -126,10 +127,12 @@ strings from them.
 | Tracker kinds | file, gitea, github, github-pr, gitlab, jira, linear | same without github-pr |
 | Agent kinds | agent-client-protocol, claude-code, codex, copilot-cli, mock, opencode, pi | same without pi |
 | `agent.kind: pi` | accepted | error `agent_adapter` |
-| Rule key `agent: <kind>` (string) | accepted | accepted; `pi` gives `unknown agent kind` |
-| Rule `agent:` as list or mapping | error `expected string` | same |
-| Rule keys `model`, `effort` | error `unknown key` | same |
-| `claude-code.effort` in the runtime block | accepted without warning | same |
+| `agent:` naming an unregistered agent in a rule | error `unknown agent kind` | same |
+| `agent.kind`, and per-rule `model`, `effort`, `command` | error `unknown key` | same |
+| `agent.command` as mapping | error `expected string or list, got mapping` | same |
+
+Accepted but never emitted: `claude-code.effort` reaches the CLI as
+`--effort <value>` but is unverified per kind (section 4.5).
 
 Strings of v1.28.1 (not documented behaviour): `orchestrator.RuleAgent` shows
 an agent resolved per rule; `run_history`, `retry_entries` and `parked_issues`
@@ -140,9 +143,9 @@ Consequences for the generator:
 
 - No engine front matter key holds working hours, so Jigz enforces them
   (section 5).
-- The engine accepts an agent kind per rule inside one loop. Model, effort and
-  command are not per rule: the model is in the runtime block of the kind
-  (`claude-code:`, `pi:`). Section 4.5 states what follows.
+- The engine takes an agent name per rule inside one loop. The model is in
+  the single runtime block of the kind, the command is the single
+  `agent.command` (section 4.5).
 - Only runtime blocks in use are read; others are reported as unknown keys.
   The generator emits only the blocks in use, which removes the
   `dropRuntimeBlockWarnings` workaround in `cmd/jig/validate.go`.
@@ -202,8 +205,9 @@ The fleet sections are `agents` and `pools`; the work section is `work`.
   (`finish` or `stop`). Omitted means 24/7.
 - `tracker`: defaults for every work entry: `kind`, `api_key` and `project`
   (references, section 3.3), `active_states`, `in_progress_state`,
-  `handoff_state`. `hooks`: defaults `after_create`, `before_run`, `after_run`,
-  `timeout_ms`.
+  `handoff_state`. `hooks`: defaults per tracker kind, taken from the
+  shipped documents (`after_create`, `before_run`, `after_run` except the
+  `github-pr` entry, which has no `after_run`, and `timeout_ms`).
 
 An unknown key is an error with the field path. An unset engine knob is left
 out of the generated document and the engine applies its default.
@@ -230,7 +234,7 @@ pools:
   <name>: [<agent name>, <agent name>]   # order = fallback order
 ```
 
-- `effort` is not accepted (section 10, item 2).
+- `effort` is not emitted (section 10, item 2).
 - Secrets are never stored in the file. A credential is a reference to an
   environment variable of the supervising process, `{ from_env: NAME }`. The
   validator rejects a plain string for a key ending in `TOKEN`, `KEY`, `SECRET`
@@ -274,7 +278,7 @@ work:
 - `agent` is a name from `agents` or `pools`, or an array of names (ordered
   fallback). A mapping with `use` overrides `model` or `schedule` of the
   fleet agent for this entry.
-- `next` and `stage` are the engine's stages feature (section 4.5).
+- `next` and `stage` are the engine's stages feature.
   `db_path` and `workspace.root` are generated from the slug (section 4.2).
   Slugs are file stems: letters, digits and `-`.
 
@@ -350,25 +354,36 @@ work:
       - { name: build-chain, stage: stage-build,                   prompt: prompts/build.md, agent: [builder-a, builder-b] }
 ```
 
-Two candidate lists give two loops, `delivery-planner` and `delivery-builder`
-(section 4.5). The `plan-build` chain crosses them, so validation rejects its
-`next`; the prompt for `plan-build` items ends by replacing the label with
-`agent:build`. With one candidate list for all rules the chain is generated as
-written.
+Two candidate lists give two loops: `delivery-planner` from the `planner`
+candidate list and `delivery-builder-a` from `[builder-a, builder-b]`.
+The `plan-build` chain crosses them, so validation rejects its `next`;
+the prompt for `plan-build` items ends by replacing the label with
+`agent:build`. With one candidate list for all rules the chain is
+generated as written.
 
 ## 4. Generation pipeline
 
-### 4.1 Overview
+### 4.1 The shipped documents as skeleton=issues and skeleton=prs
+
+`cmd/jig/workflows/WORKFLOW.issues.md` and `WORKFLOW.prs.md` (section 2.2)
+are the two skeleton variants the generator emits, and section 3.5's
+example 1 is the config they correspond to. Tracker kinds `github` /
+`github-pr`, agents `builder` / `reviewer`, unset hooks so the tracker-kind
+hook defaults of section 3.3 fill in, one rule per entry. A golden test
+compares the generator output against both files; the only intentional
+differences are the generation marker and the `db_path` move to
+`.jigz/data/`.
 
 Jigz resolves `.jigz/config.yaml` and the engine profile into one struct per
-loop, renders `.jigz/workflows/WORKFLOW.<loop>.md` with `text/template` over
-a skeleton taken from today's shipped files, runs `sortie validate` on the
-text, and replaces the file atomically. Line patching (`plan.ApplySettings`)
+loop, renders `.jigz/workflows/WORKFLOW.<loop>.md` with `text/template`
+over the skeleton, and replaces the file atomically. `sortie validate` runs
+on the rendered text (section 7.2). Line patching (`plan.ApplySettings`)
 is not used: a template makes golden tests exact.
 
 ### 4.2 Names and paths
 
-Loop name: the work slug, or `<slug>-<group>` when an entry has several loops.
+Loop name: the work slug, or `<slug>-<first-agent>` when an entry has
+several loops.
 Document: `.jigz/workflows/WORKFLOW.<loop>.md`. Database:
 `.jigz/data/jigz-<loop>.db`. Workspace: `.jigz/workspaces/<loop>/<issue>`
 (unchanged for `issues` and `prs`). State: `.jigz/data/state.json`.
@@ -411,20 +426,25 @@ applied to it.
 
 ### 4.5 From work entries to loops
 
-The engine takes an agent kind per rule (`agent: <kind>`, section 2.7) and one
-runtime block, with the model, per kind. It does not take a model, effort,
-command or list per rule.
+Each `dispatch` rule takes an agent name, resolved to one runtime kind per
+loop; a loop holds the one runtime block, with the model, for its kind.
+The block holds no per-rule model, effort, command or list.
 
 1. Each rule resolves to an ordered candidate list of agents: the rule's
    `agent`, else the entry's `agent`; a pool expands to its agents.
 2. Rules with the same candidate list form a group, and a group is one loop
    named after the slug. Rules with different lists are realised by separate
-   loops named `<slug>-<group>`. This is the baseline because it needs one
+   loops named `<slug>-<first-agent>`, where `<first-agent>` is the first
+   candidate of the group. This is the baseline because it needs one
    agent command, model and environment per process, which is verified.
-3. The query of a separate loop is the work `query_filter` combined with the
-   label clauses of its rules, and its `active_states` come from the same
-   labels plus the in-progress state. This narrowing is the only thing that
-   keeps loops of one entry from claiming the same item: a fixture shows the
+3. The query of a separate loop is the work `query_filter` combined with
+   the label clauses of its rules, and its `active_states` come from the
+   same labels plus the in-progress state. Nothing else is generated for
+   that safety net when an entry's rules share one loop: the generator
+   always emits `dispatch.default.template`, pointing at
+   `prompts/default.md`, so a query-matching item no rule matches still
+   lands in a prompt of ours. This narrowing is the only thing that keeps
+   loops of one entry from claiming the same item: a fixture shows the
    engine does **not** skip an item that matches the query but no rule — it
    dispatches it to `dispatch.default` or through the fallback path
    (`engine-interface-notes.md`). Validation rejects a split whose combined
@@ -461,7 +481,8 @@ includes it, so moving the binary is drift. The engine does not expand `$VAR`
 in `agent.command` and does not pass shell quoting through intact (probed,
 `engine-interface-notes.md`), so the generator writes a literal absolute path
 and no shell metacharacters, and there is no `$JIG_BIN` fallback. The model is
-a literal line; `JIG_MODEL` is unused.
+a literal line; `JIG_MODEL` is unused. Standby agents are realised by
+regeneration at idle (section 6.3): `agent.command` stays a single string.
 
 ### 4.7 Engine targets and profiles
 
@@ -551,8 +572,8 @@ decision above is made per loop. With several sessions:
 
 ### 5.4 What needs a restart
 
-The engine re-reads the document while it runs (section 2.7; live keys to verify
-with a fixture), so most changes apply without a
+The engine re-reads the document while it runs (section 2.7; live keys were
+verified with a fixture), so most changes apply without a
 restart. The query filter is read only at start: a change of `query_filter`, of
 the rule labels that form it, or of the assignee scope needs a drain and
 restart, which the manager performs on `jig reload` (stop at idle, start with
@@ -632,10 +653,11 @@ need no binary and run in `go test ./...`. Binary tests carry the build tag
 ### 7.2 Golden files of generated documents
 
 - `internal/gen/testdata/golden/<profile>/<case>.md`, one set per engine
-  target: default `issues` and `prs`, a pool with fallback, a `pi` agent, rules
-  with an agent array, a work entry split into two loops, a stage chain in one
-  loop, hook and prompt overrides, `managed: false`, `prs` on the upstream
-  profile (offline with reason). `go test -update` rewrites them.
+  target: default `issues` and `prs`, a pool with fallback, a `pi` agent,
+  rules with an agent array, a work entry split into two loops, a stage
+  chain in one loop, hook and prompt overrides, `managed: false`, `prs` on
+  the upstream profile (offline with reason). `go test ./internal/gen/`
+  with `-update` rewrites them; review the golden diff before committing.
 - A `contract` test runs `sortie validate --format json` on every golden file
   with the matching engine and requires `valid: true` and no `unknown_key`.
 - A negative set must fail with exact text: unknown key, plain secret,
@@ -670,9 +692,10 @@ For each engine: `--help` contains `--env-file`, `--port` and "0 to disable";
 `--dry-run --port 0 --env-file <f> <document>` on a golden document exits 0;
 `engine.Probe` returns the version and registered kinds (pinning
 `parseRegistered`); `validate --format json` has the documented shape. A
-document with a rule `agent: <kind>` validates on each profile that registers
-the kind and fails with `unknown agent kind` otherwise, which pins the
-behaviour section 4.5 relies on.
+document naming a registered agent name in a rule validates on that profile
+and fails with `unknown agent kind` on one that does not register it,
+which pins the behaviour section 4.5 relies on: one runtime block per
+kind, no per-rule model, effort, command or list.
 
 ### 7.6 Acceptance matrix
 
@@ -705,8 +728,8 @@ Acceptance time: about 3 minutes by `ci.yml`, 8 by `AGENTS.md` (unknown).
 
 Record `--version`, `--help` and registered kinds; run `make schema-fixture
 ENGINE=<repo>@<tag>` and commit the fixture and log recording; add the profile;
-confirm accepted keys and `SORTIE_*` variables by `validate`; run `go test
--update` and review the golden diffs; run the `contract` tests and acceptance;
+confirm accepted keys and `SORTIE_*` variables by `validate`; run the generator tests with `-update`
+and review the golden diffs; run the `contract` tests and acceptance;
 set `engine` in a test config to the release, run all tests and list what
 breaks; update README. One pull request contains only the release addition.
 
@@ -805,7 +828,7 @@ plan; this section records what is done.
 | 0 Documentation fix | `feat/engine-interface` | done | README `JIG_MODEL` rows removed (a7c7d4c) |
 | 1 Config model and loader | `feat/engine-interface` | done | merged 4c0ac2b; `internal/config/{work,strict}.go`, `Config.Resolve()`, `UnresolvedRefs()` |
 | 2 Hours and offline handling | `feat/engine-interface` | done | merged 0a2ba54; `gateDecide` per loop, `.jigz/data/state.json`, `d2_offline_reason_and_estimate` |
-| 3 Document generation | | not started | |
+| 3 Document generation | `feat/engine-interface` | in progress | generator built directly on the integration branch after two dispatch failures (see work log); golden, shipped-diff and runtime checks below |
 | 4 Fallback | | not started | |
 | 5 Contract tests and CI | | not started | |
 | 6 Cleanup | | not started | |
@@ -919,12 +942,34 @@ None so far.
   bound to the existing document of the same name from phase 2 onward, and
   generate documents from phase 3 onward.
 
-- 2026-10-27: the first phase 3a dispatch died on a provider billing error
-  ("insufficient credits") after 59 tool calls of design reading and before
-  any code was written. It left one out-of-scope commit that pointed
-  `README.md` at a `ROADMAP.md` it never created; that commit is discarded
-  (`git reset --hard` to the previous tip) because it is broken and outside
-  the phase 3a scope. No generator code exists yet. The re-dispatch gets a
-  tighter brief: the engine facts are stated as settled, it is told to write
-  code early rather than read the whole tree, and it is told to stay inside
-  `internal/gen`.
+- 2026-10-27: `internal/gen` is built directly on `feat/engine-interface`
+  after the second phase 3a dispatch also produced no code. The profile
+  table (`profile.go`, fork `kinged007/sortie` `v1.28.1` as default and
+  upstream `sortie-ai/sortie` `v1.29.0`, `Supports` matrix with `github-pr`
+  split fork-only), loop splitting (`loop.go`, `<slug>-<first-agent>` for
+  differing candidate lists, disjoint combined queries plus narrowed
+  `active_states`), the skeleton template (byte-close to the shipped
+  documents with the generation marker and digest, literal absolute
+  `jig agent-exec <agent>`, only the block the agent kind names,
+  `dispatch.default.template` always emitted), the tracker-kind hook
+  defaults from the shipped documents (`defaults.go`, including the prs
+  entry having no `after_run`), atomic write plus manifest marker/digest
+  handling and drift detection (`file.go`), and `Validate` rejecting a
+  cross-group `next` with the hand-off-by-label prompt fix. The shipped-diff
+  test compares the default-config output against
+  `cmd/jig/workflows/WORKFLOW.issues.md` and `WORKFLOW.prs.md` byte for
+  byte, allowing only the marker line and the `db_path` move to
+  `.jigz/data/`. `Validate` runs on the generated
+  text before `Setup` writes anything and before `Reload` replaces any
+  document.
+  Build: `internal/gen` compiles; `gofmt`, `go vet`, `go build ./...`
+  clean. A first `Validate` run against the real engine binaries caught two
+  generator mistakes before any golden was written (`handoff_evidence` must
+  be `off`, not `plan_comment`; `comments` are booleans, not the word
+  `comment`): after the fix the issues and prs documents validate
+  `valid:true` with no errors and no warnings on the fork engine. The prs
+  document fails on upstream with `unknown tracker adapter kind
+  "github-pr"`, the missing-feature offline case of section 4.7. A mapping
+  in `agent.command` is rejected (`expected string or list, got mapping`),
+  so section 4.5 item 5 and section 4.6 record that the generator writes one
+  string.

@@ -205,9 +205,10 @@ passed through intact. Consequences for section 4.6:
 
 - The `$JIG_BIN` fallback is dropped. The generator writes the absolute path
   of `jig` taken at generation time.
-- `agent.command` must be a single argv-bearing value that does not rely on
-  shell quoting. Generate `agent.command` as the absolute `jig` path plus the
-  agent name, with no shell metacharacters.
+- `agent.command` stays a single string: a mapping there is rejected
+  (`expected string or list, got mapping`).
+  Generate `agent.command` as the absolute `jig` path plus the agent name,
+  with no shell metacharacters.
 
 ### `max_concurrent_agents: 0` does not drain (answers section 5.3 and section 9)
 
@@ -252,7 +253,29 @@ Section 6.4's "a test checks that a run after a change shows its own model" is
 supported directly by the log, and `session_metadata.model_name` /
 `run_history.agent_adapter` are the database side of the same fact.
 
-## Runtime fixture findings (2026-10-27)
+- `internal/gen/profile.go` — `Profile`, the two compiled profiles (fork
+  `kinged007/sortie` `v1.28.1` with `github-pr`, upstream `sortie-ai/sortie`
+  `v1.29.0` without it, schema 38/43), `ProfileFor`, `MinVersion` 1.27.0.
+- `internal/gen/loop.go` — `Loop`, `Split` (same candidate list = one loop
+  named the slug; different lists = `<slug>-<first-agent>` loops with
+  combined queries and narrowed `active_states`), `groupSuffix`.
+- `internal/gen/skeleton.tmpl` + `render.go` — the marker and digest,
+  tracker/api key indirection, literal absolute `jig agent-exec <agent>`,
+  only the block the agent kind names, first-candidate model, per-rule
+  `agent:`, `dispatch.default.template` always emitted, `Validate` rejecting
+  cross-group `next`, unknown kind/model rejection.
+- `internal/gen/defaults.go` — the shipped hook bodies per tracker kind
+  (`github` issues hooks, `github-pr` fetch hooks with no `after_run`).
+- `internal/gen/file.go` — `Status`/`Check`/`AtomicWrite`/`DocPath`/
+  `Managed`/`Manifest` for drift, `.bak` and skeleton detection.
+- `internal/gen/gen_test.go` — golden files under
+  `internal/gen/testdata/golden/fork-1.28.1/` (`-update` to rewrite),
+  `TestLoopSplitting` (queries disjoint, names `<slug>-<first-agent>`).
+- `internal/gen/shipped_test.go` — the default-config generator output is
+  the two shipped documents (section 4.1); allows only the marker line and
+  the `db_path` move.
+
+## Engine coupling fixture findings (2026-10-27)
 
 Answers the three items sections 2.7, 4.5 and 5.4 marked "to verify with a
 fixture". Full evidence in `/tmp/fixture-report.md`, harness in `/tmp/fixtures/`
