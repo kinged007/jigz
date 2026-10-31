@@ -289,6 +289,42 @@ work:
 	}
 }
 
+// TestFallbackLabelsModelError records a model failure as "model
+// unavailable", not "usage limit": model errors exhaust via
+// ExhaustedUntil too, so the exhausted arm would fire first.
+func TestFallbackLabelsModelError(t *testing.T) {
+	root := writeFallbackConfig(t)
+	docs, _, err := generateDocs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := promoteDocs(root, docs); err != nil {
+		t.Fatal(err)
+	}
+	s := fallbackSupervisor(t, root)
+	until := time.Now().Add(2 * time.Hour).Truncate(time.Second)
+	if err := machine.MarkModelExhausted(machine.StatePath(root), "main", until, "claude-sonnet-5-5", "model unavailable: unknown model xyz"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	in, views := gateViews(t, s, now)
+	if views["delivery"].Agent != "spare" {
+		t.Fatalf("gate picks %q, want spare", views["delivery"].Agent)
+	}
+	if trigger, usable := fallbackTrigger(in, in.work["delivery"], "main", now); trigger != "model unavailable" || !usable.IsZero() {
+		t.Fatalf("trigger = %q usable %v, want model unavailable with zero usable", trigger, usable)
+	}
+	s.fallbackStep(in, views, now)
+	fb, ok := s.fallback["delivery"]
+	if !ok || fb.trigger != "model unavailable" || !fb.usable.IsZero() {
+		t.Fatalf("fallback = %+v, want model-unavailable trigger with zero usable", fb)
+	}
+	w := s.statusDoc("running").Workflows[0]
+	if !strings.Contains(w.FallbackReason, "model unavailable") || strings.Contains(w.FallbackReason, "usage limit") {
+		t.Errorf("status fallback %q, want model unavailable without usage limit", w.FallbackReason)
+	}
+}
+
 // TestFallbackWaitsForIdle keeps the document while sessions run.
 func TestFallbackWaitsForIdle(t *testing.T) {
 	root := writeFallbackConfig(t)

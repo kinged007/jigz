@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/kinged007/jigz/internal/config"
@@ -746,6 +747,8 @@ func fallbackTrigger(in gateInputs, res config.Resolved, prev string, now time.T
 	_, over := candidates(res)
 	b := in.blockOf(prev, over, now)
 	switch {
+	case strings.HasPrefix(in.state.Agents[prev].Reason, "model unavailable:"):
+		return "model unavailable", time.Time{}
 	case b.exhausted:
 		return "usage limit", in.state.Agents[prev].ExhaustedUntil
 	case b.hours:
