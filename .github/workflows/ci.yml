@@ -6,7 +6,7 @@ on:
   pull_request:
     paths-ignore:
       - 'plans/**'
-      - '*.md'
+      - '**/*.md'
   schedule:
     - cron: '0 6 * * 1'
 
@@ -113,7 +113,7 @@ jobs:
             echo "canary issue already open"
             exit 0
           fi
-          gh issue create --title "New engine release needs a profile (canary $(date -u +%F))" --body "The weekly canary found an engine release without a profile. Follow the release checklist in plans/jigz/engine-interface.md section 7.8. Failing output: $(tail -5 canary.log)"
+          { echo "The weekly canary found an engine release without a profile. Follow the release checklist in plans/jigz/engine-interface.md section 7.8."; echo; echo "Failing output:"; echo '```'; cat canary.log; echo '```'; } > body.md; gh issue create --title "New engine release needs a profile (canary $(date -u +%F))" --body-file body.md --label engine-canary
 
   build:
     runs-on: ubuntu-latest
