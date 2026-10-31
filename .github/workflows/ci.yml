@@ -31,7 +31,7 @@ jobs:
           fi
 
       - name: vet
-        run: go vet ./...
+        run: go vet -tags 'acceptance contract' ./...
 
       # TestSortieValidate prefers an engine binary and skips without one.
       # CI deliberately does not install one: it would run whatever engine
@@ -155,4 +155,4 @@ jobs:
           path: ~/.local/share/jigz
           key: engine-binaries-v1
       - name: contract
-        run: go test -tags contract ./...
+        run: go test -tags contract -count=1 -timeout 14m ./...
