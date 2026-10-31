@@ -110,9 +110,14 @@ func runAgentTarget(cfg *config.Config, state machine.State, statePath string, f
 		}
 		env = append(env, k+"="+v.Str)
 	}
-	// Usage-limit text is detected with the builtin patterns; a fleet
-	// agent carries no custom patterns of its own.
+	// Usage-limit text uses the machine file's limits block when it
+	// loads; a fleet agent carries no custom patterns of its own.
 	mine := &machine.Config{}
+	if path, err := machine.DefaultPath(); err == nil {
+		if c, err := machine.Load(path); err == nil {
+			mine = c
+		}
+	}
 	detect := func(line string, isStderr bool) (time.Time, string, bool) {
 		return mine.DetectLimit(a.Runtime, line, isStderr, time.Now())
 	}
