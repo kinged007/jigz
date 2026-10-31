@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kinged007/jigz/internal/engine"
 	"github.com/kinged007/jigz/internal/fakegithub"
@@ -232,9 +233,12 @@ func TestContractNewestRelease(t *testing.T) {
 	if os.Getenv("CONTRACT_CANARY") == "" {
 		t.Skip("canary only")
 	}
-	for _, p := range Profiles() {
+	profiles := Profiles()
+	unknown := 0
+	for _, p := range profiles {
 		tag := newestRelease(t, p.Repo)
 		if tag == "" {
+			unknown++
 			continue
 		}
 		if compareVersion(tag, p.Version) <= 0 {
@@ -242,7 +246,8 @@ func TestContractNewestRelease(t *testing.T) {
 		}
 		bin, err := engine.Fetch(engine.Spec{Repo: p.Repo, Tag: tag})
 		if err != nil {
-			t.Skipf("cannot download %s@%s: %v", p.Repo, tag, err)
+			t.Errorf("cannot download %s@%s: %v", p.Repo, tag, err)
+			continue
 		}
 		caps := engine.Probe(bin)
 		if !caps.Known() {
@@ -254,13 +259,17 @@ func TestContractNewestRelease(t *testing.T) {
 		}
 		t.Errorf("new engine release %s@%s (profiled: %s): add a profile row, schema fixture and contract run per section 7.8", p.Repo, tag, p.Version)
 	}
+	if unknown == len(profiles) {
+		t.Skip("releases API unreachable, newest tag unknown")
+	}
 }
 
 // newestRelease returns the newest release tag of a repository, or ""
 // when the network is unavailable.
 func newestRelease(t *testing.T, repo string) string {
 	t.Helper()
-	resp, err := http.Get("https://api.github.com/repos/" + repo + "/releases/latest")
+	client := http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get("https://api.github.com/repos/" + repo + "/releases/latest")
 	if err != nil {
 		t.Logf("releases API unreachable: %v", err)
 		return ""
