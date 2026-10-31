@@ -115,7 +115,7 @@ work:
     query_filter: "label:in-progress -label:needs-human"
     rules:
       - { name: plan, match: { labels: [agent:plan] }, prompt: prompts/plan.md, agent: planner, next: chain }
-      - { name: chain, stage: stage-build, prompt: prompts/build.md, agent: builder }
+      - { name: chain, match: { labels: [agent:build] }, stage: stage-build, prompt: prompts/build.md, agent: builder }
 `)
 	loops = Split(cfg.Resolve()["delivery"], cfg.Agents)
 	if len(loops) != 2 {

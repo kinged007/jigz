@@ -173,15 +173,20 @@ func combine(base string, labels []string) string {
 	return strings.Join(keep, " ")
 }
 
-// CheckOverlap rejects a split whose loops share a rule label: their
-// combined queries would claim the same item, and no active_states
-// narrowing can separate identical queries.
+// CheckOverlap rejects a split whose loops share a rule label or whose
+// loop has no rule labels: their combined queries would claim the same
+// item, and no active_states narrowing can separate identical queries.
+// A split loop with no labels keeps the base query minus its label
+// clauses, which matches every other loop's items.
 func CheckOverlap(loops []Loop) error {
 	if len(loops) < 2 {
 		return nil
 	}
 	seen := map[string]string{}
 	for _, l := range loops {
+		if len(labelsOf(l.Rules)) == 0 {
+			return fmt.Errorf("gen: loop %s has no match.labels; give each split loop its own labels", l.Name)
+		}
 		for _, r := range l.Rules {
 			for _, lb := range r.Labels {
 				if other, ok := seen[lb]; ok && other != l.Name {

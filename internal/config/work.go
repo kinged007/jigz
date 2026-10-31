@@ -584,6 +584,51 @@ func (c *Config) validateWorkEntry(slug string) error {
 			return fmt.Errorf("%s.rules[%d].next: %q does not name a later rule of %s", key, i, r.Next, key)
 		}
 	}
+	// A split entry runs one loop per candidate list with the base
+	// query narrowed to the loop's labels (see gen.Split): a loop with
+	// no labels keeps the un-narrowed query and claims every other
+	// loop's items, so each group needs its own labels.
+	groups := map[string][]int{}
+	var order []string
+	for i, r := range w.Rules {
+		names := r.Agent.Names
+		if len(names) == 0 {
+			names = w.Agent
+		}
+		gkey := strings.Join(c.expand(names), "\x00")
+		if _, ok := groups[gkey]; !ok {
+			order = append(order, gkey)
+		}
+		groups[gkey] = append(groups[gkey], i)
+	}
+	if len(groups) > 1 {
+		seen := map[string]int{}
+		for _, gkey := range order {
+			idxs := groups[gkey]
+			var labels []string
+			for _, i := range idxs {
+				labels = append(labels, w.Rules[i].Match.Labels...)
+			}
+			if len(labels) == 0 {
+				return fmt.Errorf("%s.rules[%d].match.labels is required when rules use different agents (each split loop needs its own labels)", key, idxs[0])
+			}
+			// A repeat within one group stays in one loop, so only
+			// labels seen in an earlier group collide.
+			uniq := map[string]bool{}
+			for _, lb := range labels {
+				if uniq[lb] {
+					continue
+				}
+				uniq[lb] = true
+				if other, ok := seen[lb]; ok {
+					return fmt.Errorf("%s.rules[%d].match.labels: %q is also in rules[%d]; give each split loop its own labels", key, idxs[0], lb, other)
+				}
+			}
+			for lb := range uniq {
+				seen[lb] = idxs[0]
+			}
+		}
+	}
 	return nil
 }
 
