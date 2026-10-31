@@ -464,7 +464,7 @@ func isSecretName(name string) bool {
 	return false
 }
 
-var slugRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*$`)
+var slugRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 
 // validateModel validates the values of the new sections and every
 // cross-reference between them. Error messages name the field path.
@@ -532,7 +532,7 @@ func (c *Config) validateWorkEntry(slug string) error {
 	key := "work." + slug
 	w := c.Work[slug]
 	if !slugRe.MatchString(slug) {
-		return fmt.Errorf("%s: work names are letters, digits and \"-\"", key)
+		return fmt.Errorf("%s: work names are letters, digits, \"-\" and \"_\"", key)
 	}
 	if w.Tracker != nil {
 		if err := validateTracker(*w.Tracker, key+".tracker"); err != nil {
