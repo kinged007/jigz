@@ -114,6 +114,8 @@ func generationChecks(root string) []validateCheck {
 			checks = append(checks, validateCheck{Name: "generation:" + n, OK: true})
 		case r == "unmanaged":
 			checks = append(checks, validateCheck{Name: "generation:" + n, OK: true, Output: "unmanaged: Jigz neither generates nor overwrites this document"})
+		case strings.HasPrefix(r, "offline:"):
+			checks = append(checks, validateCheck{Name: "generation:" + n, OK: true, Output: r + ": the loop stays offline and Jigz leaves its document alone"})
 		default:
 			checks = append(checks, validateCheck{Name: "generation:" + n, OK: false, Error: r})
 		}

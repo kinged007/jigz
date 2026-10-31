@@ -333,6 +333,94 @@ work:
 	}
 }
 
+// TestOfflineAndStandbyPassValidate keeps intended-offline loops and
+// standby rewrites green: unsupported kinds report "offline:*" and pass
+// like unmanaged, and a standby candidate's render is not drift.
+func TestOfflineAndStandbyPassValidate(t *testing.T) {
+	root := writeGenConfig(t, `repo: owner/repo
+engine: { repo: sortie-ai/sortie, version: v1.29.0 }
+tracker:
+  kind: github
+  api_key: { from_env: JIG_TEST_TOKEN }
+  project: owner/repo
+  in_progress_state: in-progress
+  handoff_state: agent:done
+agents:
+  pi-api: { runtime: pi, model: sonnet }
+work:
+  issues:
+    query_filter: "label:agent:build,in-progress -label:needs-human"
+    agent: pi-api
+    rules:
+      - { name: build, match: { labels: [agent:build] }, prompt: prompts/build.md }
+`)
+	reports, err := driftReports(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(reports["issues"], "offline:") {
+		t.Fatalf("report = %q, want offline:*", reports["issues"])
+	}
+	for _, c := range generationChecks(root) {
+		if c.Name == "generation:issues" && !c.OK {
+			t.Fatalf("offline loop fails validate: %+v", c)
+		}
+	}
+
+	// Standby: two candidates of the same supported kind, disk holding
+	// the non-primary render.
+	root = writeGenConfig(t, `repo: owner/repo
+tracker:
+  kind: github
+  api_key: { from_env: JIG_TEST_TOKEN }
+  project: owner/repo
+  in_progress_state: in-progress
+  handoff_state: agent:done
+agents:
+  builder: { runtime: claude-code, model: claude-haiku-5-5 }
+  spare: { runtime: claude-code, model: claude-sonnet-5-5 }
+work:
+  delivery:
+    query_filter: "label:in-progress -label:needs-human"
+    agent: [builder, spare]
+    rules:
+      - { name: build, match: { labels: [agent:build] }, prompt: prompts/build.md }
+`)
+	docs, _, err := generateDocs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := promoteDocs(root, docs); err != nil {
+		t.Fatal(err)
+	}
+	s := testSupervisor(t, root)
+	s.refreshWork("test")
+	loop := s.genLoops["delivery"]
+	prof := s.genProf["delivery"]
+	jigPath, err := selfExe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	standby, ok := loop.ForAgent(s.agents, "spare")
+	if !ok {
+		t.Fatal("spare is not a candidate")
+	}
+	text, err := gen.Render(prof, standby, s.agents, jigPath, defaultPrompt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gen.AtomicWrite(gen.DocPath(root, "delivery"), text); err != nil {
+		t.Fatal(err)
+	}
+	reports, err = driftReports(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reports["delivery"] != "" {
+		t.Errorf("standby render reports drift: %q", reports["delivery"])
+	}
+}
+
 // TestValidateDocsEngine runs the rendered document through the real
 // fork engine: valid with no warnings.
 func TestValidateDocsEngine(t *testing.T) {

@@ -263,8 +263,10 @@ func promptRefs(text []byte) []string {
 
 // driftReports re-renders the managed loops and compares with the files
 // on disk without writing anything. The report maps loop to "" when
-// clean, "missing" when the file is absent, "unmanaged" for entries
-// Jigz does not own, and a short diff otherwise.
+// clean (including a standby candidate's render the supervisor wrote
+// at idle), "missing" when the file is absent, "unmanaged" for entries
+// Jigz does not own, "offline:" for kinds the engine profile does not
+// support, and a short diff otherwise.
 func driftReports(root string) (map[string]string, error) {
 	out := map[string]string{}
 	cfg, err := config.Load(root)
@@ -305,6 +307,28 @@ func driftReports(root string) (map[string]string, error) {
 			st, disk, want, err := gen.Check(gen.DocPath(root, l.Name), true, func() ([]byte, error) { return text, nil })
 			if err != nil {
 				return nil, fmt.Errorf("loop %s: %w", l.Name, err)
+			}
+			if st == gen.Drift && disk != nil {
+				// The supervisor rewrites the document for a standby
+				// agent at idle; disk holding another candidate's
+				// render is not a hand edit.
+				for _, name := range l.Agents {
+					if name == l.Agent {
+						continue
+					}
+					alt, ok := l.ForAgent(cfg.Agents, name)
+					if !ok || (alt.Runtime != "" && !p.SupportsAgent(alt.Runtime)) {
+						continue
+					}
+					altText, err := gen.Render(p, alt, cfg.Agents, jigPath, defaultPrompt)
+					if err != nil {
+						continue
+					}
+					if string(disk) == string(altText) {
+						st = gen.Clean
+						break
+					}
+				}
 			}
 			switch st {
 			case gen.Clean:
