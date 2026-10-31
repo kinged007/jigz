@@ -415,7 +415,6 @@ func (s *supervisor) reload() {
 	s.mu.Lock()
 	s.sleepCfg = cfg.Sleep
 	s.mu.Unlock()
-	s.reloadBudgets(cfg.Budgets())
 	s.reloadCleanup(cfg)
 	old := s.querySnapshot()
 	s.refreshState(s.clock(), true)
@@ -425,16 +424,26 @@ func (s *supervisor) reload() {
 			s.recycleDrain(name)
 		}
 	}
-	s.mergeDiscoveredDefs()
+	added := s.mergeDiscoveredDefs()
+	// Budgets follow the converged loop set: a dropped loop's budget
+	// goes with it instead of polling a def that is gone.
+	s.reloadBudgets(cfg.Budgets())
+	// The boot path: startAll starts what the gate leaves open and
+	// holds the rest for the tick to start.
+	if err := s.startAll(added); err != nil {
+		fmt.Fprintln(os.Stderr, "jig:", err)
+	}
 	s.republish()
 	fmt.Fprintln(os.Stderr, "jig: reloaded config")
 }
 
-// mergeDiscoveredDefs picks up loop documents that appeared since boot:
-// generation on reload writes them, and the supervisor starts them
-// through the gate like any other loop. Removed documents keep their
-// running loops; deleting a loop is a stop.
-func (s *supervisor) mergeDiscoveredDefs() {
+// mergeDiscoveredDefs picks up loop documents that appeared since boot
+// and drops the loops whose work entry is gone: it returns the added
+// names so the caller starts them through the same path as boot. A
+// dropped loop stops at once; without work entries there is nothing
+// to converge to, so installed documents only accumulate.
+func (s *supervisor) mergeDiscoveredDefs() []string {
+	var added []string
 	for _, d := range listWorkflows(s.root) {
 		s.mu.Lock()
 		_, ok := s.defs[d.name]
@@ -443,9 +452,54 @@ func (s *supervisor) mergeDiscoveredDefs() {
 		}
 		s.mu.Unlock()
 		if !ok {
-			fmt.Fprintf(os.Stderr, "jig: %s: new loop document, starting\n", d.name)
+			added = append(added, d.name)
+			fmt.Fprintf(os.Stderr, "jig: %s: new loop document\n", d.name)
 		}
 	}
+	s.mu.Lock()
+	dropped := map[string]bool{}
+	if len(s.work) > 0 {
+		fresh := map[string]bool{}
+		for _, n := range added {
+			fresh[n] = true
+		}
+		for name := range s.defs {
+			// A document discovered in this merge never had a work
+			// entry deleted from under it; only a loop the run
+			// already knew can have lost its entry.
+			if fresh[name] {
+				continue
+			}
+			if _, ok := s.work[name]; !ok {
+				dropped[name] = true
+				delete(s.defs, name)
+				delete(s.disabled, name)
+				delete(s.gateHeld, name)
+				delete(s.gone, name)
+				delete(s.budgets, name)
+				delete(s.budgetStates, name)
+				delete(s.budgetUse, name)
+				delete(s.budgetPolled, name)
+				delete(s.budgetReadErr, name)
+				if p := s.procs[name]; p != nil {
+					p.stopping, p.drain, p.recycle = true, false, false
+				}
+			}
+		}
+	}
+	s.mu.Unlock()
+	for name := range dropped {
+		s.terminate(name)
+		fmt.Fprintf(os.Stderr, "jig: %s: work entry removed, stopping\n", name)
+	}
+	var kept []string
+	for _, name := range added {
+		if !dropped[name] {
+			kept = append(kept, name)
+		}
+	}
+	sort.Strings(kept)
+	return kept
 }
 
 func (s *supervisor) reloadBudgets(budgets map[string]config.Budget) {
