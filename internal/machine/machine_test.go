@@ -329,6 +329,8 @@ func TestDetectLimit(t *testing.T) {
 		{"pi nested", "pi", `{"type":"turn_end","message":{"role":"assistant","stopReason":"error","errorMessage":"insufficient_quota"}}`, false, true, now.Add(time.Hour)},
 		{"pi top level", "pi", `{"stopReason":"error","errorMessage":"429 quota exceeded"}`, false, true, now.Add(time.Hour)},
 		{"stderr", "pi", `Error: usage limit reached|{epoch}`, true, true, now.Add(2 * time.Hour)},
+		{"stderr quota error", "pi", `Error: quota exceeded`, true, true, now.Add(time.Hour)},
+		{"stderr warning prose", "pi", `warning: registry proxy reported quota exceeded, retrying`, true, false, time.Time{}},
 		{"claude overloaded", "claude-code", `{"type":"result","is_error":true,"result":"Overloaded"}`, false, false, time.Time{}},
 		{"claude 529", "claude-code", `{"type":"result","is_error":true,"result":"API Error: 529 overloaded_error"}`, false, false, time.Time{}},
 		{"claude 429", "claude-code", `{"type":"system","subtype":"api_retry","error":"rate_limit","status":429}`, false, false, time.Time{}},

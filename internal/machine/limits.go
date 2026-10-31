@@ -22,13 +22,33 @@ var BuiltinModelError = regexp.MustCompile(`(?i)model not found|unknown model|in
 // recorded engine logs show new variants.
 func IsModelError(runtime, line string, stderr bool) (string, bool) {
 	text := line
-	if !stderr {
+	if stderr {
+		text = stderrError(runtime, line)
+	} else {
 		text = stdoutError(runtime, line)
 	}
 	if text == "" || !BuiltinModelError.MatchString(text) {
 		return "", false
 	}
 	return strings.TrimSpace(text), true
+}
+
+// stderrErrorRe matches CLI-error framing on a stderr line. Stdout is
+// already scoped to error events; stderr needs the same gate so routine
+// tool warnings mentioning a limit phrase do not exhaust the agent.
+var stderrErrorRe = regexp.MustCompile(`(?i)\berror\b|\bfailed\b|\bfailure\b|\bfatal\b|\b[45]\d\d\b`)
+
+// stderrError returns the error text of a stderr line, or "" when the
+// line is not error-shaped. JSON error events count on either stream;
+// otherwise the line must carry CLI-error framing.
+func stderrError(runtime, line string) string {
+	if s := stdoutError(runtime, line); s != "" {
+		return s
+	}
+	if !stderrErrorRe.MatchString(line) {
+		return ""
+	}
+	return strings.TrimSpace(line)
 }
 
 var (
@@ -42,7 +62,9 @@ var (
 // message.
 func (c *Config) DetectLimit(runtime, line string, stderr bool, now time.Time) (until time.Time, reason string, limited bool) {
 	text := line
-	if !stderr {
+	if stderr {
+		text = stderrError(runtime, line)
+	} else {
 		text = stdoutError(runtime, line)
 	}
 	if text == "" || !c.isLimit(text) {

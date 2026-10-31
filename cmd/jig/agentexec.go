@@ -189,7 +189,7 @@ func spawnAgentChild(stdin io.Reader, stdout, stderr io.Writer, fail func(int, s
 				if err := machine.MarkExhausted(statePath, markName, until, reason); err != nil {
 					fmt.Fprintln(stderr, "jig agent-exec: warning:", err)
 				}
-				fmt.Fprintf(stderr, "jig agent-exec: %s hit a usage limit; exhausted until %s\n", displayName, until.Format(time.RFC3339))
+				fmt.Fprintf(stderr, "jig agent-exec: %s hit a usage limit; exhausted until %s: %s\n", displayName, until.Format(time.RFC3339), reason)
 			})
 			return
 		}
@@ -199,7 +199,7 @@ func spawnAgentChild(stdin io.Reader, stdout, stderr io.Writer, fail func(int, s
 				if err := machine.MarkExhausted(statePath, markName, modelCooldown, "model unavailable: "+msg); err != nil {
 					fmt.Fprintln(stderr, "jig agent-exec: warning:", err)
 				}
-				fmt.Fprintf(stderr, "jig agent-exec: %s: model unavailable, exhausted until %s\n", displayName, modelCooldown.Format(time.RFC3339))
+				fmt.Fprintf(stderr, "jig agent-exec: %s: model unavailable, exhausted until %s: %s\n", displayName, modelCooldown.Format(time.RFC3339), msg)
 			})
 		}
 	}
