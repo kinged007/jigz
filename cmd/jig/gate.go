@@ -600,6 +600,7 @@ func (s *supervisor) fallbackStep(in gateInputs, views map[string]loopView, now 
 		prof, pok := s.genProf[l.name]
 		cur, seen := s.docAgent[l.name]
 		st := s.pickCnt[l.name]
+		_, fb := s.fallback[l.name]
 		s.mu.Unlock()
 		if !lok || !pok {
 			continue
@@ -613,6 +614,15 @@ func (s *supervisor) fallbackStep(in gateInputs, views map[string]loopView, now 
 				s.docAgent[l.name] = cur
 			}
 			s.mu.Unlock()
+		}
+		if fb && v.Agent == cur {
+			// Reload re-renders for the primary behind docAgent's
+			// back; disk says primary while memory says standby, so
+			// the pick looks settled and the exhausted primary keeps
+			// the loop. Re-render for cur at idle.
+			if s.reconcileDoc(l.name, cur, loop, prof) {
+				continue
+			}
 		}
 		if v.Agent == cur {
 			if st.agent != "" {
@@ -643,6 +653,43 @@ func (s *supervisor) fallbackStep(in gateInputs, views map[string]loopView, now 
 		}
 		s.rewriteAgent(l.name, v.Agent, cur, loop, prof, res, in, now)
 	}
+}
+
+// reconcileDoc re-renders the loop's document for the agent docAgent
+// records when disk drifted (reload renders for the primary behind a
+// standby failover's back). It reports whether it rewrote the file; the
+// caller skips the pick logic, since memory and disk agree again. A
+// busy loop keeps its document until it goes idle.
+func (s *supervisor) reconcileDoc(name, cur string, loop gen.Loop, p gen.Profile) bool {
+	s.mu.Lock()
+	agents := s.agents
+	_, running := s.procs[name]
+	s.mu.Unlock()
+	if running && !s.noSession(name) {
+		return false
+	}
+	newLoop, ok := loop.ForAgent(agents, cur)
+	if !ok || !p.SupportsAgent(newLoop.Runtime) {
+		return false
+	}
+	jigPath, err := selfExe()
+	if err != nil {
+		return false
+	}
+	want, err := gen.Render(p, newLoop, agents, jigPath, defaultPrompt)
+	if err != nil {
+		return false
+	}
+	disk, err := os.ReadFile(gen.DocPath(s.root, name))
+	if err != nil || string(disk) == string(want) {
+		return false
+	}
+	if err := gen.AtomicWrite(gen.DocPath(s.root, name), want); err != nil {
+		fmt.Fprintln(os.Stderr, "jig:", err)
+		return false
+	}
+	fmt.Fprintf(os.Stderr, "jig: %s: restored document for %q after reload\n", name, cur)
+	return true
 }
 
 // rewriteAgent renders the loop's document for the newly picked agent

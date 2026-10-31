@@ -159,6 +159,45 @@ func TestFallbackReturnsAfterCooldown(t *testing.T) {
 	}
 }
 
+// TestFallbackSurvivesReload keeps the standby document when reload
+// re-renders for the primary behind docAgent's back.
+func TestFallbackSurvivesReload(t *testing.T) {
+	root := writeFallbackConfig(t)
+	docs, _, err := generateDocs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := promoteDocs(root, docs); err != nil {
+		t.Fatal(err)
+	}
+	s := fallbackSupervisor(t, root)
+	if err := machine.MarkExhausted(machine.StatePath(root), "main", time.Now().Add(2*time.Hour), "limit"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	in, views := gateViews(t, s, now)
+	s.fallbackStep(in, views, now)
+	if got := docText(t, root, "delivery"); !strings.Contains(got, "agent-exec spare") {
+		t.Fatalf("not on spare:\n%s", got)
+	}
+	// Reload re-renders every managed loop for the primary.
+	docs, _, err = generateDocs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := promoteDocs(root, docs); err != nil {
+		t.Fatal(err)
+	}
+	if got := docText(t, root, "delivery"); !strings.Contains(got, "agent-exec main") {
+		t.Fatalf("reload did not clobber the fixture:\n%s", got)
+	}
+	in, views = gateViews(t, s, now.Add(2*time.Second))
+	s.fallbackStep(in, views, now.Add(2*time.Second))
+	if got := docText(t, root, "delivery"); !strings.Contains(got, "agent-exec spare") {
+		t.Errorf("standby document lost after reload:\n%s", got)
+	}
+}
+
 // TestFallbackRigRewritesAndReturns drives the whole supervisor path on
 // a fake clock: exhaustion moves the document to the standby at idle,
 // and the primary returns after the pick survives consecutive ticks.
