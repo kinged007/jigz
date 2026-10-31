@@ -1,30 +1,19 @@
-// Package config resolves Jigz's settings from its YAML file:
-// which repositories run, which of each repository's workflows start,
-// and the agent settings they run with.
-//
-// Every optional knob is a pointer so "not configured" stays distinct
-// from "configured to the zero value". An unset knob is left out of
-// the generated per-repository files and the child environment
-// entirely, so Jigz and the engine apply their own
-// shipped default rather than one restated here. This package
-// deliberately holds no defaults of its own: a default belongs to the
-// thing it defaults, and restating it here is how the two drift.
+// Package config holds the dashboard's per-repository DTO and the github
+// block. Per-repository files under .jigz/ are the source of truth;
+// there is no fleet-wide cascade.
 package config
 
 import (
 	"fmt"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/kinged007/jigz/internal/dirs"
 )
 
 // Agent holds the agent settings one repository's loops run with. A
-// nil field is unset and inherits from Defaults, or from the engine's
-// own default when neither sets it.
+// nil field is unset and left out of generated files and the child
+// environment, so the engine applies its own shipped default.
 type Agent struct {
 	// Kind selects the sortie agent adapter (pi, claude-code, ...).
 	Kind    string `yaml:"kind"`
@@ -42,21 +31,6 @@ type Agent struct {
 	StallTimeoutMS      *int `yaml:"stall_timeout_ms"`
 	StopGraceMS         *int `yaml:"stop_grace_ms"`
 	MaxRetryBackoffMS   *int `yaml:"max_retry_backoff_ms"`
-}
-
-// Defaults applies to every repository that does not override the
-// knob.
-type Defaults struct {
-	Assignee  *string `yaml:"assignee"`
-	Milestone string  `yaml:"milestone"`
-	// TokenEnv is the environment variable holding the tracker token
-	// for any repository that does not name its own. It is a variable
-	// name, never a token: the value stays in the environment and is
-	// never written to a file by this program.
-	TokenEnv string `yaml:"token_env"`
-	Agent    Agent  `yaml:"agent"`
-	// PollingIntervalMS is how often a loop asks the tracker for work.
-	PollingIntervalMS *int `yaml:"polling_interval_ms"`
 }
 
 // Repo is one managed repository.
@@ -124,39 +98,6 @@ var knobEnv = map[string]string{
 	"model":                 "",
 }
 
-// repoSettings reads the repository-level knobs, skipping every unset
-// one so it never reaches a file or the environment.
-func repoSettings(a Agent, polling *int) Settings {
-	s := Settings{}
-	for k, v := range map[string]string{
-		"kind":    a.Kind,
-		"command": a.Command,
-		"model":   a.Model,
-	} {
-		if v != "" {
-			s[k] = v
-		}
-	}
-	for k, v := range map[string]*int{
-		"max_turns":             a.MaxTurns,
-		"max_concurrent_agents": a.MaxConcurrentAgents,
-		"turn_timeout_ms":       a.TurnTimeoutMS,
-		"read_timeout_ms":       a.ReadTimeoutMS,
-		"stall_timeout_ms":      a.StallTimeoutMS,
-		"stop_grace_ms":         a.StopGraceMS,
-		"max_retry_backoff_ms":  a.MaxRetryBackoffMS,
-		"polling_interval_ms":   polling,
-	} {
-		if v != nil {
-			s[k] = fmt.Sprint(*v)
-		}
-	}
-	return s
-}
-
-// workflowSettings reads one workflow's own knobs.
-func workflowSettings(w Workflow) Settings { return repoSettings(w.Agent, w.PollingIntervalMS) }
-
 // FileSettings returns the knob values that must be written into one
 // workflow's front matter: the repository value for every knob any
 // workflow overrides, with this workflow's own value winning.
@@ -196,13 +137,6 @@ func (r Resolved) OverriddenKnobs() map[string]bool {
 		}
 	}
 	return out
-}
-
-// Access holds the keys of an access block from an older config. They are
-// accepted so that the file still loads, and have no effect.
-type Access struct {
-	PublicRead   bool `yaml:"public_read"`
-	TrustedProxy bool `yaml:"trusted_proxy"`
 }
 
 // GitHub is the github block: the optional enrichment of run history from
@@ -315,39 +249,27 @@ func (g GitHub) validate() *FieldError {
 	return nil
 }
 
-// Config is a loaded Jigz config.
-type Config struct {
-	Access   Access   `yaml:"access"`
-	GitHub   GitHub   `yaml:"github"`
-	Defaults Defaults `yaml:"defaults"`
-	Repos    []Repo   `yaml:"repos"`
-	// StateDir is the root under which per-repository state lives.
-	StateDir string `yaml:"state_dir"`
-}
-
-// Resolved is one repository's settings with the defaults cascade
-// applied: what to run, where, and what environment its Jigz
-// child needs.
+// Resolved is one repository's settings: what to run, where, and what
+// environment its loops need.
 type Resolved struct {
 	Repo Repo
 	// Dir is where this repository's .jigz/ goes.
 	Dir string
-	// Workflows is the resolved loop set. Empty means every installed
-	// workflow, passed through as an unset JIG_ONLY.
+	// Workflows is the loop set. Empty means every installed workflow.
 	Workflows []string
-	// Milestone and Assignee are the cascade-resolved tracker scope.
+	// Milestone and Assignee scope the tracker query.
 	// Assignee nil means "leave it to Jigz".
 	Milestone string
 	Assignee  *string
-	// TokenEnv is the cascade-resolved environment variable holding the
+	// TokenEnv is the environment variable holding the
 	// tracker token, empty to fall back to the engine's own lookup.
 	TokenEnv string
-	// Agent is the cascade-resolved agent settings.
+	// Agent is the agent settings.
 	Agent Agent
-	// PollingIntervalMS is the cascade-resolved poll interval, nil when
+	// PollingIntervalMS is the poll interval, nil when
 	// unset.
 	PollingIntervalMS *int
-	// Knobs is the cascade-resolved repository-level knobs, normalized.
+	// Knobs is the repository-level knobs, normalized.
 	Knobs Settings
 	// Overrides holds each workflow's own knobs. A nil entry means the
 	// workflow takes the repository values.
@@ -367,151 +289,6 @@ type FieldError struct {
 func (e *FieldError) Error() string { return e.Err.Error() }
 func (e *FieldError) Unwrap() error { return e.Err }
 
-// validate rejects a repository Jigz cannot run. These are checked
-// at load time so a typo in a config that supervises live issue
-// backlogs surfaces immediately rather than at the first claim.
-func (r *Repo) validate() error {
-	slug := r.Repo
-	if parts := strings.Split(slug, "/"); len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return fmt.Errorf("%q is not owner/name", slug)
-	}
-	if strings.ContainsAny(slug, " \t") {
-		return fmt.Errorf("%q has whitespace", slug)
-	}
-	for _, w := range r.Workflows {
-		if strings.TrimSpace(w) == "" {
-			return fmt.Errorf("%s: empty workflow name", slug)
-		}
-	}
-	// Workflow names are not checked against a known set: Jigz does
-	// not ship the workflows, so it cannot know their names, and a
-	// stale list here would reject a name Jigz still supports.
-	// Jigz fails loudly on an unknown name at start.
-	return nil
-}
-
-// Dir returns the directory holding this repository's .jigz/.
-func (c *Config) Dir(r Repo) (string, error) {
-	if r.Path == "" {
-		state, err := c.stateDir()
-		if err != nil {
-			return "", err
-		}
-		return filepath.Join(state, "repos", filepath.FromSlash(r.Repo)), nil
-	}
-	abs, err := filepath.Abs(expandHome(r.Path))
-	if err != nil {
-		return "", fmt.Errorf("%s: path: %w", r.Repo, err)
-	}
-	return abs, nil
-}
-
-// stateDir is the configured root, or the per-user default.
-func (c *Config) stateDir() (string, error) {
-	p := c.StateDir
-	if p == "" {
-		home, err := dirs.State()
-		if err != nil {
-			return "", fmt.Errorf("state_dir unset and no home directory: %w", err)
-		}
-		p = home
-	}
-	abs, err := filepath.Abs(expandHome(p))
-	if err != nil {
-		return "", fmt.Errorf("state_dir %q: %w", p, err)
-	}
-	return abs, nil
-}
-
-// StateDirPath is the state directory with the default and ~ applied.
-func (c *Config) StateDirPath() (string, error) { return c.stateDir() }
-
-// Resolve applies the defaults cascade to every repository. It fails on
-// the first bad entry so a run never starts a partial fleet.
-func (c *Config) Resolve() ([]Resolved, error) {
-	out := make([]Resolved, 0, len(c.Repos))
-	for _, r := range c.Repos {
-		dir, err := c.Dir(r)
-		if err != nil {
-			return nil, err
-		}
-		// Only the selected workflows are installed, so the set on disk
-		// is the set that starts; an empty selection installs them all.
-		res := Resolved{
-			Repo:              r,
-			Dir:               dir,
-			Workflows:         append([]string(nil), r.Workflows...),
-			Milestone:         cmp(r.Milestone, c.Defaults.Milestone),
-			TokenEnv:          cmp(r.TokenEnv, c.Defaults.TokenEnv),
-			Assignee:          firstNonNil(r.Assignee, c.Defaults.Assignee),
-			Agent:             mergeAgent(c.Defaults.Agent, r.Agent),
-			PollingIntervalMS: firstNonNil(r.PollingIntervalMS, c.Defaults.PollingIntervalMS),
-			Overrides:         map[string]Settings{},
-		}
-		res.Knobs = repoSettings(res.Agent, res.PollingIntervalMS)
-		// A workflow's own knobs are layered over the repository's, so
-		// an unset field in an override inherits instead of blanking.
-		for name, w := range r.Overrides {
-			own := workflowSettings(w)
-			if len(own) == 0 {
-				continue
-			}
-			res.Overrides[name] = own
-		}
-		out = append(out, res)
-	}
-	return out, nil
-}
-
-func mergeAgent(d, r Agent) Agent {
-	m := r
-	if m.Kind == "" {
-		m.Kind = d.Kind
-	}
-	if m.Command == "" {
-		m.Command = d.Command
-	}
-	if m.Model == "" {
-		m.Model = d.Model
-	}
-	m.MaxTurns = firstNonNil(m.MaxTurns, d.MaxTurns)
-	m.MaxConcurrentAgents = firstNonNil(m.MaxConcurrentAgents, d.MaxConcurrentAgents)
-	m.TurnTimeoutMS = firstNonNil(m.TurnTimeoutMS, d.TurnTimeoutMS)
-	m.ReadTimeoutMS = firstNonNil(m.ReadTimeoutMS, d.ReadTimeoutMS)
-	m.StallTimeoutMS = firstNonNil(m.StallTimeoutMS, d.StallTimeoutMS)
-	m.StopGraceMS = firstNonNil(m.StopGraceMS, d.StopGraceMS)
-	m.MaxRetryBackoffMS = firstNonNil(m.MaxRetryBackoffMS, d.MaxRetryBackoffMS)
-	return m
-}
-
-func firstNonNil[T any](v, fallback *T) *T {
-	if v != nil {
-		return v
-	}
-	return fallback
-}
-
-func cmp(v, fallback string) string {
-	if v != "" {
-		return v
-	}
-	return fallback
-}
-
-func expandHome(p string) string {
-	if p != "~" && !strings.HasPrefix(p, "~/") {
-		return p
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return p
-	}
-	if p == "~" {
-		return home
-	}
-	return filepath.Join(home, p[2:])
-}
-
 // Token returns this repository's tracker token. token_env names the
 // variable when a fleet loops over several bot accounts; otherwise the
 // engine's own GITHUB_TOKEN/GH_TOKEN fallback applies. The token only
@@ -524,48 +301,4 @@ func (r Resolved) Token() string {
 		return v
 	}
 	return os.Getenv("GH_TOKEN")
-}
-
-// Where a cascaded value was set.
-const (
-	OriginDefault  = "default"
-	OriginRepo     = "repo"
-	OriginWorkflow = "workflow"
-)
-
-// Knobs lists the agent settings in display order.
-var Knobs = []string{
-	"kind", "command", "model", "max_turns", "max_concurrent_agents",
-	"turn_timeout_ms", "read_timeout_ms", "stall_timeout_ms", "stop_grace_ms",
-	"max_retry_backoff_ms", "polling_interval_ms",
-}
-
-// Setting is one cascaded knob value and the scope that set it.
-type Setting struct {
-	Value  string
-	Origin string
-}
-
-// Cascade returns the knob values in force for a scope after the defaults
-// cascade, each with where it came from. An empty repo gives the defaults
-// alone, and an empty workflow stops at the repository. Knobs set nowhere
-// are absent: the engine's own default applies.
-func (c *Config) Cascade(repo, workflow string) map[string]Setting {
-	out := map[string]Setting{}
-	layer := func(s Settings, origin string) {
-		for k, v := range s {
-			out[k] = Setting{Value: v, Origin: origin}
-		}
-	}
-	layer(repoSettings(c.Defaults.Agent, c.Defaults.PollingIntervalMS), OriginDefault)
-	for _, r := range c.Repos {
-		if r.Repo != repo {
-			continue
-		}
-		layer(repoSettings(r.Agent, r.PollingIntervalMS), OriginRepo)
-		if w, ok := r.Overrides[workflow]; ok {
-			layer(workflowSettings(w), OriginWorkflow)
-		}
-	}
-	return out
 }
