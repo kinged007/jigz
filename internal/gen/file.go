@@ -78,15 +78,33 @@ func AtomicWrite(path string, text []byte) error {
 		os.Remove(tmpName)
 		return err
 	}
+	if err := os.Chmod(tmpName, 0o644); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
 	if _, err := os.Stat(path); err == nil {
 		bak := path + ".bak"
-		os.Remove(bak)
+		if err := os.Remove(bak); err != nil && !errors.Is(err, os.ErrNotExist) {
+			os.Remove(tmpName)
+			return err
+		}
 		if err := os.Rename(path, bak); err != nil {
 			os.Remove(tmpName)
 			return err
 		}
+		if err := os.Rename(tmpName, path); err != nil {
+			// Keep a live document when the final rename fails.
+			_ = os.Rename(bak, path)
+			os.Remove(tmpName)
+			return err
+		}
+		return nil
 	}
-	return os.Rename(tmpName, path)
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return nil
 }
 
 // DocPath returns the document path for a loop in the repository root.
