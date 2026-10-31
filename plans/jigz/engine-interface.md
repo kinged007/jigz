@@ -572,9 +572,8 @@ decision above is made per loop. With several sessions:
 
 ### 5.4 What needs a restart
 
-The engine re-reads the document while it runs (section 2.7; live keys were
-verified with a fixture), so most changes apply without a
-restart. The query filter is read only at start: a change of `query_filter`, of
+The engine may re-read the document while it runs (section 2.7, strings only;
+re-read scope is not proven), so the supported path is drain-and-restart. The query filter is read only at start: a change of `query_filter`, of
 the rule labels that form it, or of the assignee scope needs a drain and
 restart, which the manager performs on `jig reload` (stop at idle, start with
 the new environment). Agent changes are also made at idle, which keeps sessions
@@ -652,12 +651,23 @@ need no binary and run in `go test ./...`. Binary tests carry the build tag
 
 ### 7.2 Golden files of generated documents
 
-- `internal/gen/testdata/golden/<profile>/<case>.md`, one set per engine
-  target: default `issues` and `prs`, a pool with fallback, a `pi` agent,
-  rules with an agent array, a work entry split into two loops, a stage
-  chain in one loop, hook and prompt overrides, `managed: false`, `prs` on
-  the upstream profile (offline with reason). `go test ./internal/gen/`
-  with `-update` rewrites them; review the golden diff before committing.
+- `internal/gen/testdata/golden/<profile>/<case>.md`: the fork set is
+  default `issues` and `prs`, a pool with fallback, a `pi` agent, a work
+  entry split into two loops (the split inputs use a rule agent array), a
+  stage chain in one loop, and hook and prompt overrides; the upstream set
+  is `issues` only, because that profile registers neither `github-pr` nor
+  `pi` so those renders fail by design (`gen.Render` unsupported-kind
+  errors). `go test ./internal/gen/` with `-update` rewrites them; review
+  the golden diff before committing.
+- No goldens for `managed: false` (an unmanaged entry generates no
+  document) or for upstream `prs` offline (the generator refuses the
+  render). They are covered without goldens by
+  `cmd/jig/generate_test.go` `TestGenerateUnmanaged` (writes nothing,
+  reports `unmanaged`), `TestGenerateSkipsUnsupportedKinds` and
+  `TestOfflineAndStandbyPassValidate` (skip with reason, `offline:*`
+  passes validate), `internal/gen/negatives_test.go`
+  `TestNegativesExactText` (exact `prs` without `github-pr` text), and
+  `cmd/jig/capabilities_test.go` `TestUpstreamEngineSkipsThePRLoop`.
 - A `contract` test runs `sortie validate --format json` on every golden file
   with the matching engine and requires `valid: true` and no `unknown_key`.
 - A negative set must fail with exact text: unknown key, plain secret,
@@ -682,9 +692,9 @@ of each release: a session start, a retry start, two concurrent sessions, a
 turn, a normal end, a failed end with a retry, and a poll tick with `running`
 above 1. The test replays them into `liveTracker` and asserts sessions,
 attempts and `unaccounted`. A `contract` test searches each engine binary for
-the `msg` literals in `livelog.go`. A re-read fixture changes the agent
-command in the document while the engine runs and checks that the next session
-uses it (section 5.4).
+the `msg` literals in `livelog.go`. A live re-read check (agent command change
+while running) is aspirational, not gating; the supported path is the
+query-change drain-and-restart on `jig reload` (section 5.4, owner sign-off).
 
 ### 7.5 CLI and capability contract
 
@@ -758,7 +768,7 @@ the contract job and the other fixtures wait for phase 5.
 | --- | --- | --- |
 | A loop under continuous load never becomes idle | Agent changes and `finish` are delayed | Measure in acceptance; if needed a bounded wait, then a drain |
 | Claims between close and stop with several workers | Work starts after the gate closed | No document value stops new claims (`max_concurrent_agents: 0` means no limit). Use `finish` and accept that a draining loop claims until idle; use `stop` when the gap matters. Document the limitation. |
-| The engine's re-read scope is not proven | A live document change is ignored | The re-read fixture (7.4); restart the loop when a change is not applied |
+| The engine's re-read scope is not proven | A live document change is ignored | Drain-and-restart is the supported path; restart the loop when a change is not applied |
 | Per-kind commands unverified | Rules cannot share a loop | Separate loops (section 4.5) |
 | Hand edits to a managed document are overwritten | Lost edits | `.bak` copy, drift report, `managed: false` |
 | Two loops claim one item | Duplicate work | Label overlap validation, combined queries (section 4.5) |
