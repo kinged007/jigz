@@ -146,8 +146,9 @@ func (c *Config) Budgets() map[string]Budget {
 	return out
 }
 
-// CheckBudgets fails when a work entry with a budget names a slug that
-// has no WORKFLOW.<slug>.md file.
+// CheckBudgets fails when a work entry with a budget has no workflow
+// document: either WORKFLOW.<slug>.md or, for a split entry, one of its
+// WORKFLOW.<slug>-*.md loops.
 func (c *Config) CheckBudgets() error {
 	names := make([]string, 0, len(c.Work))
 	for n := range c.Work {
@@ -158,9 +159,13 @@ func (c *Config) CheckBudgets() error {
 		if c.Work[n].Budget == nil {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(c.Dir, ".jigz", "workflows", "WORKFLOW."+n+".md")); err != nil {
-			return fmt.Errorf("work.%s: no WORKFLOW.%s.md in .jigz/workflows", n, n)
+		if _, err := os.Stat(filepath.Join(c.Dir, ".jigz", "workflows", "WORKFLOW."+n+".md")); err == nil {
+			continue
 		}
+		if matches, _ := filepath.Glob(filepath.Join(c.Dir, ".jigz", "workflows", "WORKFLOW."+n+"-*.md")); len(matches) > 0 {
+			continue
+		}
+		return fmt.Errorf("work.%s: no WORKFLOW.%s.md in .jigz/workflows", n, n)
 	}
 	return nil
 }

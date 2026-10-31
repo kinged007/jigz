@@ -216,17 +216,38 @@ func (s *supervisor) stateLocked(name string) *budgetState {
 
 // initBudget loads the saved state and applies the current period before
 // any child starts, so a workflow that is over its cap is never started.
+// Budgets arrive keyed by work slug; loops run under split names, so an
+// entry budget fans out to each of its loops through genLoops.
 func (s *supervisor) initBudget(budgets map[string]config.Budget) {
 	s.mu.Lock()
-	s.budgets = map[string]config.Budget{}
-	for n, b := range budgets {
-		if _, ok := s.defs[n]; ok && b.MaxTokens > 0 {
-			s.budgets[n] = b
-		}
-	}
+	s.budgets = s.expandBudgetsLocked(budgets)
 	s.budgetStates = loadBudgetStates(s.root)
 	s.mu.Unlock()
 	s.budgetPoll(true)
+}
+
+// expandBudgetsLocked maps entry budgets to the loops that run them: the
+// loop itself when unsplit, or each split loop whose entry is the slug.
+// The caller holds s.mu.
+func (s *supervisor) expandBudgetsLocked(budgets map[string]config.Budget) map[string]config.Budget {
+	out := map[string]config.Budget{}
+	for slug, b := range budgets {
+		if b.MaxTokens <= 0 {
+			continue
+		}
+		if _, ok := s.defs[slug]; ok {
+			out[slug] = b
+		}
+		for name, l := range s.genLoops {
+			if l.Entry.Slug != slug {
+				continue
+			}
+			if _, ok := s.defs[name]; ok {
+				out[name] = b
+			}
+		}
+	}
+	return out
 }
 
 func (s *supervisor) isPaused(name string) bool {

@@ -504,12 +504,7 @@ func (s *supervisor) mergeDiscoveredDefs() []string {
 
 func (s *supervisor) reloadBudgets(budgets map[string]config.Budget) {
 	s.mu.Lock()
-	filtered := map[string]config.Budget{}
-	for n, b := range budgets {
-		if _, ok := s.defs[n]; ok && b.MaxTokens > 0 {
-			filtered[n] = b
-		}
-	}
+	filtered := s.expandBudgetsLocked(budgets)
 	if len(filtered) == len(s.budgets) {
 		match := true
 		for n, b := range filtered {
