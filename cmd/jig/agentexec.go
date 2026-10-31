@@ -85,7 +85,17 @@ func runAgentTarget(cfg *config.Config, state machine.State, statePath string, f
 		return fail(2, "agent %s has unknown runtime %q", name, a.Runtime)
 	}
 	if until := state.Agents[name].ExhaustedUntil; time.Now().Before(until) {
-		return fail(exitNoAgent, "agent %s is exhausted until %s", name, until.Format(time.RFC3339))
+		// An unknown-model block records the model that failed; a config
+		// change to another model clears it without waiting it out.
+		if e := state.Agents[name]; e.ModelStale(a.Model) {
+			e.ExhaustedUntil, e.Reason, e.Model = time.Time{}, "", ""
+			if err := machine.UpdateState(statePath, func(st *machine.State) { st.Agents[name] = e }); err != nil {
+				return fail(exitNoAgent, "agent %s is exhausted until %s", name, until.Format(time.RFC3339))
+			}
+			state.Agents[name] = e
+		} else {
+			return fail(exitNoAgent, "agent %s is exhausted until %s", name, until.Format(time.RFC3339))
+		}
 	}
 	var env []string
 	for _, k := range sortedKeys(a.Env) {
@@ -110,7 +120,7 @@ func runAgentTarget(cfg *config.Config, state machine.State, statePath string, f
 		return machine.IsModelError(a.Runtime, line, isStderr)
 	}
 	return spawnAgentChild(stdin, stdout, stderr, fail, machine.DefaultCommand(a.Runtime), childArgs,
-		append(os.Environ(), env...), detect, modelDetect, name, name, statePath, time.Now())
+		append(os.Environ(), env...), detect, modelDetect, name, name, a.Model, statePath, time.Now())
 }
 
 // agentExecRoot finds the repository the loop runs in: agent-exec runs
@@ -147,7 +157,7 @@ func isRepoRoot(dir string) bool {
 // spawnAgentChild runs the agent executable with the engine's arguments
 // and environment, marks the entry used, and exhausts it when the
 // output matches a usage-limit pattern. markName is the state key.
-func spawnAgentChild(stdin io.Reader, stdout, stderr io.Writer, fail func(int, string, ...any) int, command string, childArgs, env []string, detect func(string, bool) (time.Time, string, bool), modelDetect func(string, bool) (string, bool), markName, displayName, statePath string, now time.Time) int {
+func spawnAgentChild(stdin io.Reader, stdout, stderr io.Writer, fail func(int, string, ...any) int, command string, childArgs, env []string, detect func(string, bool) (time.Time, string, bool), modelDetect func(string, bool) (string, bool), markName, displayName, model, statePath string, now time.Time) int {
 	if err := machine.MarkUsed(statePath, markName, now); err != nil {
 		fmt.Fprintln(stderr, "jig agent-exec: warning:", err)
 	}
@@ -181,7 +191,10 @@ func spawnAgentChild(stdin io.Reader, stdout, stderr io.Writer, fail func(int, s
 
 	var once sync.Once
 	limited := false
-	modelCooldown := now.Add(time.Hour)
+	// An unknown model never recovers on its own: the cooldown is a
+	// placeholder far enough out that only a config change clears it.
+	modelCooldown := now.AddDate(100, 0, 0)
+	modelAgent := model
 	onLine := func(line string, isStderr bool) {
 		if until, reason, hit := detect(line, isStderr); hit {
 			once.Do(func() {
@@ -196,7 +209,7 @@ func spawnAgentChild(stdin io.Reader, stdout, stderr io.Writer, fail func(int, s
 		if msg, ok := modelDetect(line, isStderr); ok {
 			once.Do(func() {
 				limited = true
-				if err := machine.MarkExhausted(statePath, markName, modelCooldown, "model unavailable: "+msg); err != nil {
+				if err := machine.MarkModelExhausted(statePath, markName, modelCooldown, modelAgent, "model unavailable: "+msg); err != nil {
 					fmt.Fprintln(stderr, "jig agent-exec: warning:", err)
 				}
 				fmt.Fprintf(stderr, "jig agent-exec: %s: model unavailable, exhausted until %s: %s\n", displayName, modelCooldown.Format(time.RFC3339), msg)

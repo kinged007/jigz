@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -18,6 +19,9 @@ type EntryState struct {
 	ExhaustedUntil time.Time `json:"exhausted_until,omitzero"`
 	Reason         string    `json:"reason,omitempty"`
 	LastUsed       time.Time `json:"last_used,omitzero"`
+	// Model is the configured model that failed with an unknown-model
+	// error; the block holds until the config names a different one.
+	Model string `json:"model,omitempty"`
 }
 
 // LoopState is the recorded state of one loop: the agent the manager
@@ -144,12 +148,35 @@ func MarkUsed(path, name string, at time.Time) error {
 
 // MarkExhausted records that an agent hit a usage limit until the given time.
 func MarkExhausted(path, name string, until time.Time, reason string) error {
-	if r := []rune(reason); len(r) > maxReason {
-		reason = string(r[:maxReason])
-	}
 	return UpdateState(path, func(st *State) {
 		e := st.Agents[name]
-		e.ExhaustedUntil, e.Reason = until, reason
+		e.ExhaustedUntil, e.Reason, e.Model = until, trimReason(reason), ""
 		st.Agents[name] = e
 	})
+}
+
+// MarkModelExhausted records that an agent failed with an unknown-model
+// error and remembers the configured model that failed, so the block
+// holds until the config names a different model.
+func MarkModelExhausted(path, name string, until time.Time, model, reason string) error {
+	return UpdateState(path, func(st *State) {
+		e := st.Agents[name]
+		e.ExhaustedUntil, e.Reason, e.Model = until, trimReason(reason), model
+		st.Agents[name] = e
+	})
+}
+
+// ModelStale reports whether a model-unavailable block no longer holds
+// because the configured model changed since the failure. Usage-limit
+// blocks never go stale.
+func (e EntryState) ModelStale(model string) bool {
+	return strings.HasPrefix(e.Reason, "model unavailable:") && e.Model != model
+}
+
+// trimReason caps a record reason at maxReason runes.
+func trimReason(reason string) string {
+	if r := []rune(reason); len(r) > maxReason {
+		return string(r[:maxReason])
+	}
+	return reason
 }

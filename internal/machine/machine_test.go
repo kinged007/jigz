@@ -295,6 +295,8 @@ func TestIsModelError(t *testing.T) {
 		{"claude json", "claude-code", `{"type":"result","is_error":true,"result":"model not found: sonnet-x"}`, false, true},
 		{"stderr text", "claude-code", "Error: unknown model xyz", true, true},
 		{"pi nested", "pi", `{"type":"message_end","message":{"role":"assistant","stopReason":"error","errorMessage":"invalid model foo"}}`, false, true},
+		{"stderr model does not exist", "pi", "Error: model foo does not exist", true, true},
+		{"stderr model file prose is not a model error", "pi", "Error: model file foo does not exist", true, false},
 		{"usage text is not a model error", "claude-code", `{"type":"result","is_error":true,"result":"usage limit reached"}`, false, false},
 		{"plain output is not a model error", "pi", "hello", false, false},
 	}

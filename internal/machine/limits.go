@@ -13,8 +13,9 @@ var BuiltinLimit = regexp.MustCompile(`(?i)usage limit|limit reached|limit exhau
 // BuiltinModelError matches a CLI line reporting an unknown or
 // unavailable model. The per-CLI message catalog grows as recorded
 // engine logs show new wordings; the gate treats a hit like a usage
-// limit so the standby takes over.
-var BuiltinModelError = regexp.MustCompile(`(?i)model not found|unknown model|invalid model|model .* does not exist|no such model`)
+// limit so the standby takes over. The does-not-exist wording takes a
+// single token so "model file foo does not exist" prose does not match.
+var BuiltinModelError = regexp.MustCompile(`(?i)model not found|unknown model|invalid model|model ['"]?\S+['"]? does not exist|no such model`)
 
 // IsModelError reports whether an agent CLI line says the model is
 // unavailable, returning the message. The text is extracted the same
