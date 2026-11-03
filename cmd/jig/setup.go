@@ -287,10 +287,12 @@ func configTemplateBody(repo string) string {
 		"  handoff_state: agent:done\n" +
 		"# GitHub enrichment: lets the dashboard read pull requests for run\n" +
 		"# history and agent questions. enrich defaults to false; set it to\n" +
-		"# true to turn on run-history enrichment. The other keys are in the\n" +
-		"# README under \"GitHub settings\".\n" +
+		"# true to turn on run-history enrichment, and details to also read\n" +
+		"# commits, changed files and check runs (needs enrich). The other\n" +
+		"# keys are in the README under \"GitHub settings\".\n" +
 		"github:\n" +
 		"  enrich: false\n" +
+		"  details: false\n" +
 		"agents:\n" +
 		"  coder: { runtime: claude-code, model: claude-haiku-5-5 }\n" +
 		"work:\n" +
