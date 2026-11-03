@@ -7,3 +7,4 @@
 
 # GoReleaser output
 /dist
+/tmp/*
