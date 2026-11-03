@@ -67,8 +67,13 @@ func TestReleaseAssetNameMatchesInstaller(t *testing.T) {
 	// install.sh builds the name from the version and target; the archive
 	// template has to produce the same string.
 	sh := string(repoFile(t, "install.sh"))
-	if !strings.Contains(sh, `ASSET="jig_${VER}_${OS_ARCH}.tar.gz"`) {
+	if !strings.Contains(sh, `"jig_${VER}_${OS_ARCH}.tar.gz"`) {
 		t.Error("install.sh no longer builds the asset name .goreleaser.yaml produces")
+	}
+	// Releases up to v0.4.0 shipped under the pre-rename prefix; the
+	// installer tries the current name first, then the legacy one.
+	if !strings.Contains(sh, `"sortie-loop_${VER}_${OS_ARCH}.tar.gz"`) {
+		t.Error("install.sh lost its legacy sortie-loop_ fallback; pre-rename releases 404")
 	}
 	if g.Checksum.NameTemplate != "checksums.txt" || g.Checksum.Algorithm != "sha256" {
 		t.Errorf("checksum = %q/%q, want checksums.txt/sha256 (install.sh reads both)",

@@ -128,7 +128,6 @@ else
   fi
 
   VER="${VERSION#v}"
-  ASSET="jig_${VER}_${OS_ARCH}.tar.gz"
   if [ "$VERSION" = "$VER" ]; then
     BASE="https://github.com/${REPO}/releases/download/${VERSION}"
   else
@@ -138,9 +137,19 @@ else
   TMP="$(mktemp -d)"
   trap 'rm -rf "$TMP"' EXIT
 
-  echo ":: fetching ${ASSET} ..."
-  if ! curl -sSfL "${BASE}/${ASSET}" -o "${TMP}/${ASSET}"; then
-    echo "error: no release asset ${ASSET} at ${BASE}" >&2
+  # Releases up to v0.4.0 shipped archives as sortie-loop_<ver>_<os>_<arch>;
+  # the rename to jig_ landed after. Try the current name first, then the
+  # legacy one, so the one-liner works against both.
+  ASSET=""
+  for CAND in "jig_${VER}_${OS_ARCH}.tar.gz" "sortie-loop_${VER}_${OS_ARCH}.tar.gz"; do
+    echo ":: fetching ${CAND} ..."
+    if curl -sSfL "${BASE}/${CAND}" -o "${TMP}/${CAND}" 2>/dev/null; then
+      ASSET="$CAND"
+      break
+    fi
+  done
+  if [ -z "$ASSET" ]; then
+    echo "error: no release asset jig_${VER}_${OS_ARCH}.tar.gz (or legacy sortie-loop_ name) at ${BASE}" >&2
     echo "       use --from-source from a checkout, or --version TAG." >&2
     exit 1
   fi
@@ -164,14 +173,20 @@ else
   fi
   echo ":: checksum ok"
 
-  # The archive holds one file, jig. Extract to a staging name and
-  # move it into place so a shell starting mid-install never sees a
-  # half-written binary.
+  # The archive holds the binary (jig in current releases, sortie-loop
+  # before the rename). Extract to a staging name and move it into place
+  # so a shell starting mid-install never sees a half-written binary.
   tar -xzf "${TMP}/${ASSET}" -C "$TMP"
-  [ -f "${TMP}/jig" ] || { echo "error: archive holds no jig" >&2; exit 1; }
+  if [ -f "${TMP}/jig" ]; then
+    STAGED="${TMP}/jig"
+  elif [ -f "${TMP}/sortie-loop" ]; then
+    STAGED="${TMP}/sortie-loop"
+  else
+    echo "error: archive holds no jig binary" >&2; exit 1
+  fi
   mkdir -p "$BIN_DIR"
-  chmod +x "${TMP}/jig"
-  mv -f "${TMP}/jig" "${BIN_DIR}/jig"
+  chmod +x "$STAGED"
+  mv -f "$STAGED" "${BIN_DIR}/jig"
   echo ":: installed ${BIN_DIR}/jig (${VERSION})"
 fi
 
