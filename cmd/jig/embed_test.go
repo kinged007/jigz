@@ -254,6 +254,7 @@ var questionPrompts = map[string][]string{
 	"build.md":      {"agent:build"},
 	"review-fix.md": {"agent:build"},
 	"docs.md":       {"agent:docs"},
+	"merge.md":      {"agent:merge"},
 }
 
 // questionExample is the example block every questions section shows, with
@@ -338,18 +339,6 @@ func TestPromptQuestionTemplatesParse(t *testing.T) {
 		}
 		if _, err := template.New(e.Name()).Parse(string(raw)); err != nil {
 			t.Errorf("%s: %v", e.Name(), err)
-		}
-	}
-}
-
-func TestPromptQuestionAbsentInMerge(t *testing.T) {
-	for _, name := range []string{"merge.md"} {
-		raw, err := embeddedWorkflows.ReadFile("workflows/prompts/" + name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(string(raw), "agent-question") {
-			t.Errorf("%s: asks a question", name)
 		}
 	}
 }

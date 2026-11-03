@@ -256,6 +256,8 @@ Ask a question when a decision needs a person's answer and you cannot reasonably
 
 Do not wrap the block in a code fence: the parser ignores markers inside a fence.
 
+Before you end your turn, re-read the posted comment and confirm every block is intact: the opening marker with id, audience, blocking and resume, the Question and Suggested answer lines, and the closing marker, all outside any code fence. A malformed block parks the item until a person repairs it — the answer path never resumes it.
+
 - `id` is `q-` plus a short unique id of letters, digits, `_` or `-`.
 - `audience` is `product` (scope, priority, user-facing behaviour) or `project` (technical approach, implementation, order of work).
 - `resume` is always `agent:review`: the label that returns the PR to dispatch after the answer.
