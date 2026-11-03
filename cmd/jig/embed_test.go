@@ -14,6 +14,7 @@ import (
 	"text/template"
 
 	"github.com/kinged007/jigz/internal/config"
+	"github.com/kinged007/jigz/internal/gen"
 )
 
 func TestSetupSeedsLabelsIntoFreshConfig(t *testing.T) {
@@ -37,6 +38,104 @@ func TestSetupSeedsLabelsIntoFreshConfig(t *testing.T) {
 	if cfg.Labels[0].Name != config.DefaultLabels[0].Name {
 		t.Errorf("first label = %q", cfg.Labels[0].Name)
 	}
+}
+
+// TestSetupSkeletonCarriesShippedWorkflows checks that the fresh config
+// setup writes loads, resolves to the issues and prs loops with the
+// shipped queries and rules, and renders managed documents from them.
+func TestSetupSkeletonCarriesShippedWorkflows(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, ".jigz"), 0o755)
+	if err := os.WriteFile(filepath.Join(root, ".jigz", "config.yaml"), []byte(configTemplateBody("o/r")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("JIG_TRACKER_TOKEN", "test-token")
+	cfg, err := config.Load(root)
+	if err != nil {
+		t.Fatalf("fresh config does not load: %v", err)
+	}
+	resolved := cfg.Resolve()
+	if len(resolved) != 2 {
+		t.Fatalf("work entries = %d, want issues + prs", len(resolved))
+	}
+	p, _, err := gen.ProfileFor("kinged007/sortie", "v1.28.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRules := map[string][]string{
+		"issues": {"plan", "plan-build", "build", "docs", "build-chain"},
+		"prs":    {"review", "review-fix", "merge"},
+	}
+	for slug, names := range wantRules {
+		res, ok := resolved[slug]
+		if !ok {
+			t.Fatalf("no work.%s entry", slug)
+		}
+		if res.QueryFilter != shippedQueryFilter(t, slug) {
+			t.Errorf("work.%s query = %q, shipped document has %q", slug, res.QueryFilter, shippedQueryFilter(t, slug))
+		}
+		loops := gen.Split(res, cfg.Agents)
+		if len(loops) != 1 {
+			t.Fatalf("work.%s splits into %d loops, want 1", slug, len(loops))
+		}
+		if len(loops[0].Rules) != len(names) {
+			t.Fatalf("work.%s rules = %d, want %d", slug, len(loops[0].Rules), len(names))
+		}
+		for i, n := range names {
+			if loops[0].Rules[i].Name != n {
+				t.Errorf("work.%s rule %d = %q, want %q", slug, i, loops[0].Rules[i].Name, n)
+			}
+		}
+		text, err := gen.Render(p, loops[0], cfg.Agents, filepath.Join(root, "jig"), defaultPrompt)
+		if err != nil {
+			t.Fatalf("render work.%s: %v", slug, err)
+		}
+		if !gen.Managed(text) {
+			t.Errorf("work.%s document carries no generated marker", slug)
+		}
+	}
+	// The same root must promote both documents to disk, the way setup
+	// does after writing the fresh config.
+	docs, _, err := generateDocs(root)
+	if err != nil {
+		t.Fatalf("generateDocs: %v", err)
+	}
+	if _, err := ensurePrompts(root, docs); err != nil {
+		t.Fatalf("ensurePrompts: %v", err)
+	}
+	sum, err := promoteDocs(root, docs)
+	if err != nil {
+		t.Fatalf("promoteDocs: %v", err)
+	}
+	if len(sum.Generated) != 2 {
+		t.Fatalf("generated = %v, want issues + prs", sum.Generated)
+	}
+	for _, slug := range []string{"issues", "prs"} {
+		raw, err := os.ReadFile(filepath.Join(root, ".jigz", "workflows", "WORKFLOW."+slug+".md"))
+		if err != nil {
+			t.Fatalf("no generated WORKFLOW.%s.md: %v", slug, err)
+		}
+		if !gen.Managed(raw) {
+			t.Errorf("WORKFLOW.%s.md on disk carries no generated marker", slug)
+		}
+	}
+}
+
+// shippedQueryFilter reads the query_filter of the embedded workflow
+// document, so the skeleton stays a mirror of the shipped files.
+func shippedQueryFilter(t *testing.T, slug string) string {
+	t.Helper()
+	raw, err := embeddedWorkflows.ReadFile("workflows/WORKFLOW." + slug + ".md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if s, ok := strings.CutPrefix(strings.TrimSpace(line), "query_filter:"); ok {
+			return strings.Trim(strings.TrimSpace(s), "\"")
+		}
+	}
+	t.Fatalf("no query_filter in shipped WORKFLOW.%s.md", slug)
+	return ""
 }
 
 func TestSyncWorkflowsKeepsEditsFillsGaps(t *testing.T) {
