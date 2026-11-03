@@ -291,8 +291,8 @@ func TestDaemonStartsALoopOnWakeWithTheRunnerFilter(t *testing.T) {
 		t.Errorf("files = %+v, want the applied workflow", l.Files)
 	}
 	cfg := readFile(t, filepath.Join(r.root(testProject), ".jigz", "config.yaml"))
-	if !strings.Contains(cfg, "issues: label:agent:plan -label:needs-human label:"+testRunner) || !strings.Contains(cfg, "assignee: octo") {
-		t.Errorf("config.yaml lacks the runner filter or the assignee:\n%s", cfg)
+	if !strings.Contains(cfg, "issues: label:agent:plan -label:needs-human label:"+testRunner) {
+		t.Errorf("config.yaml lacks the runner filter:\n%s", cfg)
 	}
 	if r.record("starts") != "" {
 		t.Fatal("a loop started before any wake")

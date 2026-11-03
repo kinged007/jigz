@@ -77,8 +77,8 @@ pi:
   model: "sonnet"
 
 # Both runtime blocks are present; the engine reads only the one named by
-# agent.kind, which defaults to claude-code. The agent account pool in
-# machine.yaml overrides agent.kind and agent.command at run time.
+# agent.kind from the .jigz/config.yaml fleet agent. machine.yaml no
+# longer overrides kind/command on the loop path.
 claude-code:
   model: "claude-haiku-5-5"
 

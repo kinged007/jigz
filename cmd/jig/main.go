@@ -318,13 +318,19 @@ func run() (code int) {
 	if err := cfg.CheckBudgets(); err != nil {
 		fatal(err)
 	}
-	for name, b := range cfg.Budgets {
+	for name, b := range cfg.Budgets() {
 		if b.MaxUSD > 0 {
-			fmt.Fprintf(os.Stderr, "jig: workflows.%s.budget.max_usd is ignored: the engine records no cost per run\n", name)
+			fmt.Fprintf(os.Stderr, "jig: work.%s.budget.max_usd is ignored: the engine records no cost per run\n", name)
 		}
 	}
 	bin, err := resolveSortieBin()
 	if err != nil {
+		fatal(err)
+	}
+	// Generation runs before discovery: managed documents, prompts and
+	// the data directory exist before any loop starts. Without work
+	// entries this is a no-op and the installed documents run.
+	if _, err := generateAll(abs); err != nil {
 		fatal(err)
 	}
 	// JIG_ONLY selects a subset of the installed loops, for a
@@ -338,8 +344,15 @@ func run() (code int) {
 	if len(loops) == 0 {
 		fatal(fmt.Errorf("no WORKFLOW.*.md files in %s", filepath.Join(abs, ".jigz", "workflows")))
 	}
+	queries := loopQueryMap(cfg)
 	for _, l := range loops {
-		fmt.Printf("loop %-10s %s filter %q\n", l.name, l.file, cfg.FilterFor(l.name))
+		filter, ok := queries[l.name]
+		if !ok || strings.TrimSpace(filter) == "" {
+			filter = cfg.FilterFor(l.name)
+		} else {
+			filter += " assignee:@me"
+		}
+		fmt.Printf("loop %-10s %s filter %q\n", l.name, l.file, filter)
 	}
 	// An explicit --dashboard-port=N always starts a dashboard on N (fatal
 	// if busy). Otherwise a --unite run joins the live unite dashboard
@@ -367,7 +380,7 @@ func run() (code int) {
 	}
 	sup.setGate(engine.Detect(bin))
 	sup.sleepCfg = cfg.Sleep
-	sup.initBudget(cfg.Budgets)
+	sup.initBudget(cfg.Budgets())
 	// Ordered rather than deferred in the body: os.Exit would skip a
 	// defer, and the children and the registry entry both have to be
 	// cleaned up on the way out whatever ends the run — including a

@@ -37,18 +37,18 @@ func TestCapAlerts(t *testing.T) {
 	prs2 := loopFile{"o/b", "prs", flow("github-pr", "claude-code")}
 
 	for _, c := range []struct {
-		name  string
-		g     engine.Gate
-		files []loopFile
-		env   []string
-		pool  []string
-		want  []string
+		name     string
+		g        engine.Gate
+		files    []loopFile
+		env      []string
+		runtimes []string
+		want     []string
 	}{
 		{"fork runs everything", fork, []loopFile{issues, prs}, nil, []string{"pi"}, nil},
 		{"upstream", upstream, []loopFile{issues, prs, prs2}, nil, nil, []string{
 			"warn|Feature off|PR workflow is off: engine sortie-ai/sortie v1.29.0 has no github-pr tracker."}},
-		{"upstream with a pi pool entry", upstream, nil, nil, []string{"pi", "claude-code"}, []string{
-			"warn|Pool|Pool entries with runtime pi are unavailable: engine sortie-ai/sortie v1.29.0 has no pi agent."}},
+		{"upstream with a pi agent", upstream, nil, nil, []string{"pi|pi-api", "claude-code|builder"}, []string{
+			"warn|Pool|agents pi-api use runtime pi, which the engine does not register"}},
 		{"explicit kind the engine lacks", upstream, []loopFile{{"o/a", "issues", flow("github", "gemini")}}, nil, nil, []string{
 			`err|Agent kind|o/a/issues: Agent kind "gemini" is not available: engine sortie-ai/sortie v1.29.0 registers claude-code, codex, mock. The loop is not started.`}},
 		{"explicit pi is an error with no fallback", upstream, []loopFile{{"o/a", "issues", flow("github", "pi")}}, nil, nil, []string{
@@ -63,7 +63,7 @@ func TestCapAlerts(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			var got []string
-			for _, a := range capAlerts(c.g, c.files, c.env, c.pool) {
+			for _, a := range capAlerts(c.g, c.files, c.env, c.runtimes) {
 				got = append(got, a.Sev+"|"+a.Kind+"|"+a.Msg)
 			}
 			if strings.Join(got, "\n") != strings.Join(c.want, "\n") {
@@ -113,8 +113,8 @@ func TestUpstreamEngineSkipsThePRLoop(t *testing.T) {
 	for _, w := range sup.statusDoc("running").Workflows {
 		if w.Name == "prs" {
 			found = true
-			if w.State != "disabled" || w.Hold != why {
-				t.Errorf("prs status = %q, hold %q", w.State, w.Hold)
+			if w.State != "disabled" || w.OfflineReason != why {
+				t.Errorf("prs status = %q, offline reason %q", w.State, w.OfflineReason)
 			}
 		}
 	}
@@ -189,17 +189,34 @@ func TestOldEngineStartsNoLoop(t *testing.T) {
 	}
 }
 
+// TestPoolSkipsRuntimesTheEngineLacks keeps the pool-selection
+// contract on config agents: a pi candidate the engine does not
+// register never becomes the launch runtime.
 func TestPoolSkipsRuntimesTheEngineLacks(t *testing.T) {
-	sup, _ := gatedSup(t, testGate("1.29.0", upTrackers, upAgents))
-	cfg, dir := t.TempDir(), t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", cfg)
-	t.Setenv("XDG_STATE_HOME", dir)
-	mustWrite(t, filepath.Join(cfg, "jigz", "machine.yaml"),
-		"pool:\n  - name: a-pi\n    runtime: pi\n  - name: b-claude\n    runtime: claude-code\n")
-	sup.initMachine()
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".jigz", "config.yaml"), `repo: owner/repo
+tracker:
+  kind: github
+  api_key: { from_env: JIG_TEST_TOKEN }
+  project: owner/repo
+  in_progress_state: in-progress
+agents:
+  a-pi: { runtime: pi, model: sonnet }
+  b-claude: { runtime: claude-code, model: claude-haiku-5-5 }
+work:
+  issues:
+    query_filter: "label:x"
+    agent: [a-pi, b-claude]
+    rules:
+      - { name: r, match: { labels: [x] }, prompt: p.md }
+`)
+	t.Setenv("JIG_TEST_TOKEN", "test-token")
+	sup := testSupervisor(t, root)
+	sup.refreshWork("test")
 	sup.setGate(testGate("1.29.0", upTrackers, upAgents))
-	env, runtime, err := sup.agentEnv()
-	if err != nil || runtime != "claude-code" || !strings.Contains(strings.Join(env, " "), "SORTIE_AGENT_KIND=claude-code") {
-		t.Fatalf("agentEnv = %v, %q, %v", env, runtime, err)
+	in := sup.gateInputsLocked()
+	lv := in.loopView("issues", time.Now())
+	if lv.Agent != "b-claude" {
+		t.Errorf("gate picks %q, want b-claude", lv.Agent)
 	}
 }

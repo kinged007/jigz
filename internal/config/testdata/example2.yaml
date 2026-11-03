@@ -1,0 +1,12 @@
+agents:
+  claude-main:  { runtime: claude-code, model: claude-sonnet-5-5, env: { ANTHROPIC_OAUTH_TOKEN: { from_env: CLAUDE_SUB_1 } } }
+  claude-spare: { runtime: claude-code, model: claude-sonnet-5-5, env: { ANTHROPIC_OAUTH_TOKEN: { from_env: CLAUDE_SUB_2 } } }
+  pi-api:       { runtime: pi, model: sonnet, env: { ANTHROPIC_API_KEY: { from_env: ANTHROPIC_API_KEY } } }
+pools:
+  build-pool: [claude-main, claude-spare, pi-api]
+work:
+  issues:
+    query_filter: "label:agent:build,in-progress -label:needs-human"
+    agent: build-pool
+    rules:
+      - { name: build, match: { labels: [agent:build] }, prompt: prompts/build.md }

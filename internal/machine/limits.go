@@ -10,6 +10,48 @@ import (
 
 var BuiltinLimit = regexp.MustCompile(`(?i)usage limit|limit reached|limit exhausted|insufficient_quota|quota exceeded|out of credits`)
 
+// BuiltinModelError matches a CLI line reporting an unknown or
+// unavailable model. The per-CLI message catalog grows as recorded
+// engine logs show new wordings; the gate treats a hit like a usage
+// limit so the standby takes over. The does-not-exist wording takes a
+// single token so "model file foo does not exist" prose does not match.
+var BuiltinModelError = regexp.MustCompile(`(?i)model not found|unknown model|invalid model|model ['"]?\S+['"]? does not exist|no such model`)
+
+// IsModelError reports whether an agent CLI line says the model is
+// unavailable, returning the message. The text is extracted the same
+// way usage-limit text is; the per-CLI wording catalog grows as
+// recorded engine logs show new variants.
+func IsModelError(runtime, line string, stderr bool) (string, bool) {
+	text := line
+	if stderr {
+		text = stderrError(runtime, line)
+	} else {
+		text = stdoutError(runtime, line)
+	}
+	if text == "" || !BuiltinModelError.MatchString(text) {
+		return "", false
+	}
+	return strings.TrimSpace(text), true
+}
+
+// stderrErrorRe matches CLI-error framing on a stderr line. Stdout is
+// already scoped to error events; stderr needs the same gate so routine
+// tool warnings mentioning a limit phrase do not exhaust the agent.
+var stderrErrorRe = regexp.MustCompile(`(?i)\berror\b|\bfailed\b|\bfailure\b|\bfatal\b|\b[45]\d\d\b`)
+
+// stderrError returns the error text of a stderr line, or "" when the
+// line is not error-shaped. JSON error events count on either stream;
+// otherwise the line must carry CLI-error framing.
+func stderrError(runtime, line string) string {
+	if s := stdoutError(runtime, line); s != "" {
+		return s
+	}
+	if !stderrErrorRe.MatchString(line) {
+		return ""
+	}
+	return strings.TrimSpace(line)
+}
+
 var (
 	resetEpoch = regexp.MustCompile(`\|(\d{9,11})\b`)
 	resetClock = regexp.MustCompile(`(?i)resets?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:\(([^)]+)\))?`)
@@ -21,7 +63,9 @@ var (
 // message.
 func (c *Config) DetectLimit(runtime, line string, stderr bool, now time.Time) (until time.Time, reason string, limited bool) {
 	text := line
-	if !stderr {
+	if stderr {
+		text = stderrError(runtime, line)
+	} else {
 		text = stdoutError(runtime, line)
 	}
 	if text == "" || !c.isLimit(text) {
@@ -130,5 +174,9 @@ func (c *Config) resetTime(text string, now time.Time) time.Time {
 			return t
 		}
 	}
-	return now.Add(c.Limits.reset)
+	reset := c.Limits.reset
+	if reset <= 0 {
+		reset = defaultReset
+	}
+	return now.Add(reset)
 }

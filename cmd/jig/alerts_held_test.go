@@ -3,10 +3,29 @@ package main
 import (
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/kinged007/jigz/internal/loopsrc"
 	"github.com/kinged007/jigz/internal/rollup"
 )
+
+// TestFallbackAgentAlert fires while a loop runs a non-primary agent.
+func TestFallbackAgentAlert(t *testing.T) {
+	var p opsProject
+	p.Slug = "acme/app"
+	p.Status = &loopsrc.StatusInfo{Workflows: []loopsrc.WorkflowInfo{
+		{Name: "issues", Agent: "spare", Primary: "main", FallbackReason: "usage limit (since 2026-10-29T00:00:00Z); main usable again unknown"},
+		{Name: "prs", Agent: "reviewer", Primary: "reviewer"},
+	}}
+	var kinds []string
+	for _, a := range projectAlerts(p) {
+		kinds = append(kinds, a.Kind+"|"+a.Msg)
+	}
+	if len(kinds) != 1 || !strings.Contains(kinds[0], "Fallback agent|acme/app/issues: on fallback agent spare") {
+		t.Errorf("alerts = %v", kinds)
+	}
+}
 
 func TestLoopAlertsFromTheDatabase(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())

@@ -94,7 +94,9 @@ tr.lp td:first-child { padding-left: 1.6rem; }
   <td>
     <span class="chip s-{{.Class}}">{{.State}}</span>
     {{if .Paused}}<span class="chip s-paused" title="The budget holds this workflow">{{if .PausedBy}}{{.PausedBy}}{{else}}paused{{end}}</span>{{end}}
-    {{if .Hold}}<span class="chip s-paused" title="The machine's working hours or agent accounts hold this workflow">{{if and (ne .State "held") (ne .State "disabled")}}held: {{end}}{{.Hold}}</span>{{end}}
+    {{if .OfflineReason}}<span class="chip s-paused" title="The gate keeps this loop offline">{{if and (ne .State "offline") (ne .State "disabled")}}offline: {{end}}{{.OfflineReason}}{{if .ETA}}, starts {{.ETA}}{{end}}</span>{{end}}
+    {{if .Agent}}<span class="muted" title="Agent this loop runs with{{if and .Primary (ne .Primary .Agent)}}; primary is {{.Primary}}{{end}}">{{.Agent}}{{if and .Primary (ne .Primary .Agent)}} (fallback){{end}}</span>{{end}}
+    {{if .FallbackReason}}<div class="muted" title="Standby switch">{{.FallbackReason}}</div>{{end}}
     {{if .Runtime}}<span class="muted" title="Agent runtime the machine gate selected">{{.Runtime}}</span>{{end}}
     {{if .Hint}}<div class="muted">{{.Hint}}</div>{{end}}
     {{if .Budget}}<div class="muted" title="Tokens used this period against the workflow's cap">{{.Budget}} <span style="opacity:.7">({{.BudgetPct}}%)</span></div>{{end}}

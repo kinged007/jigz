@@ -278,9 +278,12 @@ type Session struct {
 	// AgentKind, RuleName, Model and Effort are what the engine logged
 	// when it dispatched the session.
 	AgentKind string `json:"agent_kind,omitempty"`
-	RuleName  string `json:"rule_name,omitempty"`
-	Model     string `json:"model,omitempty"`
-	Effort    string `json:"effort,omitempty"`
+	// Agent is the agent name the loop runs with. One loop has one agent
+	// at a time because changes happen at idle.
+	Agent    string `json:"agent,omitempty"`
+	RuleName string `json:"rule_name,omitempty"`
+	Model    string `json:"model,omitempty"`
+	Effort   string `json:"effort,omitempty"`
 }
 
 // Loop builds one loop's figures from its database. live says a process

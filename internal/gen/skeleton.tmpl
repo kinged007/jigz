@@ -1,0 +1,83 @@
+---
+# jig:generated v1 skeleton={{.Skeleton}} engine={{.Profile.EngineVersion}} sha256={{.Digest}}
+tracker:
+  kind: {{.Tracker.Kind}}
+  api_key: {{.Tracker.ApiKey}}
+  project: {{.Tracker.Project}}
+  # A label query. The tracker evaluates it once at loop start; a change
+  # needs a drain and restart.
+  #
+  # Agent, in-progress and human-escalation routing labels. Trigger labels
+  # start work; in-progress keeps the loop from claiming its own running
+  # work twice; needs-human parks an item for a person.
+  #
+  # The assignee scope is always @me; it is appended at launch, not stored
+  # here.
+  query_filter: "{{.QueryFilter}}"
+  active_states: [{{range $i, $s := .Tracker.ActiveStates}}{{if $i}}, {{end}}{{$s}}{{end}}]
+  in_progress_state: {{.Tracker.InProgressState}}
+  handoff_state: {{.Tracker.HandoffState}}
+  handoff_evidence: off
+  terminal_states: [closed]
+  comments:
+    on_completion: false{{if .Hooks.AfterRun}}
+    on_failure: false{{end}}
+
+polling:
+  interval_ms: {{.PollingIntervalMS}}
+
+db_path: {{.DBPath}}
+
+workspace:
+  root: $JIG_WORKSPACES/{{.LoopName}}
+  retention_days: 30
+
+hooks:
+  # Hooks run with a restricted env (PATH/HOME plus the vars the CLI and
+  # the engine set), so the repo URL is built from the tracker project
+  # the engine already has.
+  after_create: |
+{{ indent .Hooks.AfterCreate 4 }}
+  before_run: |
+{{ indent .Hooks.BeforeRun 4 }}{{if .Hooks.AfterRun}}
+  after_run: |
+{{ indent .Hooks.AfterRun 4 }}{{end}}
+  timeout_ms: {{.Hooks.TimeoutMS}}
+
+agent:
+  kind: {{.AgentKind}}
+  command: {{.AgentCommand}}
+  max_turns: {{.MaxTurns}}
+  max_concurrent_agents: {{.MaxConcurrentAgents}}
+  turn_timeout_ms: 3600000
+  read_timeout_ms: 120000
+  stall_timeout_ms: 300000
+  stop_grace_ms: 5000
+  max_retry_backoff_ms: 120000
+
+# Only the block the agent kind names is emitted; the engine reports
+# blocks for other kinds as unknown keys.
+{{.RuntimeBlockName}}:
+  model: "{{.Model}}"
+
+# The first matching rule wins, so an item carrying two rule labels runs
+# the earlier rule first. dispatch.default is the safety net: the engine
+# dispatches a query-matching item that matches no rule, and this keeps
+# that dispatch inside a prompt of ours.
+dispatch:
+{{- if .Rules}}
+  rules:{{range .Rules}}
+    - name: {{.Name}}
+{{- if .Stage}}
+      stage: {{.Stage}}
+{{- end}}
+{{- if .Labels}}
+      match:
+        labels: [{{range $i, $l := .Labels}}{{if $i}}, {{end}}"{{$l}}"{{end}}]
+{{- end}}
+      template: {{.Prompt}}{{if .Next}}
+      next: {{.Next}}{{end}}{{end}}
+{{- end}}
+  default:
+    template: {{.DefaultPrompt}}
+---

@@ -45,6 +45,25 @@ func statusLivenessJSON(t *testing.T, root string) string {
 	return got["liveness"].(string)
 }
 
+// TestLoopSummaryReportsGateAndDrift checks the per-loop status line.
+func TestLoopSummaryReportsGateAndDrift(t *testing.T) {
+	w := workflowStatus{
+		Name: "issues", Agent: "spare", Primary: "main",
+		FallbackReason: "usage limit; main usable again unknown",
+		OfflineReason:  "outside operating hours",
+		Drift:          "line 3: disk \"x\" generated \"y\"\nline 4: disk \"x\" generated \"y\"",
+	}
+	got := loopSummary(w)
+	for _, want := range []string{"agent: spare (primary main)", "offline: outside operating hours", "fallback: usage limit", "drift: line 3:"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("summary lacks %q: %q", want, got)
+		}
+	}
+	if loopSummary(workflowStatus{Name: "prs"}) != "" {
+		t.Errorf("empty loop has a summary")
+	}
+}
+
 func TestStatusCommandRunning(t *testing.T) {
 	_, root := startedSup(t, "while true; do sleep 1; done\n")
 	if got := statusLivenessJSON(t, root); got != "running" {

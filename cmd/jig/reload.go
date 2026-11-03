@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"syscall"
 	"time"
@@ -66,6 +67,20 @@ func runReload(args []string) {
 	abs, err := absRoot(dir)
 	if err != nil {
 		fatal(err)
+	}
+	sum, err := generateAll(abs)
+	if err != nil {
+		if asJSON {
+			out, _ := json.Marshal(reloadResult{Error: err.Error()})
+			fmt.Println(string(out))
+		} else {
+			fmt.Fprintln(os.Stderr, "jig: reload:", err)
+			fmt.Fprintln(os.Stderr, "jig: running loops stay as they are")
+		}
+		fatal(err)
+	}
+	if !asJSON {
+		reportGeneration(abs, sum)
 	}
 	res, err := reloadSupervisor(abs)
 	if err != nil {

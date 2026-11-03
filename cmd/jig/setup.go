@@ -7,9 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/kinged007/jigz/internal/config"
+	"github.com/kinged007/jigz/internal/gen"
 )
 
 // runSetup creates .jigz/config.yaml if missing, syncs labels via gh,
@@ -40,45 +42,7 @@ func runSetup(dir, repo string, asJSON bool) {
 		if repo == "" {
 			repo = guessRepo(abs)
 		}
-		body := "# Repo id (owner/name). Empty = detect from git remote at runtime.\n" +
-			"repo: " + repo + "\n" +
-			"# Token for the tracker. Empty = GITHUB_TOKEN/GH_TOKEN env.\n" +
-			"token: \"\"\n" +
-			"# Optional milestone title to restrict all loops to (empty = off).\n" +
-			"milestone: \"\"\n" +
-			"# Assignee scope for all loops (@me = the token owner; only\n" +
-			"# items assigned to that user are picked up). Set to \"\"\n" +
-			"# to disable (shared backlog).\n" +
-			"assignee: \"@me\"\n" +
-			"# Per-loop query-filter overrides, keyed by WORKFLOW.*.md stem.\n" +
-			"# New loops start on the default filter; narrow them here, e.g.:\n" +
-			"#filters:\n" +
-			"#  triage: \"label:agent:triage -label:needs-human\"\n" +
-			"# Workspace cleanup: runs command every interval. max_age_days must be\n" +
-			"# less than workspace.retention_days in every workflow. dry_run passes\n" +
-			"# JIG_CLEANUP_DRY_RUN=1; timeout defaults to 10m.\n" +
-			"#cleanup:\n" +
-			"#  enabled: true\n" +
-			"#  interval: 6h\n" +
-			"#  command: ./scripts/cleanup.sh\n" +
-			"#  max_age_days: 14\n" +
-			"#  dry_run: false\n" +
-			"#  timeout: 10m\n" +
-			"# Idle sleep: stop the engine children after idle_timeout with no running\n" +
-			"# or retrying work, start them again after wake_interval or on\n" +
-			"# `jig wake`. idle_timeout should exceed the workflows' polling\n" +
-			"# interval. New issues wait while sleeping.\n" +
-			"#sleep:\n" +
-			"#  enabled: true\n" +
-			"#  idle_timeout: 15m\n" +
-			"#  wake_interval: 1h\n"
-		labelsBody := ""
-		for _, l := range config.DefaultLabels {
-			labelsBody += fmt.Sprintf("- {name: %q, color: %q, description: %q}\n", l.Name, l.Color, l.Description)
-		}
-		body += "# GitHub labels setup ensures exist (create-or-edit; others left alone).\n" +
-			"# Add a custom loop's labels here, then re-run setup.\n" +
-			"labels:\n" + labelsBody
+		body := configTemplateBody(repo)
 		if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
 			fatal(err)
 		}
@@ -87,6 +51,11 @@ func runSetup(dir, repo string, asJSON bool) {
 		}
 		fmt.Println("created", cfgPath)
 	}
+	sum, err := generateAll(abs)
+	if err != nil {
+		fatal(err)
+	}
+	reportGeneration(abs, sum)
 	warnLegacy(syncWorkflows(abs))
 	warnStalePrompts(abs)
 	warnStaleWorkflows(abs)
@@ -102,6 +71,9 @@ func runSetup(dir, repo string, asJSON bool) {
 		fmt.Println("warning: engine not installed:", err)
 	}
 	repo = configRepo(abs, repo)
+	if err := os.MkdirAll(filepath.Join(abs, ".jigz", "data"), 0o755); err != nil {
+		fatal(err)
+	}
 	ensureGitignore(abs)
 	// Labels come from the config file so custom loops can add their own:
 	// list entries under `labels:`, re-run setup, and they are created.
@@ -141,10 +113,86 @@ func runSetup(dir, repo string, asJSON bool) {
 			}
 		}
 	}
+	for _, w := range ruleLabelWarnings(cfg) {
+		fmt.Fprintln(os.Stderr, "note:", w)
+	}
 	fmt.Println("labels synced to", repo)
 }
 
-// setup types for --json output.
+// reportGeneration prints what generation wrote, for setup, start and
+// reload. Drifted documents keep the hand edit as <name>.md.bak.
+func reportGeneration(root string, sum genSummary) {
+	for _, l := range sum.Generated {
+		fmt.Println("generated", genDocPath(root, l))
+	}
+	for _, l := range sum.Drifted {
+		fmt.Println("updated", genDocPath(root, l), "(previous kept as .bak)")
+	}
+	for _, p := range sum.Prompts {
+		fmt.Println("wrote missing prompt", p)
+	}
+	for _, w := range sum.Warnings {
+		fmt.Println("warning:", w)
+	}
+}
+
+func genDocPath(root, loop string) string {
+	return filepath.Join(root, ".jigz", "workflows", "WORKFLOW."+loop+".md")
+}
+
+// ruleLabelWarnings names the dispatch rule labels that are not in the
+// labels list, so the owner adds them with colours and descriptions
+// before the next setup syncs them.
+func ruleLabelWarnings(cfg *config.Config) []string {
+	have := map[string]bool{}
+	for _, l := range cfg.Labels {
+		have[l.Name] = true
+	}
+	var missing []string
+	seen := map[string]bool{}
+	for _, res := range cfg.Resolve() {
+		for _, r := range res.Rules {
+			for _, l := range r.Labels {
+				if !have[l] && !seen[l] {
+					seen[l] = true
+					missing = append(missing, l)
+				}
+			}
+		}
+		if res.QueryFilter != "" {
+			for _, l := range queryLabels(res.QueryFilter) {
+				if !have[l] && !seen[l] {
+					seen[l] = true
+					missing = append(missing, l)
+				}
+			}
+		}
+	}
+	sort.Strings(missing)
+	var out []string
+	for _, l := range missing {
+		out = append(out, fmt.Sprintf("label %q is used by a work entry but is not in the labels list of .jigz/config.yaml, so setup does not create it", l))
+	}
+	return out
+}
+
+// queryLabels extracts the label names from a tracker query filter.
+func queryLabels(q string) []string {
+	var out []string
+	for _, field := range strings.Fields(q) {
+		f := strings.TrimPrefix(field, "-")
+		v, ok := strings.CutPrefix(f, "label:")
+		if !ok {
+			continue
+		}
+		for _, l := range strings.Split(strings.Trim(v, "\"'"), ",") {
+			if l = strings.Trim(l, "\"'"); l != "" {
+				out = append(out, l)
+			}
+		}
+	}
+	return out
+}
 
 type setupCreated struct {
 	Path string `json:"path"`
@@ -178,6 +226,46 @@ type setupResult struct {
 	Error        *string            `json:"error,omitempty"`
 }
 
+// configTemplateBody builds the first .jigz/config.yaml `jig setup`
+// writes. It carries the keys the loader accepts today: the repository
+// section plus commented examples; the fleet and work sections the owner
+// adds after setup are documented in the README.
+func configTemplateBody(repo string) string {
+	body := "# Repo id (owner/name). Empty = detect from git remote at runtime.\n" +
+		"repo: " + repo + "\n" +
+		"# Token for the tracker. Empty = GITHUB_TOKEN/GH_TOKEN env.\n" +
+		"token: \"\"\n" +
+		"# Per-loop query-filter overrides, keyed by WORKFLOW.*.md stem.\n" +
+		"# New loops start on the default filter; narrow them here, e.g.:\n" +
+		"#filters:\n" +
+		"#  triage: \"label:agent:triage -label:needs-human\"\n" +
+		"# Workspace cleanup: runs command every interval. max_age_days must be\n" +
+		"# less than workspace.retention_days in every workflow. dry_run passes\n" +
+		"# JIG_CLEANUP_DRY_RUN=1; timeout defaults to 10m.\n" +
+		"#cleanup:\n" +
+		"#  enabled: true\n" +
+		"#  interval: 6h\n" +
+		"#  command: ./scripts/cleanup.sh\n" +
+		"#  max_age_days: 14\n" +
+		"#  dry_run: false\n" +
+		"#  timeout: 10m\n" +
+		"# Idle sleep: stop the engine children after idle_timeout with no running\n" +
+		"# or retrying work, start them again after wake_interval or on\n" +
+		"# `jig wake`. idle_timeout should exceed the workflows' polling\n" +
+		"# interval. New issues wait while sleeping.\n" +
+		"#sleep:\n" +
+		"#  enabled: true\n" +
+		"#  idle_timeout: 15m\n" +
+		"#  wake_interval: 1h\n"
+	labelsBody := ""
+	for _, l := range config.DefaultLabels {
+		labelsBody += fmt.Sprintf("- {name: %q, color: %q, description: %q}\n", l.Name, l.Color, l.Description)
+	}
+	return body + "# GitHub labels setup ensures exist (create-or-edit; others left alone).\n" +
+		"# Add a custom loop's labels here, then re-run setup.\n" +
+		"labels:\n" + labelsBody
+}
+
 func runSetupJSON(dir, repo string) {
 	if dir == "" {
 		dir = "."
@@ -206,45 +294,7 @@ func runSetupJSON(dir, repo string) {
 		if repo == "" {
 			repo = guessRepo(abs)
 		}
-		body := "# Repo id (owner/name). Empty = detect from git remote at runtime.\n" +
-			"repo: " + repo + "\n" +
-			"# Token for the tracker. Empty = GITHUB_TOKEN/GH_TOKEN env.\n" +
-			"token: \"\"\n" +
-			"# Optional milestone title to restrict all loops to (empty = off).\n" +
-			"milestone: \"\"\n" +
-			"# Assignee scope for all loops (@me = the token owner; only\n" +
-			"# items assigned to that user are picked up). Set to \"\"\n" +
-			"# to disable (shared backlog).\n" +
-			"assignee: \"@me\"\n" +
-			"# Per-loop query-filter overrides, keyed by WORKFLOW.*.md stem.\n" +
-			"# New loops start on the default filter; narrow them here, e.g.:\n" +
-			"#filters:\n" +
-			"#  triage: \"label:agent:triage -label:needs-human\"\n" +
-			"# Workspace cleanup: runs command every interval. max_age_days must be\n" +
-			"# less than workspace.retention_days in every workflow. dry_run passes\n" +
-			"# JIG_CLEANUP_DRY_RUN=1; timeout defaults to 10m.\n" +
-			"#cleanup:\n" +
-			"#  enabled: true\n" +
-			"#  interval: 6h\n" +
-			"#  command: ./scripts/cleanup.sh\n" +
-			"#  max_age_days: 14\n" +
-			"#  dry_run: false\n" +
-			"#  timeout: 10m\n" +
-			"# Idle sleep: stop the engine children after idle_timeout with no running\n" +
-			"# or retrying work, start them again after wake_interval or on\n" +
-			"# `jig wake`. idle_timeout should exceed the workflows' polling\n" +
-			"# interval. New issues wait while sleeping.\n" +
-			"#sleep:\n" +
-			"#  enabled: true\n" +
-			"#  idle_timeout: 15m\n" +
-			"#  wake_interval: 1h\n"
-		labelsBody := ""
-		for _, l := range config.DefaultLabels {
-			labelsBody += fmt.Sprintf("- {name: %q, color: %q, description: %q}\n", l.Name, l.Color, l.Description)
-		}
-		body += "# GitHub labels setup ensures exist (create-or-edit; others left alone).\n" +
-			"# Add a custom loop's labels here, then re-run setup.\n" +
-			"labels:\n" + labelsBody
+		body := configTemplateBody(repo)
 		if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
 			printSetupJSONAndFatal(res, err)
 			return
@@ -257,6 +307,21 @@ func runSetupJSON(dir, repo string) {
 	} else {
 		res.Skipped = append(res.Skipped, setupSkipped{Path: cfgPath, Reason: "exists"})
 	}
+	sum, err := generateAll(abs)
+	if err != nil {
+		printSetupJSONAndFatal(res, err)
+		return
+	}
+	for _, l := range sum.Generated {
+		res.Created = append(res.Created, setupCreated{Path: genDocPath(abs, l), Kind: "workflow"})
+	}
+	for _, l := range sum.Drifted {
+		res.Created = append(res.Created, setupCreated{Path: genDocPath(abs, l), Kind: "workflow"})
+	}
+	for _, p := range sum.Prompts {
+		res.Created = append(res.Created, setupCreated{Path: p, Kind: "prompt"})
+	}
+	res.Warnings = append(res.Warnings, sum.Warnings...)
 	// Workflows and prompts.
 	legacy := syncWorkflowsJSON(abs, res)
 	if len(legacy) > 0 {
@@ -281,6 +346,9 @@ func runSetupJSON(dir, repo string) {
 		if err != nil {
 			continue
 		}
+		if gen.Managed(cur) {
+			continue
+		}
 		want, err := embeddedWorkflows.ReadFile("workflows/" + name)
 		if err == nil && string(cur) != string(want) {
 			msg := fmt.Sprintf("note: .jigz/workflows/%s differs from the shipped copy; diff it or delete it and rerun setup to take the shipped version.", name)
@@ -299,6 +367,10 @@ func runSetupJSON(dir, repo string) {
 	}
 	repo = configRepo(abs, repo)
 	// Gitignore.
+	if err := os.MkdirAll(filepath.Join(abs, ".jigz", "data"), 0o755); err != nil {
+		printSetupJSONAndFatal(res, err)
+		return
+	}
 	ensureGitignoreJSON(abs, res)
 	// Config.
 	cfg, err := config.Load(abs)
@@ -317,6 +389,7 @@ func runSetupJSON(dir, repo string) {
 			res.Warnings = append(res.Warnings, msg)
 		}
 	}
+	res.Warnings = append(res.Warnings, ruleLabelWarnings(cfg)...)
 	// Labels.
 	for _, l := range cfg.Labels {
 		cur, err := labelOn(repo, l.Name)

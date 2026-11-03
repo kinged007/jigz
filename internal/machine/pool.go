@@ -5,7 +5,7 @@ import "time"
 // Available reports whether the entry can be used at t: not exhausted and
 // inside its own hours.
 func (e Entry) Available(st State, t time.Time) bool {
-	return !t.Before(st[e.Name].ExhaustedUntil) && e.Hours.Open(t)
+	return !t.Before(st.Agents[e.Name].ExhaustedUntil) && e.Hours.Open(t)
 }
 
 func (c *Config) usable(e Entry, st State, t time.Time) bool {
@@ -45,7 +45,7 @@ func (c *Config) NextChange(st State, t time.Time) time.Time {
 	consider(c.Hours.Next(t))
 	for _, e := range c.Pool {
 		consider(e.Hours.Next(t))
-		consider(st[e.Name].ExhaustedUntil)
+		consider(st.Agents[e.Name].ExhaustedUntil)
 	}
 	return best
 }

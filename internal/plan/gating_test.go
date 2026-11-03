@@ -1,8 +1,6 @@
 package plan
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -49,46 +47,5 @@ func TestGateLoop(t *testing.T) {
 				t.Fatalf("GateLoop = %+v, want off %q problem %v", lg, c.off, c.problem)
 			}
 		})
-	}
-}
-
-func TestValidateFileReportsADisabledWorkflowWithoutRunningTheEngine(t *testing.T) {
-	dir := t.TempDir()
-	ran := filepath.Join(dir, "ran")
-	bin := filepath.Join(dir, "sortie")
-	body := `#!/bin/sh
-case "$1" in
--dumpversion) echo 1.29.0 ;;
-validate)
-  case "$*" in *probe*|*WORKFLOW.md*) cat <<'JSON'
-{"valid":false,"errors":[{"check":"tracker_adapter","message":"registered: [github]"},{"check":"agent_adapter","message":"registered: [claude-code, codex]"}],"warnings":[]}
-JSON
-  exit 1;; esac
-  echo ran >> ` + ran + `
-  echo '{"valid":true,"errors":[],"warnings":[]}' ;;
-esac
-`
-	if err := os.WriteFile(bin, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	prs := filepath.Join(dir, "WORKFLOW.prs.md")
-	issues := filepath.Join(dir, "WORKFLOW.issues.md")
-	os.WriteFile(prs, []byte(flow("github-pr", "claude-code")), 0o644)
-	os.WriteFile(issues, []byte(flow("github", "claude-code")), 0o644)
-
-	p := Plan{}
-	res, err := p.validateFile(bin, nil, prs)
-	if err != nil || !res.Valid || len(res.Errors) != 0 || len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0].Message, "PR workflow is off") {
-		t.Fatalf("PR workflow: %+v, %v", res, err)
-	}
-	if _, err := os.Stat(ran); err == nil {
-		t.Fatal("the engine validated a workflow it cannot run")
-	}
-	res, err = p.validateFile(bin, nil, issues)
-	if err != nil || !res.Valid || len(res.Warnings) != 0 {
-		t.Fatalf("issue workflow: %+v, %v", res, err)
-	}
-	if _, err := os.Stat(ran); err != nil {
-		t.Fatal("the issue workflow was not validated by the engine")
 	}
 }

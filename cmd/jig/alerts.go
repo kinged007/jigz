@@ -86,6 +86,17 @@ func projectAlerts(p opsProject) []alert {
 			out = append(out, alert{"warn", "Schema", fmt.Sprintf("%s/%s: %s", p.Slug, l.L.Loop, l.L.Schema), href})
 		}
 	}
+	if p.Status != nil {
+		for _, w := range p.Status.Workflows {
+			if w.Agent != "" && w.Primary != "" && w.Agent != w.Primary {
+				msg := fmt.Sprintf("%s/%s: on fallback agent %s", p.Slug, w.Name, w.Agent)
+				if w.FallbackReason != "" {
+					msg += " (" + w.FallbackReason + ")"
+				}
+				out = append(out, alert{"warn", "Fallback agent", msg, href})
+			}
+		}
+	}
 	return out
 }
 

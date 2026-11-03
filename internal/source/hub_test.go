@@ -118,7 +118,7 @@ func TestHubWritesRootsWithRunnerLabelInEveryFilter(t *testing.T) {
 	}
 	w := got["acme/widgets issues"]
 	cfg, _ := config.Load(w.Root)
-	if f := cfg.FilterFor("issues"); f != "label:agent:plan -label:needs-human -label:backlog label:runner:ci-1 assignee:octo" {
+	if f := cfg.FilterFor("issues"); f != "label:agent:plan -label:needs-human -label:backlog label:runner:ci-1 assignee:@me" {
 		t.Errorf("widgets issues filter = %q", f)
 	}
 	if _, err := os.Stat(filepath.Join(w.Root, ".jigz", "workflows", "WORKFLOW.prs.md")); !os.IsNotExist(err) {
