@@ -85,6 +85,9 @@ func runSetup(dir, repo string, asJSON bool) {
 	if err != nil {
 		fatal(err)
 	}
+	if len(cfg.Work) == 0 {
+		fmt.Fprintln(os.Stderr, "note: .jigz/config.yaml has no work: entries, so no workflow documents are generated; add them (README \"Fleet and work\") and re-run setup.")
+	}
 	warnMissingLabels(cfg.Labels)
 	for _, l := range cfg.Labels {
 		cur, err := labelOn(repo, l.Name)
@@ -227,9 +230,11 @@ type setupResult struct {
 }
 
 // configTemplateBody builds the first .jigz/config.yaml `jig setup`
-// writes. It carries the keys the loader accepts today: the repository
-// section plus commented examples; the fleet and work sections the owner
-// adds after setup are documented in the README.
+// writes. The work entries mirror the shipped WORKFLOW.issues.md and
+// WORKFLOW.prs.md documents, so setup (and start and reload) generate
+// those documents from this config; the generated files are not edited
+// by hand. The fleet and work shapes are documented in the README under
+// "Fleet and work".
 func configTemplateBody(repo string) string {
 	body := "# Repo id (owner/name). Empty = detect from git remote at runtime.\n" +
 		"repo: " + repo + "\n" +
@@ -261,9 +266,45 @@ func configTemplateBody(repo string) string {
 	for _, l := range config.DefaultLabels {
 		labelsBody += fmt.Sprintf("- {name: %q, color: %q, description: %q}\n", l.Name, l.Color, l.Description)
 	}
-	return body + "# GitHub labels setup ensures exist (create-or-edit; others left alone).\n" +
+	body += "# GitHub labels setup ensures exist (create-or-edit; others left alone).\n" +
 		"# Add a custom loop's labels here, then re-run setup.\n" +
 		"labels:\n" + labelsBody
+	// The work entries mirror the shipped WORKFLOW.issues.md and
+	// WORKFLOW.prs.md documents: same queries, rules, prompts and
+	// agent. Generation derives the states, hooks, db path and runtime
+	// values, so they are not repeated here. project: follows the repo
+	// above; export JIG_TRACKER_TOKEN (a GitHub token) or the loops stay
+	// offline with a reason until it is set.
+	return body +
+		"# Engine, fleet and work. setup, start and reload generate the\n" +
+		"# WORKFLOW.*.md documents from these entries; edit here.\n" +
+		"engine: { repo: kinged007/sortie, version: v1.28.1 }\n" +
+		"tracker:\n" +
+		"  kind: github\n" +
+		"  api_key: { from_env: JIG_TRACKER_TOKEN }\n" +
+		"  project: " + repo + "\n" +
+		"  in_progress_state: in-progress\n" +
+		"  handoff_state: agent:done\n" +
+		"agents:\n" +
+		"  coder: { runtime: claude-code, model: claude-haiku-5-5 }\n" +
+		"work:\n" +
+		"  issues:\n" +
+		"    query_filter: \"label:agent:plan,agent:plan-build,agent:build,agent:docs,in-progress -label:needs-human\"\n" +
+		"    agent: coder\n" +
+		"    rules:\n" +
+		"    - { name: plan, match: { labels: [agent:plan] }, prompt: prompts/plan.md }\n" +
+		"    - { name: plan-build, match: { labels: [agent:plan-build] }, prompt: prompts/plan.md, next: build-chain }\n" +
+		"    - { name: build, match: { labels: [agent:build] }, prompt: prompts/build.md }\n" +
+		"    - { name: docs, match: { labels: [agent:docs] }, prompt: prompts/docs.md }\n" +
+		"    - { name: build-chain, stage: stage-build, prompt: prompts/build.md }\n" +
+		"  prs:\n" +
+		"    tracker: { kind: github-pr }\n" +
+		"    query_filter: \"label:agent:review,agent:build,agent:merge,in-progress -label:needs-human\"\n" +
+		"    agent: coder\n" +
+		"    rules:\n" +
+		"    - { name: review, match: { labels: [agent:review] }, prompt: prompts/review.md }\n" +
+		"    - { name: review-fix, match: { labels: [agent:build] }, prompt: prompts/review-fix.md }\n" +
+		"    - { name: merge, match: { labels: [agent:merge] }, prompt: prompts/merge.md }\n"
 }
 
 func runSetupJSON(dir, repo string) {
@@ -377,6 +418,9 @@ func runSetupJSON(dir, repo string) {
 	if err != nil {
 		printSetupJSONAndFatal(res, err)
 		return
+	}
+	if len(cfg.Work) == 0 {
+		res.Warnings = append(res.Warnings, "config has no work: entries, so no workflow documents are generated; add them (README \"Fleet and work\") and re-run setup.")
 	}
 	// Missing labels warning.
 	have := map[string]bool{}
