@@ -19,6 +19,9 @@ import (
 //go:embed workflows
 var embeddedWorkflows embed.FS
 
+//go:embed scripts
+var embeddedScripts embed.FS
+
 //go:embed pm-agent.md
 var embeddedPMAgent embed.FS
 
@@ -89,6 +92,39 @@ func syncWorkflows(root string) []string {
 		writeWorkflow(embeddedWorkflows, filepath.Join(dir, "prompts", p.Name()), "workflows/prompts/"+p.Name(), keepEdits)
 	}
 	return legacy
+}
+
+// syncScripts installs the embedded cleanup script as
+// <root>/.jigz/scripts/cleanup.sh so the cleanup example in a fresh
+// config points at a file that exists. A missing file is written with
+// mode 0755; an existing file is never changed, because it is
+// hand-edited. It returns the installed path, or "" when one already
+// existed. Hub roots hold only the files the hub served, so nothing is
+// installed there.
+func syncScripts(root string) string {
+	if source.IsHubRoot(root) {
+		return ""
+	}
+	dest := filepath.Join(root, ".jigz", "scripts", "cleanup.sh")
+	if _, err := os.Stat(dest); err == nil {
+		return ""
+	}
+	data, err := embeddedScripts.ReadFile("scripts/cleanup.sh")
+	if err != nil {
+		fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		fatal(err)
+	}
+	if err := os.WriteFile(dest, data, 0o755); err != nil {
+		fatal(err)
+	}
+	// WriteFile is umask-filtered; the exec bits must survive for
+	// `sh -c <command>` to run the script directly.
+	if err := os.Chmod(dest, 0o755); err != nil {
+		fatal(err)
+	}
+	return dest
 }
 
 // warnStalePrompts names the installed plan and build prompts that differ

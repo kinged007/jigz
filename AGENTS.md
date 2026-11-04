@@ -43,4 +43,4 @@ The project and brand is `Jigz` (repository `kinged007/jigz`, Go module `github.
 - Executables, processes, services and environment variables use `jig`: the command `jig` and its subcommands, the background service `jigd` (runs `jig daemon`; systemd unit `jigd.service`, launchd label `io.github.kinged007.jigd`), and the environment variables `JIG_*`.
 - New code, docs, environment variables and file names follow these two rules.
 - Do not introduce the engine's name in user-facing strings. User-facing text calls it "the engine". The engine's own `SORTIE_*` variables are set only where the code passes them to the engine.
-- Environment variables are documented in `README.md` next to the feature they configure.
+- Environment variables are documented next to the feature they configure (`docs/`; overview in `README.md`).
