@@ -12,6 +12,7 @@ import (
 
 	"github.com/kinged007/jigz/internal/config"
 	"github.com/kinged007/jigz/internal/gen"
+	"github.com/kinged007/jigz/internal/machine"
 )
 
 // runSetup creates .jigz/config.yaml if missing, syncs labels via gh,
@@ -51,6 +52,11 @@ func runSetup(dir, repo string, asJSON bool) {
 		}
 		fmt.Println("created", cfgPath)
 	}
+	if path, created, err := ensureMachineFile(); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: machine file not created:", err)
+	} else if created {
+		fmt.Println("created", path)
+	}
 	sum, err := generateAll(abs)
 	if err != nil {
 		fatal(err)
@@ -60,6 +66,9 @@ func runSetup(dir, repo string, asJSON bool) {
 	warnStalePrompts(abs)
 	warnStaleWorkflows(abs)
 	fmt.Println("workflows ready in", filepath.Join(abs, ".jigz", "workflows"))
+	if p := syncScripts(abs); p != "" {
+		fmt.Println("cleanup script ready in", p)
+	}
 	syncPMAgent(abs, askBeforeOverwrite)
 	fmt.Println("project manager prompt ready in", filepath.Join(abs, ".jigz", "pm-agent.md"))
 	// The engine is resolved here so a working setup leaves a bare
@@ -86,7 +95,7 @@ func runSetup(dir, repo string, asJSON bool) {
 		fatal(err)
 	}
 	if len(cfg.Work) == 0 {
-		fmt.Fprintln(os.Stderr, "note: .jigz/config.yaml has no work: entries, so no workflow documents are generated; add them (README \"Fleet and work\") and re-run setup.")
+		fmt.Fprintln(os.Stderr, "note: .jigz/config.yaml has no work: entries, so no workflow documents are generated; add them (docs/configuration.md \"Fleet and work\") and re-run setup.")
 	}
 	warnMissingLabels(cfg.Labels)
 	for _, l := range cfg.Labels {
@@ -229,28 +238,87 @@ type setupResult struct {
 	Error        *string            `json:"error,omitempty"`
 }
 
+// machineTemplateBody is the first machine.yaml `jig setup` writes when the
+// file is missing. engine and connected stay commented, so the file loads
+// to the built-in engine and the daemon defaults; dashboard hide and
+// limits are live at their defaults so their shape is editable in place.
+func machineTemplateBody() string {
+	return "# Machine settings for jig: one file per machine, shared by every repo on it.\n" +
+		"# Uncomment a block to change it.\n" +
+		"#\n" +
+		"# Which engine release the loops run. Omitted or empty fields = the\n" +
+		"# default the jig binary was built against; pin a version here only\n" +
+		"# to hold one. JIG_ENGINE_BIN, JIG_ENGINE_REPO and JIG_ENGINE_VERSION\n" +
+		"# override this block.\n" +
+		"#engine:\n" +
+		"#  repo: kinged007/sortie\n" +
+		"#  version: v1.28.1\n" +
+		"#\n" +
+		"# Dashboard pages and sections to hide. Nothing is hidden by default;\n" +
+		"# hidden pages and their routes answer 404. Full name lists are in\n" +
+		"# docs/configuration.md under \"Machine file\".\n" +
+		"dashboard:\n" +
+		"  hide:\n" +
+		"    pages: []\n" +
+		"    sections: []\n" +
+		"#\n" +
+		"# Usage-limit detection for `jig agent-exec`: CLI output matching a\n" +
+		"# pattern marks the agent exhausted until the reset time in the\n" +
+		"# message, or default_reset later. Patterns are case-insensitive.\n" +
+		"limits:\n" +
+		"  default_reset: 1h\n" +
+		"  patterns: []\n" +
+		"#connected:\n" +
+		"#  idle_timeout: 15m\n" +
+		"#  fallback_interval: 5m\n"
+}
+
+// ensureMachineFile creates the machine file with defaults when it is
+// missing. An existing file is left alone. The file may hold API keys, so
+// it is created with mode 0600.
+func ensureMachineFile() (path string, created bool, err error) {
+	path, err = machine.DefaultPath()
+	if err != nil {
+		return "", false, err
+	}
+	if _, err := os.Stat(path); err == nil {
+		return path, false, nil
+	} else if !os.IsNotExist(err) {
+		return path, false, err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return path, false, err
+	}
+	if err := os.WriteFile(path, []byte(machineTemplateBody()), 0o600); err != nil {
+		return path, false, err
+	}
+	return path, true, nil
+}
+
 // configTemplateBody builds the first .jigz/config.yaml `jig setup`
 // writes. The work entries mirror the shipped WORKFLOW.issues.md and
 // WORKFLOW.prs.md documents, so setup (and start and reload) generate
 // those documents from this config; the generated files are not edited
-// by hand. The fleet and work shapes are documented in the README under
-// "Fleet and work".
+// by hand. The fleet and work shapes are documented in
+// docs/configuration.md under "Fleet and work".
 func configTemplateBody(repo string) string {
 	body := "# Repo id (owner/name). Empty = detect from git remote at runtime.\n" +
 		"repo: " + repo + "\n" +
-		"# Token for the tracker. Empty = GITHUB_TOKEN/GH_TOKEN env.\n" +
+		"# Token for the tracker. Empty = JIG_TOKEN, then GITHUB_TOKEN / GH_TOKEN env.\n" +
 		"token: \"\"\n" +
 		"# Per-loop query-filter overrides, keyed by WORKFLOW.*.md stem.\n" +
 		"# New loops start on the default filter; narrow them here, e.g.:\n" +
 		"#filters:\n" +
 		"#  triage: \"label:agent:triage -label:needs-human\"\n" +
-		"# Workspace cleanup: runs command every interval. max_age_days must be\n" +
-		"# less than workspace.retention_days in every workflow. dry_run passes\n" +
+		"# Workspace cleanup: runs your command every interval (installed by\n" +
+		"# setup as .jigz/scripts/cleanup.sh; edit freely, it is never\n" +
+		"# overwritten). max_age_days must be less than\n" +
+		"# workspace.retention_days in every workflow. dry_run passes\n" +
 		"# JIG_CLEANUP_DRY_RUN=1; timeout defaults to 10m.\n" +
 		"#cleanup:\n" +
 		"#  enabled: true\n" +
 		"#  interval: 6h\n" +
-		"#  command: ./scripts/cleanup.sh\n" +
+		"#  command: .jigz/scripts/cleanup.sh\n" +
 		"#  max_age_days: 14\n" +
 		"#  dry_run: false\n" +
 		"#  timeout: 10m\n" +
@@ -276,29 +344,81 @@ func configTemplateBody(repo string) string {
 	// above; export JIG_TRACKER_TOKEN (a GitHub token) or the loops stay
 	// offline with a reason until it is set.
 	return body +
-		"# Engine, fleet and work. setup, start and reload generate the\n" +
-		"# WORKFLOW.*.md documents from these entries; edit here.\n" +
-		"engine: { repo: kinged007/sortie, version: v1.28.1 }\n" +
+		"# Operating hours gate every loop. Omitted or empty = 24/7; windows\n" +
+		"# use days mon..sun and \"HH:MM\"; an end earlier than start wraps\n" +
+		"# past midnight.\n" +
+		"#operating_hours:\n" +
+		"#  timezone: Europe/Madrid\n" +
+		"#  end: finish\n" +
+		"#  windows:\n" +
+		"#    - days: [mon, tue, wed, thu, fri]\n" +
+		"#      start: \"09:00\"\n" +
+		"#      end: \"18:00\"\n" +
+		"# Tracker defaults for every work entry; work.<slug>.tracker\n" +
+		"# overrides. api_key is a { from_env: NAME } reference, never a\n" +
+		"# literal. project follows the repo above; export JIG_TRACKER_TOKEN\n" +
+		"# (a GitHub token) or the loops stay offline with a reason.\n" +
 		"tracker:\n" +
 		"  kind: github\n" +
 		"  api_key: { from_env: JIG_TRACKER_TOKEN }\n" +
 		"  project: " + repo + "\n" +
 		"  in_progress_state: in-progress\n" +
 		"  handoff_state: agent:done\n" +
-		"# GitHub enrichment: lets the dashboard read pull requests for run\n" +
-		"# history and agent questions. enrich defaults to false; set it to\n" +
-		"# true to turn on run-history enrichment, and details to also read\n" +
-		"# commits, changed files and check runs (needs enrich). The other\n" +
-		"# keys are in the README under \"GitHub settings\".\n" +
+		"# Hook defaults; work.<slug>.hooks overrides. timeout_ms >= 0.\n" +
+		"hooks:\n" +
+		"  timeout_ms: 60000\n" +
+		"# GitHub: lets the dashboard read pull requests for run history\n" +
+		"# (enrich) and agent questions. The other keys are in\n" +
+		"# docs/configuration.md under \"GitHub settings\".\n" +
 		"github:\n" +
 		"  enrich: false\n" +
+		"  questions: true\n" +
+		"  interval: 10m\n" +
 		"  details: false\n" +
+		"  questions_interval: 2m\n" +
+		"  questions_window: 168h\n" +
+		"# Agent fleet. runtime is required: claude-code | pi; model passes\n" +
+		"# through to the CLI unvalidated. A name ending in TOKEN, KEY,\n" +
+		"# SECRET or PASSWORD must be a { from_env: NAME } reference, never\n" +
+		"# a literal; an unset variable makes the agent unavailable.\n" +
 		"agents:\n" +
 		"  coder: { runtime: claude-code, model: claude-haiku-5-5 }\n" +
+		"#  night-owl:                      # second account, e.g. evenings\n" +
+		"#    runtime: claude-code\n" +
+		"#    model: claude-haiku-5-5\n" +
+		"#    schedule:                     # omitted = always available\n" +
+		"#      timezone: Europe/Madrid\n" +
+		"#      end: finish                 # finish | stop\n" +
+		"#      windows:\n" +
+		"#        - days: [mon, tue, wed, thu, fri]\n" +
+		"#          start: \"18:00\"\n" +
+		"#          end: \"09:00\"\n" +
+		"#    env:\n" +
+		"#      ANTHROPIC_OAUTH_TOKEN: { from_env: CLAUDE_SUB_1 }\n" +
+		"# Ordered fallback: the loop tries each agent in order. Agent and\n" +
+		"# pool names share one space.\n" +
+		"#pools:\n" +
+		"#  build-pool: [coder, night-owl]\n" +
+		"# Work entries mirror the shipped WORKFLOW.issues.md and\n" +
+		"# WORKFLOW.prs.md documents: the same queries, rules, prompts and\n" +
+		"# agent. setup, start and reload generate the documents from these\n" +
+		"# entries; the generated files are not edited by hand. max_turns,\n" +
+		"# max_concurrent_agents and polling_interval_ms default to 10, 1\n" +
+		"# and 60000 in the generated document; managed: false leaves a\n" +
+		"# hand-written document alone. A rule's agent may be a name, a\n" +
+		"# list, or { use:, model:, schedule: } to override the fleet agent\n" +
+		"# for that rule; next names a later rule of the same entry.\n" +
 		"work:\n" +
 		"  issues:\n" +
 		"    query_filter: \"label:agent:plan,agent:plan-build,agent:build,agent:docs,in-progress -label:needs-human\"\n" +
 		"    agent: coder\n" +
+		"    # Spend cap for this loop, per period. The slug needs its\n" +
+		"    # WORKFLOW.<slug>.md; the loop pauses at max_tokens.\n" +
+		"    #budget:\n" +
+		"    #  period: monthly\n" +
+		"    #  max_tokens: 5000000\n" +
+		"    #  warn_percent: 80\n" +
+		"    #  on_exceed: pause\n" +
 		"    rules:\n" +
 		"    - { name: plan, match: { labels: [agent:plan] }, prompt: prompts/plan.md }\n" +
 		"    - { name: plan-build, match: { labels: [agent:plan-build] }, prompt: prompts/plan.md, next: build-chain }\n" +
@@ -356,6 +476,13 @@ func runSetupJSON(dir, repo string) {
 	} else {
 		res.Skipped = append(res.Skipped, setupSkipped{Path: cfgPath, Reason: "exists"})
 	}
+	if path, created, err := ensureMachineFile(); err != nil {
+		res.Warnings = append(res.Warnings, fmt.Sprintf("machine file not created: %s", err))
+	} else if created {
+		res.Created = append(res.Created, setupCreated{Path: path, Kind: "machine"})
+	} else {
+		res.Skipped = append(res.Skipped, setupSkipped{Path: path, Reason: "exists"})
+	}
 	sum, err := generateAll(abs)
 	if err != nil {
 		printSetupJSONAndFatal(res, err)
@@ -377,6 +504,13 @@ func runSetupJSON(dir, repo string) {
 		msg := fmt.Sprintf("warning: legacy workflow files found in .jigz/workflows/ (%s).", strings.Join(legacy, ", ")) +
 			" WORKFLOW.issues.md and WORKFLOW.prs.md are skipped until the legacy files are deleted. Delete them, then rerun `jig setup`."
 		res.Warnings = append(res.Warnings, msg)
+	}
+	// Cleanup script (installed by setup, never overwritten).
+	scriptDest := filepath.Join(abs, ".jigz", "scripts", "cleanup.sh")
+	if _, err := os.Stat(scriptDest); err == nil {
+		res.Skipped = append(res.Skipped, setupSkipped{Path: scriptDest, Reason: "exists"})
+	} else if p := syncScripts(abs); p != "" {
+		res.Created = append(res.Created, setupCreated{Path: p, Kind: "script"})
 	}
 	// Stale prompts.
 	for _, name := range []string{"plan.md", "build.md"} {
@@ -428,7 +562,7 @@ func runSetupJSON(dir, repo string) {
 		return
 	}
 	if len(cfg.Work) == 0 {
-		res.Warnings = append(res.Warnings, "config has no work: entries, so no workflow documents are generated; add them (README \"Fleet and work\") and re-run setup.")
+		res.Warnings = append(res.Warnings, "config has no work: entries, so no workflow documents are generated; add them (docs/configuration.md \"Fleet and work\") and re-run setup.")
 	}
 	// Missing labels warning.
 	have := map[string]bool{}

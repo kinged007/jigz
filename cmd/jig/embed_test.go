@@ -15,6 +15,7 @@ import (
 
 	"github.com/kinged007/jigz/internal/config"
 	"github.com/kinged007/jigz/internal/gen"
+	"github.com/kinged007/jigz/internal/machine"
 )
 
 func TestSetupSeedsLabelsIntoFreshConfig(t *testing.T) {
@@ -837,5 +838,42 @@ func TestShippedWorkflowsHardCodeNoBaseBranch(t *testing.T) {
 		if m := re.FindString(body); m != "" {
 			t.Errorf("%s hard-codes a base branch: %q", p, m)
 		}
+	}
+}
+
+func TestEnsureMachineFileCreatesDefaults(t *testing.T) {
+	d := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(d, "config"))
+	path, created, err := ensureMachineFile()
+	if err != nil || !created {
+		t.Fatalf("ensure = %q %v %v, want created", path, created, err)
+	}
+	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("mode = %v, %v", fi.Mode(), err)
+	}
+	cfg, err := machine.Load(path)
+	if err != nil {
+		t.Fatalf("template does not load: %v", err)
+	}
+	if len(cfg.Pool) != 0 || len(cfg.Dashboard.Hide.Pages) != 0 || len(cfg.Dashboard.Hide.Sections) != 0 {
+		t.Fatalf("template is not defaults: %+v", cfg)
+	}
+	for _, line := range strings.Split(machineTemplateBody(), "\n") {
+		if strings.HasPrefix(line, "engine:") {
+			t.Fatalf("template pins a live engine block; the default moves with the binary")
+		}
+	}
+	if _, created, err := ensureMachineFile(); err != nil || created {
+		t.Fatalf("second ensure = %v %v, want exists", created, err)
+	}
+	custom := "connected:\n  idle_timeout: 20m\n"
+	if err := os.WriteFile(path, []byte(custom), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, created, err := ensureMachineFile(); err != nil || created {
+		t.Fatalf("existing file must be left alone: %v %v", created, err)
+	}
+	if raw, _ := os.ReadFile(path); string(raw) != custom {
+		t.Fatalf("existing file was overwritten: %q", raw)
 	}
 }
