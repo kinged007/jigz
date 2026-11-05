@@ -41,13 +41,16 @@ work:
 		if !strings.Contains(s, "  max_turns: 10\n  max_sessions: 3\n  max_concurrent_agents: 1\n") {
 			t.Errorf("%s: max_sessions not rendered after max_turns", name)
 		}
+		if !strings.Contains(s, "notifications:\n  - kind: tracker_comment\n    events: [auto_merge.merged, budget.held]\n\n") {
+			t.Errorf("%s: tracker_comment notification not rendered", name)
+		}
 		if !strings.Contains(s, "dispatch:\n  partials:\n    - \"prompts/partials/*.md\"\n  rules:\n") {
 			t.Errorf("%s: partials not rendered under dispatch", name)
 		}
 	}
 	cfg, agents = variantFixture(t, head+rules)
 	for name, text := range renderLoops(t, p, cfg, agents) {
-		if strings.Contains(string(text), "max_sessions") || strings.Contains(string(text), "partials") {
+		if strings.Contains(string(text), "max_sessions") || strings.Contains(string(text), "notifications") || strings.Contains(string(text), "partials") {
 			t.Errorf("%s: unset keys rendered", name)
 		}
 	}

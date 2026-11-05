@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kinged007/jigz/internal/config"
 	"github.com/kinged007/jigz/internal/gen"
 )
 
@@ -446,6 +447,43 @@ func TestValidateDocsEngine(t *testing.T) {
 	bad := []generatedDoc{{Loop: "issues", Text: []byte("---\nnot: [valid\n"), Managed: true}}
 	if _, err := validateDocs(root, bad); err == nil {
 		t.Errorf("broken document validated")
+	}
+}
+
+// TestValidateDocsBudgetHoldNotification checks that the engine reports
+// no implicit budget-hold warning for a document with max_sessions.
+func TestValidateDocsBudgetHoldNotification(t *testing.T) {
+	t.Setenv("JIG_ENGINE_BIN", testEngineBin(t))
+	root := writeGenConfig(t, genBase()+`work:
+  issues:
+    query_filter: "label:agent:build,in-progress -label:needs-human"
+    agent: builder
+    max_sessions: 3
+    rules:
+      - { name: build, match: { labels: [agent:build] }, prompt: prompts/build.md }
+`)
+	docs, _, err := generateDocs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ensurePrompts(root, docs); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := copyDir(filepath.Join(root, ".jigz", "workflows", "prompts"), filepath.Join(dir, "prompts")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "WORKFLOW.issues.md"), docs[0].Text, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runSortieValidate(testEngineBin(t), dir, loopDef{"issues", "WORKFLOW.issues.md"}, cfg)
+	t.Logf("validate output: %q", out)
+	if err != nil || strings.Contains(out, "implicit_budget_hold") {
+		t.Errorf("validate: %v %q", err, out)
 	}
 }
 
