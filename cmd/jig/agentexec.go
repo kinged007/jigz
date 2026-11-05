@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -163,7 +164,8 @@ func isRepoRoot(dir string) bool {
 	return err == nil && !fi.IsDir()
 }
 
-// spawnAgentChild runs the agent executable with the engine's arguments
+// spawnAgentChild runs the agent command, split on whitespace without a
+// shell, with the engine's arguments
 // and environment, marks the entry used, and exhausts it when the
 // output matches a usage-limit pattern. markName is the state key.
 func spawnAgentChild(stdin io.Reader, stdout, stderr io.Writer, fail func(int, string, ...any) int, command string, childArgs, env []string, detect func(string, bool) (time.Time, string, bool), modelDetect func(string, bool) (string, bool), markName, displayName, model, statePath string, now time.Time) int {
@@ -171,11 +173,15 @@ func spawnAgentChild(stdin io.Reader, stdout, stderr io.Writer, fail func(int, s
 		fmt.Fprintln(stderr, "jig agent-exec: warning:", err)
 	}
 
-	path, err := exec.LookPath(command)
+	words := strings.Fields(command)
+	if len(words) == 0 {
+		return fail(127, "agent command is empty")
+	}
+	path, err := exec.LookPath(words[0])
 	if err != nil {
 		return fail(127, "%v", err)
 	}
-	cmd := exec.Command(path, childArgs...)
+	cmd := exec.Command(path, append(words[1:], childArgs...)...)
 	cmd.Env = env
 	cmd.Stdin = stdin
 	outPipe, err := cmd.StdoutPipe()

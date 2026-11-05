@@ -23,10 +23,16 @@ import (
 	"github.com/kinged007/jigz/internal/dirs"
 )
 
-// DefaultCommand is the executable a runtime runs when a pool entry or
+// DefaultCommand is the command a runtime runs when a pool entry or
 // agent names no command. It is "" for a runtime without a default.
 func DefaultCommand(runtime string) string {
-	return map[string]string{"claude-code": "claude", "pi": "pi"}[runtime]
+	return map[string]string{
+		"claude-code": "claude",
+		"pi":          "pi",
+		"codex":       "codex app-server",
+		"opencode":    "opencode",
+		"copilot-cli": "copilot",
+	}[runtime]
 }
 
 const (

@@ -387,3 +387,14 @@ while :; do sleep 0.1; done
 		t.Fatal("child was not stopped")
 	}
 }
+
+func TestAgentExecDefaultCommandWithArguments(t *testing.T) {
+	home := agentExecEnv(t)
+	writeAgentRepo(t, home, "agents:\n  a: { runtime: codex }\n")
+	t.Setenv("PATH", stubCommand(t, "codex", `printf 'args=%s\n' "$*"
+`)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	code, out, errs := execAgentExec("a", "--flag", "x")
+	if code != 0 || out != "args=app-server --flag x\n" {
+		t.Fatalf("code=%d out=%q err=%q", code, out, errs)
+	}
+}
