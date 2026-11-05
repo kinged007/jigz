@@ -105,7 +105,7 @@ Keys jig reads (validates or overrides) vs keys only the engine reads:
 | Key | Shipped value | Who reads it | Can you change it |
 |---|---|---|---|
 | `tracker.kind` | `github` / `github-pr` | jig (gating, loop type, generation) | via `work.<slug>.tracker.kind` |
-| `tracker.query_filter` | issues / prs label lists | jig (overridden at launch by `SORTIE_TRACKER_QUERY_FILTER`) | via `work.<slug>.query_filter` or `filters:` |
+| `tracker.query_filter` | issues / prs label lists | jig (overridden at launch by the work entry's query) | via `work.<slug>.query_filter` or `filters:` |
 | `tracker.active_states` | trigger labels + `in-progress` | engine (gate 1.27+) | derived from the rules at generation |
 | `tracker.in_progress_state` | `in-progress` | config-level key of the same name | via `tracker:` / `work.<slug>.tracker` |
 | `tracker.handoff_state` | `agent:done` | jig (display) + engine (backstop transition) | via `tracker:` / `work.<slug>.tracker` |
@@ -133,7 +133,12 @@ Only the block named by `agent.kind` is read; the other runtime block
 stays for documentation (its engine warning is filtered from `validate`
 output). Generated documents point `agent.command` at the absolute jig path plus
 `agent-exec <agent>` (the engine does not expand `$VAR` there) so the
-supervisor can fail over between fleet agents live.
+supervisor can fail over between fleet agents live. The runtimes a fleet
+agent can use, and their commands, are listed under
+[Agent runtimes](configuration.md#agent-runtimes).
+
+Hook scripts read the item through `JIG_*` variables; see
+[Hook environment](configuration.md#hook-environment).
 
 ## Prompts
 
@@ -143,14 +148,13 @@ runs the result as the agent's instructions:
 
 | Variable | Meaning |
 |---|---|
-| `{{ .issue.identifier }}` | `owner/repo#123`-style id, also in `$SORTIE_ISSUE_IDENTIFIER` |
+| `{{ .issue.identifier }}` | `owner/repo#123`-style id; hook scripts read it as `$JIG_ISSUE_IDENTIFIER` |
 | `{{ .issue.title }}` | Issue or PR title |
 | `{{ .issue.description }}` | Issue or PR body |
 | `{{ .issue.labels }}` | Label list |
 | `{{ .issue.url }}` | Item URL |
 | `{{ .issue.comments[].author }}`, `{{ .issue.comments[].body }}` | Comment thread |
-| `$SORTIE_TRACKER_PROJECT` | `owner/repo`, for `gh --repo` calls |
-| `$SORTIE_WORKSPACE` | The loop's worktree for this item |
+| `$JIG_TRACKER_PROJECT` | `owner/repo`, for `gh --repo` calls |
 | `$JIG_WORKSPACES` | Worktree root (set per loop by jig) |
 
 Example rule prompt (`prompts/triage.md`):
@@ -159,7 +163,7 @@ Example rule prompt (`prompts/triage.md`):
 You are triaging {{ .issue.identifier }}: {{ .issue.title }}.
 
 Read the issue and its comments with
-`gh issue view {{ .issue.identifier }} --repo $SORTIE_TRACKER_PROJECT --comments`.
+`gh issue view {{ .issue.identifier }} --repo $JIG_TRACKER_PROJECT --comments`.
 Decide: plan it (label `agent:plan`), build it now (label `agent:build`),
 or park it (`needs-human` with a comment saying what is missing).
 
