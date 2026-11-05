@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kinged007/jigz/internal/gen"
 	"github.com/kinged007/jigz/internal/machine"
 )
 
@@ -159,8 +160,8 @@ func TestFallbackReturnsAfterCooldown(t *testing.T) {
 	}
 }
 
-// TestFallbackSurvivesReload keeps the standby document when reload
-// re-renders for the primary behind docAgent's back.
+// TestFallbackSurvivesReload keeps the standby document across reload and
+// restores it when a primary render replaces it behind docAgent's back.
 func TestFallbackSurvivesReload(t *testing.T) {
 	root := writeFallbackConfig(t)
 	docs, _, err := generateDocs(root)
@@ -180,7 +181,7 @@ func TestFallbackSurvivesReload(t *testing.T) {
 	if got := docText(t, root, "delivery"); !strings.Contains(got, "agent-exec spare") {
 		t.Fatalf("not on spare:\n%s", got)
 	}
-	// Reload re-renders every managed loop for the primary.
+	// Reload leaves a standby document alone.
 	docs, _, err = generateDocs(root)
 	if err != nil {
 		t.Fatal(err)
@@ -188,8 +189,12 @@ func TestFallbackSurvivesReload(t *testing.T) {
 	if _, err := promoteDocs(root, docs); err != nil {
 		t.Fatal(err)
 	}
-	if got := docText(t, root, "delivery"); !strings.Contains(got, "agent-exec main") {
-		t.Fatalf("reload did not clobber the fixture:\n%s", got)
+	if got := docText(t, root, "delivery"); !strings.Contains(got, "agent-exec spare") {
+		t.Fatalf("reload rewrote the standby document:\n%s", got)
+	}
+	// A primary render written behind docAgent's back (an older jig) is restored.
+	if err := gen.AtomicWrite(gen.DocPath(root, "delivery"), docs[0].Text); err != nil {
+		t.Fatal(err)
 	}
 	in, views = gateViews(t, s, now.Add(2*time.Second))
 	s.fallbackStep(in, views, now.Add(2*time.Second))
