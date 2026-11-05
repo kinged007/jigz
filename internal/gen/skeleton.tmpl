@@ -47,7 +47,8 @@ hooks:
 agent:
   kind: {{.AgentKind}}
   command: {{.AgentCommand}}
-  max_turns: {{.MaxTurns}}
+  max_turns: {{.MaxTurns}}{{if .MaxSessions}}
+  max_sessions: {{.MaxSessions}}{{end}}
   max_concurrent_agents: {{.MaxConcurrentAgents}}
   turn_timeout_ms: 3600000
   read_timeout_ms: 120000
@@ -64,7 +65,9 @@ agent:
 # the earlier rule first. dispatch.default is the safety net: the engine
 # dispatches a query-matching item that matches no rule, and this keeps
 # that dispatch inside a prompt of ours.
-dispatch:
+dispatch:{{if .Partials}}
+  partials:{{range .Partials}}
+    - "{{.}}"{{end}}{{end}}
 {{- if .Rules}}
   rules:{{range .Rules}}
     - name: {{.Name}}

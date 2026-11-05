@@ -219,8 +219,10 @@ type Work struct {
 	Hooks               *Hooks
 	MaxConcurrentAgents int
 	MaxTurns            int
+	MaxSessions         int
 	PollingIntervalMS   int
 	Budget              *Budget
+	Partials            []string
 	Agent               []string
 	Rules               []Rule
 }
@@ -233,8 +235,10 @@ type workFile struct {
 	Hooks               *Hooks      `yaml:"hooks"`
 	MaxConcurrentAgents int         `yaml:"max_concurrent_agents"`
 	MaxTurns            int         `yaml:"max_turns"`
+	MaxSessions         int         `yaml:"max_sessions"`
 	PollingIntervalMS   int         `yaml:"polling_interval_ms"`
 	Budget              *budgetFile `yaml:"budget"`
+	Partials            []string    `yaml:"partials"`
 	Agent               NameList    `yaml:"agent"`
 	Rules               []Rule      `yaml:"rules"`
 }
@@ -243,7 +247,8 @@ func (f workFile) resolve(slug string) (Work, error) {
 	w := Work{
 		Managed: true, QueryFilter: f.QueryFilter, Tracker: f.Tracker, Hooks: f.Hooks,
 		MaxConcurrentAgents: f.MaxConcurrentAgents, MaxTurns: f.MaxTurns,
-		PollingIntervalMS: f.PollingIntervalMS, Agent: f.Agent, Rules: f.Rules,
+		MaxSessions: f.MaxSessions, PollingIntervalMS: f.PollingIntervalMS,
+		Partials: f.Partials, Agent: f.Agent, Rules: f.Rules,
 	}
 	if f.Managed != nil {
 		w.Managed = *f.Managed
@@ -286,8 +291,10 @@ type Resolved struct {
 	Hooks               Hooks
 	MaxConcurrentAgents int
 	MaxTurns            int
+	MaxSessions         int
 	PollingIntervalMS   int
 	Budget              *Budget
+	Partials            []string
 	Agents              []string
 	Rules               []ResolvedRule
 	Engine              machine.Engine
@@ -303,7 +310,8 @@ func (c *Config) Resolve() map[string]Resolved {
 			Slug: slug, Managed: w.Managed, QueryFilter: w.QueryFilter,
 			Tracker: c.TrackerDefaults, Hooks: c.Hooks,
 			MaxConcurrentAgents: w.MaxConcurrentAgents, MaxTurns: w.MaxTurns,
-			PollingIntervalMS: w.PollingIntervalMS, Budget: w.Budget,
+			MaxSessions: w.MaxSessions, PollingIntervalMS: w.PollingIntervalMS,
+			Budget: w.Budget, Partials: w.Partials,
 			Engine: c.Engine, OperatingHours: c.OperatingHours,
 		}
 		r.OperatingHours.End = endMode(r.OperatingHours.End)
@@ -544,6 +552,14 @@ func (c *Config) validateWorkEntry(slug string) error {
 			return err
 		}
 	}
+	if w.MaxSessions < 0 {
+		return fmt.Errorf("%s.max_sessions must not be negative", key)
+	}
+	for i, p := range w.Partials {
+		if err := validatePartial(p); err != nil {
+			return fmt.Errorf("%s.partials[%d]: %w", key, i, err)
+		}
+	}
 	for _, n := range w.Agent {
 		if !c.knownName(n) {
 			return fmt.Errorf("%s.agent: unknown agent or pool %q", key, n)
@@ -638,6 +654,21 @@ func (c *Config) knownName(name string) bool {
 	}
 	_, ok := c.Pools[name]
 	return ok
+}
+
+// validatePartial accepts a path or glob inside the prompts tree, the
+// only tree jig hashes for reloads and copies for validation.
+func validatePartial(p string) error {
+	if !strings.HasPrefix(p, "prompts/") || strings.TrimPrefix(p, "prompts/") == "" {
+		return fmt.Errorf("%q must be a relative path inside prompts/", p)
+	}
+	if slices.Contains(strings.Split(p, "/"), "..") {
+		return fmt.Errorf("%q must not contain \"..\"", p)
+	}
+	if strings.ContainsAny(p, "\"\\") {
+		return fmt.Errorf("%q must not contain quotes or backslashes", p)
+	}
+	return nil
 }
 
 func validateTracker(t Tracker, key string) error {
