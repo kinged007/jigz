@@ -21,6 +21,7 @@ type genSummary struct {
 	Generated []string
 	Unchanged []string
 	Drifted   []string
+	Retired   []string
 	Skipped   []string
 	Prompts   []string
 	Warnings  []string
@@ -434,6 +435,12 @@ func generateAll(root string) (genSummary, error) {
 	if err != nil {
 		return sum, err
 	}
+	retired, notes, err := retireStaleLoops(root)
+	if err != nil {
+		return sum, err
+	}
+	promoted.Retired = retired
+	sum.Warnings = append(sum.Warnings, notes...)
 	promoted.Prompts = sum.Prompts
 	promoted.Warnings = append(sum.Warnings, promoted.Warnings...)
 	return promoted, nil

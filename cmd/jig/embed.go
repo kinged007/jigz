@@ -55,7 +55,8 @@ var promptIn *bufio.Reader
 // prompts/) into <root>/.jigz/workflows/ so they sit visible next to
 // the loop's config, env, and workspaces. A missing file is written and
 // an existing file is never changed or removed, because installed
-// workflows and prompts are hand-edited. It returns the legacy workflow
+// workflows and prompts are hand-edited. A shipped workflow whose slug a
+// managed work entry owns is not installed. It returns the legacy workflow
 // files found; while there are any, WORKFLOW.issues.md and
 // WORKFLOW.prs.md are not written.
 // ponytail: no version stamp, so a file left untouched but outdated by a
@@ -78,8 +79,9 @@ func syncWorkflows(root string) []string {
 	if err != nil {
 		fatal(err)
 	}
+	generated := managedSlugs(root)
 	for _, e := range entries {
-		if e.IsDir() || (len(legacy) > 0 && slices.Contains(consolidatedWorkflows, e.Name())) {
+		if e.IsDir() || (len(legacy) > 0 && slices.Contains(consolidatedWorkflows, e.Name())) || generated[shippedSlug(e.Name())] {
 			continue
 		}
 		writeWorkflow(embeddedWorkflows, filepath.Join(dir, e.Name()), "workflows/"+e.Name(), keepEdits)
