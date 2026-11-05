@@ -29,6 +29,8 @@ CI (`.github/workflows/ci.yml`) runs all of the above on `push` to `main` and on
 
 The repo uses the `pi` agent. Any new workflows or prompts belong in `.jigz/workflows/` (installed from the binary at `setup` time; do not edit the installed copy in a target repo by hand without re-running `setup` on upgrade).
 
+Area context for agents (paths, entry points, conventions, focused checks per `area:` label) is in `.agents/areas/`; start at `.agents/areas/README.md`.
+
 ## Permissions / notes
 
 - This repo is self-contained. Do not commit secrets (API keys, tokens, .env); use .env.example as the template if needed.
