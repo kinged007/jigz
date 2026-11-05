@@ -293,8 +293,14 @@ unvalidated and `schedule` follows the same hours rules as
 #### Split loops
 
 Rules with different agent sets become separate loops
-(`WORKFLOW.<slug>-*.md`), each with its own narrowed query. Every split
-loop needs its own `match.labels`, and no label may repeat across loops:
+(`WORKFLOW.<slug>-*.md`), each with its own narrowed query. A split
+loop's query is the entry's `query_filter` with its `label:` terms
+replaced by the match labels and the `stage` labels of the loop's own
+rules; exclusions stay. Base labels such as `in-progress` are dropped,
+because a loop dispatches every item its query lists, and a shared label
+would list another loop's items. Stage labels are not added to
+`active_states`. Every split loop needs its own `match.labels`, and no
+label may repeat across loops:
 
 ```yaml
 work:
