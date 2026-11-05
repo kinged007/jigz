@@ -1,5 +1,5 @@
 ---
-# jig:generated v1 skeleton=issues engine=kinged007/sortie@v1.28.1 sha256=bf18e5551abf1b39fa5ff03d7efd0ce83077c73405be077818cab77a536c3b86
+# jig:generated v1 skeleton=issues engine=kinged007/sortie@v1.28.1 sha256=f603a745ae0f11a3039f20867cc27fc683893ec42fa8f4d2c15abceb688b1342
 tracker:
   kind: github
   api_key: $JIG_TRACKER_TOKEN
@@ -34,11 +34,15 @@ workspace:
 
 hooks:
   # Hooks run with a restricted env (PATH/HOME plus the vars the CLI and
-  # the engine set), so the repo URL is built from the tracker project
-  # the engine already has.
+  # the engine set). Each script starts with a preamble that exports the
+  # JIG_* names from the engine's values.
   after_create: |
+    JIG_ISSUE_ID=$SORTIE_ISSUE_ID JIG_ISSUE_IDENTIFIER=$SORTIE_ISSUE_IDENTIFIER JIG_WORKSPACE=$SORTIE_WORKSPACE JIG_ATTEMPT=$SORTIE_ATTEMPT JIG_TRACKER_PROJECT=$SORTIE_TRACKER_PROJECT
+    export JIG_ISSUE_ID JIG_ISSUE_IDENTIFIER JIG_WORKSPACE JIG_ATTEMPT JIG_TRACKER_PROJECT
     echo custom
   before_run: |
+    JIG_ISSUE_ID=$SORTIE_ISSUE_ID JIG_ISSUE_IDENTIFIER=$SORTIE_ISSUE_IDENTIFIER JIG_WORKSPACE=$SORTIE_WORKSPACE JIG_ATTEMPT=$SORTIE_ATTEMPT JIG_TRACKER_PROJECT=$SORTIE_TRACKER_PROJECT
+    export JIG_ISSUE_ID JIG_ISSUE_IDENTIFIER JIG_WORKSPACE JIG_ATTEMPT JIG_TRACKER_PROJECT
     # Heal any git operation an earlier attempt or the agent left in flight.
     # An unresolved index makes every later checkout fail, and the retry
     # reuses this directory, so the poison would persist forever.
@@ -48,10 +52,14 @@ hooks:
     git reset --hard >/dev/null
     base=$(git symbolic-ref --short refs/remotes/origin/HEAD | sed 's@^origin/@@')
     git fetch origin "$base"
-    git checkout -B "auto/$SORTIE_ISSUE_IDENTIFIER" "origin/$base"
+    git checkout -B "auto/$JIG_ISSUE_IDENTIFIER" "origin/$base"
   after_run: |
+    JIG_ISSUE_ID=$SORTIE_ISSUE_ID JIG_ISSUE_IDENTIFIER=$SORTIE_ISSUE_IDENTIFIER JIG_WORKSPACE=$SORTIE_WORKSPACE JIG_ATTEMPT=$SORTIE_ATTEMPT JIG_TRACKER_PROJECT=$SORTIE_TRACKER_PROJECT
+    export JIG_ISSUE_ID JIG_ISSUE_IDENTIFIER JIG_WORKSPACE JIG_ATTEMPT JIG_TRACKER_PROJECT
+    JIG_SELF_REVIEW_STATUS=$SORTIE_SELF_REVIEW_STATUS JIG_SELF_REVIEW_SUMMARY_PATH=$SORTIE_SELF_REVIEW_SUMMARY_PATH
+    export JIG_SELF_REVIEW_STATUS JIG_SELF_REVIEW_SUMMARY_PATH
     git add -A
-    git diff --cached --quiet || git commit -m "$SORTIE_ISSUE_IDENTIFIER: agent changes"
+    git diff --cached --quiet || git commit -m "$JIG_ISSUE_IDENTIFIER: agent changes"
     # A stage that changed nothing (plan) pushes no branch.
     base=$(git symbolic-ref --short refs/remotes/origin/HEAD | sed 's@^origin/@@')
     [ "$(git rev-parse HEAD)" = "$(git rev-parse "origin/$base")" ] && exit 0
@@ -60,8 +68,8 @@ hooks:
     # A conflicted rebase left in place poisons the workspace: the next
     # before_run cannot resolve the index and fails forever. Abort instead
     # of swallowing the error, so the retry starts from a clean tree.
-    git fetch origin "auto/$SORTIE_ISSUE_IDENTIFIER" 2>/dev/null && git rebase "origin/auto/$SORTIE_ISSUE_IDENTIFIER" || git rebase --abort
-    git push -u origin "auto/$SORTIE_ISSUE_IDENTIFIER"
+    git fetch origin "auto/$JIG_ISSUE_IDENTIFIER" 2>/dev/null && git rebase "origin/auto/$JIG_ISSUE_IDENTIFIER" || git rebase --abort
+    git push -u origin "auto/$JIG_ISSUE_IDENTIFIER"
   timeout_ms: 300000
 
 agent:

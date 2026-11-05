@@ -601,6 +601,7 @@ func (c *Config) FilterFor(name string) string {
 func (c *Config) Env() []string {
 	return []string{
 		"SORTIE_TRACKER_PROJECT=" + c.Tracker,
+		"JIG_TRACKER_PROJECT=" + c.Tracker,
 		"SORTIE_TRACKER_API_KEY=" + c.Token,
 		"JIG_WORKSPACES=" + c.Workspaces,
 	}

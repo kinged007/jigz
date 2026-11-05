@@ -495,7 +495,7 @@ func TestHubValidatesWithMinimalEnv(t *testing.T) {
 	if got == nil {
 		t.Fatal("validator not called")
 	}
-	allowed := map[string]bool{"PATH": true, "HOME": true, "SORTIE_TRACKER_PROJECT": true, "SORTIE_TRACKER_API_KEY": true, "JIG_WORKSPACES": true}
+	allowed := map[string]bool{"PATH": true, "HOME": true, "SORTIE_TRACKER_PROJECT": true, "JIG_TRACKER_PROJECT": true, "SORTIE_TRACKER_API_KEY": true, "JIG_WORKSPACES": true}
 	for _, kv := range got {
 		k, v, _ := strings.Cut(kv, "=")
 		if !allowed[k] || strings.Contains(v, testToken) || strings.Contains(v, "canary") {

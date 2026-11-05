@@ -1,5 +1,5 @@
 ---
-# jig:generated v1 skeleton=prs engine=kinged007/sortie@v1.28.1 sha256=ca33e867d2f6a32d8c1c2634fcdc97a6afe4b6554beb0dc00d40423c3ac927c7
+# jig:generated v1 skeleton=prs engine=kinged007/sortie@v1.28.1 sha256=8a02eca74fb949848defe6b8fbba8eaa049cc3ef559fbac9a002d366f38b095a
 tracker:
   kind: github-pr
   api_key: $JIG_TRACKER_TOKEN
@@ -33,18 +33,22 @@ workspace:
 
 hooks:
   # Hooks run with a restricted env (PATH/HOME plus the vars the CLI and
-  # the engine set), so the repo URL is built from the tracker project
-  # the engine already has.
+  # the engine set). Each script starts with a preamble that exports the
+  # JIG_* names from the engine's values.
   after_create: |
+    JIG_ISSUE_ID=$SORTIE_ISSUE_ID JIG_ISSUE_IDENTIFIER=$SORTIE_ISSUE_IDENTIFIER JIG_WORKSPACE=$SORTIE_WORKSPACE JIG_ATTEMPT=$SORTIE_ATTEMPT JIG_TRACKER_PROJECT=$SORTIE_TRACKER_PROJECT
+    export JIG_ISSUE_ID JIG_ISSUE_IDENTIFIER JIG_WORKSPACE JIG_ATTEMPT JIG_TRACKER_PROJECT
     git init -q . 2>/dev/null || true
     # A real remote, not ref-only fetches: the fix rule pushes back and the
     # merge rule fetches the base branch.
-    git remote add origin "https://github.com/$SORTIE_TRACKER_PROJECT.git" 2>/dev/null || true
+    git remote add origin "https://github.com/$JIG_TRACKER_PROJECT.git" 2>/dev/null || true
     # No --depth: a shallow PR root plus a shallow base root share no
     # common ancestor, which breaks `git merge` / merge-base in the merge rule.
-    git fetch origin "+pull/$SORTIE_ISSUE_IDENTIFIER/head:pr-$SORTIE_ISSUE_IDENTIFIER"
-    git checkout -q "pr-$SORTIE_ISSUE_IDENTIFIER"
+    git fetch origin "+pull/$JIG_ISSUE_IDENTIFIER/head:pr-$JIG_ISSUE_IDENTIFIER"
+    git checkout -q "pr-$JIG_ISSUE_IDENTIFIER"
   before_run: |
+    JIG_ISSUE_ID=$SORTIE_ISSUE_ID JIG_ISSUE_IDENTIFIER=$SORTIE_ISSUE_IDENTIFIER JIG_WORKSPACE=$SORTIE_WORKSPACE JIG_ATTEMPT=$SORTIE_ATTEMPT JIG_TRACKER_PROJECT=$SORTIE_TRACKER_PROJECT
+    export JIG_ISSUE_ID JIG_ISSUE_IDENTIFIER JIG_WORKSPACE JIG_ATTEMPT JIG_TRACKER_PROJECT
     git rev-parse --git-dir >/dev/null 2>&1 || exit 0
     # Heal any git operation an earlier attempt or the agent left in flight.
     # An unresolved index makes every later checkout fail, and the retry
@@ -55,10 +59,10 @@ hooks:
     git reset --hard >/dev/null
     # The workspace is shared by the review, fix and merge rules and
     # created once, so a later rule starts from the current PR head.
-    git remote get-url origin >/dev/null 2>&1 || git remote add origin "https://github.com/$SORTIE_TRACKER_PROJECT.git"
+    git remote get-url origin >/dev/null 2>&1 || git remote add origin "https://github.com/$JIG_TRACKER_PROJECT.git"
     if [ -f .git/shallow ]; then git fetch --unshallow origin 2>/dev/null || true; fi
-    git checkout -q "pr-$SORTIE_ISSUE_IDENTIFIER" 2>/dev/null || true
-    git fetch origin "pull/$SORTIE_ISSUE_IDENTIFIER/head" 2>/dev/null && git merge --ff-only FETCH_HEAD >/dev/null 2>&1 || true
+    git checkout -q "pr-$JIG_ISSUE_IDENTIFIER" 2>/dev/null || true
+    git fetch origin "pull/$JIG_ISSUE_IDENTIFIER/head" 2>/dev/null && git merge --ff-only FETCH_HEAD >/dev/null 2>&1 || true
   timeout_ms: 60000
 
 agent:
