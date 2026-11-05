@@ -14,7 +14,7 @@ import (
 
 	"github.com/kinged007/jigz/internal/engine"
 	config "github.com/kinged007/jigz/internal/fleetconfig"
-	"github.com/kinged007/jigz/internal/machine"
+	"github.com/kinged007/jigz/internal/gen"
 	"gopkg.in/yaml.v3"
 )
 
@@ -109,9 +109,11 @@ func IsRuntimeBlockWarning(check, message string) bool {
 	if check != "unknown_key" {
 		return false
 	}
-	for _, rt := range machine.Runtimes {
-		if message == fmt.Sprintf("%s: unknown top-level key %q", rt, rt) {
-			return true
+	for _, p := range gen.Profiles() {
+		for _, kind := range p.Agents {
+			if message == fmt.Sprintf("%s: unknown top-level key %q", kind, kind) {
+				return true
+			}
 		}
 	}
 	return false

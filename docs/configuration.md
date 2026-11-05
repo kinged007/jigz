@@ -90,7 +90,7 @@ tracker:                  # defaults for every work entry; work.<slug>.tracker o
   handoff_state: agent:done
 hooks:                    # defaults; work.<slug>.hooks overrides; timeout_ms >= 0
   timeout_ms: 60000
-agents:                   # runtime is required: claude-code | pi; model passes through unvalidated
+agents:                   # runtime is required: any agent kind the engine registers; model passes through unvalidated
   coder:
     runtime: claude-code
     model: claude-haiku-5-5
@@ -184,7 +184,8 @@ hooks:                       # defaults; work.<slug>.hooks overrides
   timeout_ms: 60000
 agents:
   builder:
-    runtime: claude-code     # claude-code | pi
+    runtime: claude-code     # any agent kind the engine registers
+    # command: claude        # required unless the runtime is claude-code (claude) or pi (pi)
     model: claude-sonnet-5-5 # passed to the runtime unvalidated
     schedule:                # omitted = always available
       timezone: Europe/Madrid

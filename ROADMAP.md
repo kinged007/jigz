@@ -237,8 +237,7 @@ pick up opportunistically.
   engine's error output; configurable limit patterns in `pool.json`
 - [ ] Re-probe engine capabilities when the pin changes, not only at
   supervisor start
-- [ ] Pool runtimes and shipped workflow blocks for `codex` and `opencode`
-  (both need `agent.kind` and `agent.command` set today)
+- [ ] Shipped workflow blocks for `codex` and `opencode`
 - [ ] GitHub enrichment in the collector (PR timeline, commits, check
   runs) is never triggered; wire it up
 - [ ] Configurable collector copy interval (60 s fixed today)
