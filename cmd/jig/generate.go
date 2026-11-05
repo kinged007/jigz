@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -21,6 +22,7 @@ type genSummary struct {
 	Generated []string
 	Unchanged []string
 	Drifted   []string
+	Retired   []string
 	Skipped   []string
 	Prompts   []string
 	Warnings  []string
@@ -204,7 +206,7 @@ func ensurePrompts(root string, docs []generatedDoc) ([]string, error) {
 		if data, err := embeddedWorkflows.ReadFile("workflows/prompts/" + filepath.Base(clean)); err == nil {
 			body = data
 		} else {
-			body = []byte("# " + filepath.Base(clean) + "\n\nFill in the prompt for this rule.\n")
+			body = stubPrompt(filepath.Base(clean))
 		}
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 			return created, err
@@ -219,26 +221,24 @@ func ensurePrompts(root string, docs []generatedDoc) ([]string, error) {
 
 // copyDir copies a directory tree of files.
 func copyDir(src, dst string) error {
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(dst, 0o755); err != nil {
-		return err
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(src, e.Name()))
+	return filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(filepath.Join(dst, e.Name()), data, 0o644); err != nil {
+		rel, err := filepath.Rel(src, p)
+		if err != nil {
 			return err
 		}
-	}
-	return nil
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
 }
 
 // promptRefs lists the template paths a rendered document points at.
@@ -434,6 +434,12 @@ func generateAll(root string) (genSummary, error) {
 	if err != nil {
 		return sum, err
 	}
+	retired, notes, err := retireStaleLoops(root)
+	if err != nil {
+		return sum, err
+	}
+	promoted.Retired = retired
+	sum.Warnings = append(sum.Warnings, notes...)
 	promoted.Prompts = sum.Prompts
 	promoted.Warnings = append(sum.Warnings, promoted.Warnings...)
 	return promoted, nil

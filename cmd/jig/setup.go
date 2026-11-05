@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -140,6 +141,9 @@ func reportGeneration(root string, sum genSummary) {
 	for _, l := range sum.Drifted {
 		fmt.Println("updated", genDocPath(root, l), "(previous kept as .bak)")
 	}
+	for _, l := range sum.Retired {
+		fmt.Println("removed", genDocPath(root, l), "(not produced by any work entry)")
+	}
 	for _, p := range sum.Prompts {
 		fmt.Println("wrote missing prompt", p)
 	}
@@ -231,6 +235,7 @@ type setupEngineInfo struct {
 type setupResult struct {
 	Created      []setupCreated     `json:"created"`
 	Skipped      []setupSkipped     `json:"skipped"`
+	Removed      []string           `json:"removed"`
 	SyncedLabels []setupLabelResult `json:"synced_labels"`
 	Warnings     []string           `json:"warnings"`
 	Errors       []string           `json:"errors"`
@@ -442,7 +447,7 @@ func runSetupJSON(dir, repo string) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		printSetupJSONAndFatal(&setupResult{
-			Created: []setupCreated{}, Skipped: []setupSkipped{},
+			Created: []setupCreated{}, Skipped: []setupSkipped{}, Removed: []string{},
 			SyncedLabels: []setupLabelResult{}, Warnings: []string{}, Errors: []string{},
 			Engine: setupEngineInfo{},
 		}, err)
@@ -450,7 +455,7 @@ func runSetupJSON(dir, repo string) {
 	}
 	config.MigrateRepoDir(abs)
 	res := &setupResult{
-		Created: []setupCreated{}, Skipped: []setupSkipped{},
+		Created: []setupCreated{}, Skipped: []setupSkipped{}, Removed: []string{},
 		SyncedLabels: []setupLabelResult{}, Warnings: []string{}, Errors: []string{},
 		Engine: setupEngineInfo{},
 	}
@@ -493,6 +498,9 @@ func runSetupJSON(dir, repo string) {
 	}
 	for _, l := range sum.Drifted {
 		res.Created = append(res.Created, setupCreated{Path: genDocPath(abs, l), Kind: "workflow"})
+	}
+	for _, l := range sum.Retired {
+		res.Removed = append(res.Removed, genDocPath(abs, l))
 	}
 	for _, p := range sum.Prompts {
 		res.Created = append(res.Created, setupCreated{Path: p, Kind: "prompt"})
@@ -658,8 +666,13 @@ func syncWorkflowsJSON(root string, res *setupResult) []string {
 		printSetupJSONAndFatal(res, err)
 		return legacy
 	}
+	generated := managedSlugs(root)
 	for _, e := range entries {
 		if e.IsDir() {
+			continue
+		}
+		if generated[shippedSlug(e.Name())] {
+			res.Skipped = append(res.Skipped, setupSkipped{Path: filepath.Join(dir, e.Name()), Reason: "generated"})
 			continue
 		}
 		if len(legacy) > 0 && containsConsolidated(e.Name()) {
@@ -805,6 +818,10 @@ func labelOn(repo, name string) (*existingLabel, error) {
 		"--search", name, "--limit", "100", "--json", "name,color,description").Output()
 	if err != nil {
 		return nil, err
+	}
+	// gh prints nothing, not "[]", when the search matches no label.
+	if len(bytes.TrimSpace(out)) == 0 {
+		return nil, nil
 	}
 	var labels []struct {
 		Name        string `json:"name"`

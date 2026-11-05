@@ -41,6 +41,30 @@ func TestSplitOverlap(t *testing.T) {
 	}
 }
 
+// TestSplitStageLabels adds a group's own stage labels to its query. The
+// base labels are dropped, other groups' labels stay out, and a stage
+// label is not an active state.
+func TestSplitStageLabels(t *testing.T) {
+	res := config.Resolved{
+		QueryFilter: "label:agent:plan,agent:build,stage-plan,in-progress -label:needs-human",
+		Tracker:     config.Tracker{Kind: "github", InProgressState: "in-progress"},
+		Rules: []config.ResolvedRule{
+			{Name: "plan", Labels: []string{"agent:plan"}, Agents: []string{"a"}, Stage: "stage-plan"},
+			{Name: "build", Labels: []string{"agent:build"}, Agents: []string{"b"}},
+		},
+	}
+	loops := Split(res, map[string]config.Agent{})
+	if q, w := loops[0].Query, "-label:needs-human label:agent:plan,stage-plan"; q != w {
+		t.Errorf("planner query = %q, want %q", q, w)
+	}
+	if q, w := loops[1].Query, "-label:needs-human label:agent:build"; q != w {
+		t.Errorf("builder query = %q, want %q", q, w)
+	}
+	if got := strings.Join(loops[0].Active, ","); got != "agent:plan,in-progress" {
+		t.Errorf("planner active_states = %q", got)
+	}
+}
+
 // TestForAgent swaps the running agent of a split loop: the same
 // candidate list and query, the standby's kind and model.
 func TestForAgent(t *testing.T) {

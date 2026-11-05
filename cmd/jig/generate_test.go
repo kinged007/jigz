@@ -448,3 +448,56 @@ func TestValidateDocsEngine(t *testing.T) {
 		t.Errorf("broken document validated")
 	}
 }
+
+func TestCopyDirRecursive(t *testing.T) {
+	src := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(src, "partials", "deep"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for rel, body := range map[string]string{"a.md": "a", "partials/b.md": "b", "partials/deep/c.md": "c"} {
+		if err := os.WriteFile(filepath.Join(src, filepath.FromSlash(rel)), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dst := filepath.Join(t.TempDir(), "out")
+	if err := copyDir(src, dst); err != nil {
+		t.Fatal(err)
+	}
+	for rel, body := range map[string]string{"a.md": "a", "partials/b.md": "b", "partials/deep/c.md": "c"} {
+		got, err := os.ReadFile(filepath.Join(dst, filepath.FromSlash(rel)))
+		if err != nil || string(got) != body {
+			t.Errorf("%s = %q, %v; want %q", rel, got, err, body)
+		}
+	}
+}
+
+// TestValidateDocsPartialsSubdir validates a document whose partials
+// live in a subdirectory of prompts/ with the real engine.
+func TestValidateDocsPartialsSubdir(t *testing.T) {
+	t.Setenv("JIG_ENGINE_BIN", testEngineBin(t))
+	root := writeGenConfig(t, genBase()+`work:
+  issues:
+    query_filter: "label:agent:build,in-progress -label:needs-human"
+    agent: builder
+    partials: [prompts/partials/*.md]
+    rules:
+      - { name: build, match: { labels: [agent:build] }, prompt: prompts/build.md }
+`)
+	dir := filepath.Join(root, ".jigz", "workflows", "prompts", "partials")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "shared.md"), []byte("{{ define \"shared\" }}shared text{{ end }}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	docs, _, err := generateDocs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ensurePrompts(root, docs); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := validateDocs(root, docs); err != nil {
+		t.Errorf("validate: %v", err)
+	}
+}

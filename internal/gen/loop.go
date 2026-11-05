@@ -2,6 +2,7 @@ package gen
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -40,10 +41,10 @@ type Loop struct {
 // slug; rules with different lists become loops named <slug>-<group>.
 //
 // The query of a loop that shares the entry with others is the entry's
-// query_filter minus its label clauses plus the label clauses of its
-// own rules, and its active_states are those labels plus the
-// in-progress state. Dropping the base labels (rather than appending)
-// is the only thing that keeps two loops of one entry from claiming
+// query_filter minus its label clauses plus the match labels and stage
+// labels of its own rules, and its active_states are the match labels
+// plus the in-progress state. Dropping the base labels (rather than
+// appending) is the only thing that keeps two loops of one entry from claiming
 // the same item: the engine dispatches a query-matching item even when
 // no rule matches it. CheckOverlap rejects a split whose combined
 // queries still overlap.
@@ -59,7 +60,7 @@ func Split(res config.Resolved, agents map[string]config.Agent) []Loop {
 		var active []string
 		if many {
 			name = res.Slug + "-" + groupSuffix(g.rules)
-			query = combine(res.QueryFilter, labelsOf(g.rules))
+			query = combine(res.QueryFilter, queryLabels(g.rules))
 			active = activeStates(res, g.rules)
 		}
 		out = append(out, newLoop(res, name, g.agents, g.rules, query, active, agents))
@@ -147,6 +148,19 @@ func labelsOf(rules []config.ResolvedRule) []string {
 				seen[l] = true
 				out = append(out, l)
 			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// queryLabels is the match labels and the stage labels of the rules. A
+// stage label is not an active state, so only the query carries it.
+func queryLabels(rules []config.ResolvedRule) []string {
+	out := labelsOf(rules)
+	for _, r := range rules {
+		if r.Stage != "" && !slices.Contains(out, r.Stage) {
+			out = append(out, r.Stage)
 		}
 	}
 	sort.Strings(out)

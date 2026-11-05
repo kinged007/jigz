@@ -15,7 +15,14 @@ generated document carries a `# jig:generated` marker with a digest;
 `jig validate` re-renders and fails on drift, i.e. a hand edit inside a
 managed document. Set `managed: false` on the entry and jig neither
 generates nor overwrites the document (`validate` reports it as
-unmanaged). `jig setup` never overwrites any existing workflow or prompt
+unmanaged). A managed entry owns `WORKFLOW.<slug>.md` and
+`WORKFLOW.<slug>-*.md`: setup does not install the shipped
+`WORKFLOW.<slug>.md` for it, and generation removes an owned document
+it did not produce (after a split or regrouping) when it is generated or
+an unedited shipped copy. An edited or hand-written one is kept with a
+note, still runs as a loop, and fails `jig validate` (`loops`). Documents
+of other configured slugs, such as `issues-fast` next to `issues`, are
+never removed. `jig setup` never overwrites any existing workflow or prompt
 file, and while a legacy `WORKFLOW.plan.md`/`build.md`/`review.md`/
 `review-fix.md`/`merge.md` file exists, the consolidated
 `WORKFLOW.issues.md`/`WORKFLOW.prs.md` pair is not written.
@@ -164,7 +171,10 @@ and end by removing your trigger and adding `agent:done`.
 
 `jig validate [--json]` checks, in order: the config (strict keys and
 model rules), the engine profile per work entry (older than 1.27.0
-fails; unknown versions warn), generation drift per loop, `cleanup`,
+fails; unknown versions warn), generation drift per loop, `loops` (an owned document that
+generation does not produce fails), `prompts` (a
+rule prompt of a managed entry that is missing or still the generated
+stub fails), `cleanup`,
 `budgets`, a token warning, `max_usd` warnings, then each installed
 workflow through the engine's own `validate` with capability gating.
 Both the human and `--json` output start with the repo root and the

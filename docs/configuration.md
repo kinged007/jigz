@@ -205,7 +205,7 @@ work:
 
 A work entry's `query_filter` is the complete tracker query and wins over
 the `filters:` override and the shipped defaults; `assignee:@me` is
-appended at launch. `max_concurrent_agents`, `max_turns` and
+appended at launch. `max_concurrent_agents`, `max_turns`, `max_sessions` and
 `polling_interval_ms` sit next to `budget`. A rule's `agent` may be a
 name, a list of names, or `{use: ..., model: ..., schedule: ...}` to
 override the fleet agent for that rule; `stage` and `next` are the
@@ -225,8 +225,10 @@ launch and validates and resolves the remaining sections.
 | `hooks` | mapping | top-level `hooks` | Overlay: `after_create`, `before_run`, `after_run`, `timeout_ms` |
 | `max_concurrent_agents` | int | `1` in the generated document | `0`/absent renders `1` |
 | `max_turns` | int | `10` in the generated document | `0`/absent renders `10` |
+| `max_sessions` | int | none | Rendered as `agent.max_sessions` only when above `0`; `0`/absent renders nothing (the engine default, unlimited). See [Session cap](#session-cap) |
 | `polling_interval_ms` | int | `60000` in the generated document | `0`/absent renders `60000` |
 | `budget` | mapping | none | See [Spend controls](#spend-controls); the slug needs its `WORKFLOW.<slug>.md` |
+| `partials` | list of strings | none | Rendered as `dispatch.partials` in every loop document of the entry. See [Partials](#partials) |
 | `agent` | name, list, or mapping | none | An agent, a pool, or an ordered list; per-rule overrides below |
 | `rules` | list | none | See below; `next` must name a later rule of the same entry |
 
@@ -234,6 +236,35 @@ Slugs match `^[A-Za-z0-9][A-Za-z0-9_-]*$`. `work.<slug>.budget` with no
 `WORKFLOW.<slug>.md` (or `WORKFLOW.<slug>-*.md` split loop) is a startup
 error, and the removed `workflows:` key is rejected with a pointer to
 `work.<slug>.budget`.
+
+#### Session cap
+
+`max_sessions` is the engine's `agent.max_sessions`: the maximum number of
+completed agent sessions per issue. The engine counts them from the run
+history in the loop's own database (`jigz-<name>.db`), so each loop of a
+split entry counts separately, and a session that ran in another loop
+does not count. The running session is not counted. When an issue has
+used the cap, the engine stops dispatching it, posts one comment on the
+issue that names the cap and `agent.max_sessions` as the setting that
+raises it, and holds the issue until the cap is raised above the count or
+removed, or the issue leaves the active states. Use it to bound
+review-and-revise rounds on a PR: with one loop for the PR workflow and
+`max_sessions: 4`, a PR gets at most four sessions in that loop.
+
+#### Partials
+
+`partials` lists files that contain only `{{ define }}` blocks. Every
+prompt template of the loop can call them with
+`{{ template "name" . }}`. Each entry is a path or glob that starts with
+`prompts/`, has no `..` segment and no quote or backslash; the engine
+resolves it relative to the directory of the `WORKFLOW.*.md` file
+(`.jigz/workflows/`), so `prompts/partials/*.md` selects files of
+`.jigz/workflows/prompts/partials/`. Entries are limited to the prompts
+tree because jig hashes and copies only that tree: a change under
+`prompts/` reloads the loop, and `jig validate` copies the tree next to
+the generated documents so the engine finds the partials. A pattern that
+selects a prompt template fails the engine load, so keep partials in a
+directory of their own.
 
 #### Rule agent forms
 
@@ -262,8 +293,14 @@ unvalidated and `schedule` follows the same hours rules as
 #### Split loops
 
 Rules with different agent sets become separate loops
-(`WORKFLOW.<slug>-*.md`), each with its own narrowed query. Every split
-loop needs its own `match.labels`, and no label may repeat across loops:
+(`WORKFLOW.<slug>-*.md`), each with its own narrowed query. A split
+loop's query is the entry's `query_filter` with its `label:` terms
+replaced by the match labels and the `stage` labels of the loop's own
+rules; exclusions stay. Base labels such as `in-progress` are dropped,
+because a loop dispatches every item its query lists, and a shared label
+would list another loop's items. Stage labels are not added to
+`active_states`. Every split loop needs its own `match.labels`, and no
+label may repeat across loops:
 
 ```yaml
 work:

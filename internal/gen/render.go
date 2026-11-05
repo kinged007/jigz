@@ -26,6 +26,8 @@ type data struct {
 	AgentKind           string
 	AgentCommand        string
 	MaxTurns            int
+	MaxSessions         int
+	Partials            []string
 	MaxConcurrentAgents int
 	RuntimeBlockName    string
 	Model               string
@@ -96,6 +98,8 @@ func Render(p Profile, l Loop, agents map[string]config.Agent, jigPath, defaultP
 		AgentKind:           kind,
 		AgentCommand:        strings.TrimSpace(jigPath) + " agent-exec " + agentName(l),
 		MaxTurns:            maxTurns(l),
+		MaxSessions:         l.Entry.MaxSessions,
+		Partials:            l.Entry.Partials,
 		MaxConcurrentAgents: maxConcurrent(l),
 		RuntimeBlockName:    kind,
 		Model:               modelOf(l),
