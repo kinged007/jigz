@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -24,11 +23,8 @@ import (
 	"github.com/kinged007/jigz/internal/dirs"
 )
 
-// Runtimes are the agent kinds a pool entry can use.
-var Runtimes = []string{"claude-code", "pi"}
-
 // DefaultCommand is the executable a runtime runs when a pool entry or
-// agent names no command.
+// agent names no command. It is "" for a runtime without a default.
 func DefaultCommand(runtime string) string {
 	return map[string]string{"claude-code": "claude", "pi": "pi"}[runtime]
 }
@@ -270,11 +266,14 @@ func (c *Config) validate() error {
 			return fmt.Errorf("%sname: %q is used twice", key, e.Name)
 		}
 		seen[e.Name] = true
-		if !slices.Contains(Runtimes, e.Runtime) {
-			return fmt.Errorf("%sruntime: unknown runtime %q (use %s)", key, e.Runtime, strings.Join(Runtimes, " or "))
+		if e.Runtime == "" {
+			return fmt.Errorf("%sruntime is required", key)
 		}
 		if e.Command == "" {
 			e.Command = DefaultCommand(e.Runtime)
+		}
+		if e.Command == "" {
+			return fmt.Errorf("%scommand: required for runtime %q", key, e.Runtime)
 		}
 		if e.Hours.End != "" {
 			return fmt.Errorf("%shours.end: only the machine hours have an end mode", key)

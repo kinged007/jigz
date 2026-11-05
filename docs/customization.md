@@ -56,12 +56,12 @@ installed CLI accepts. Generated documents point `agent.command` at
 `jig agent-exec <agent>` instead, and the supervisor rewrites the kind,
 command and model when the gate picks another fleet agent (see
 [Working hours and agent accounts](configuration.md#working-hours-and-agent-accounts)).
-The
-pinned engine only knows `pi` and `claude-code` (plus a few others);
-other adapters need a newer or upstream engine binary, and a loop whose
-agent kind the engine lacks does not start (see [Engine
-capabilities](install.md#engine-capabilities)). Setting `agent.kind` to `codex` or
-`opencode` needs `agent.command` set as well (the shipped `command:
-claude` would be passed to the adapter), and no pool runtime or shipped
-adapter block exists for them. The dashboard's token/model columns populate
-for either agent.
+A fleet agent's or pool entry's `runtime` can be any agent kind the
+engine registers (the pinned engine registers `agent-client-protocol`,
+`claude-code`, `codex`, `copilot-cli`, `mock`, `opencode` and `pi`). A loop
+whose agent kind the engine lacks does not start (see [Engine
+capabilities](install.md#engine-capabilities)). Only `claude-code` and `pi`
+have a default `command`; every other runtime needs `command` set on the
+agent or pool entry. Usage-limit detection and transcript reading cover
+`claude-code` and `pi` only, and no shipped adapter block exists for the
+other kinds. The dashboard's token/model columns populate for either agent.

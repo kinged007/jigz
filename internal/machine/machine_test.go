@@ -124,7 +124,8 @@ func TestLoadValidation(t *testing.T) {
 		{"equal", win("{days: [mon], start: \"09:00\", end: \"09:00\"}"), "start and end must differ"},
 		{"no name", "pool:\n  - runtime: pi\n", "pool[0].name"},
 		{"dup name", "pool:\n  - {name: a, runtime: pi}\n  - {name: a, runtime: pi}\n", "pool[1].name"},
-		{"runtime", "pool:\n  - {name: a, runtime: pi}\n  - {name: b, runtime: codex}\n", `pool[1].runtime: unknown runtime "codex"`},
+		{"empty runtime", "pool:\n  - {name: a}\n", "pool[0].runtime is required"},
+		{"runtime without default command", "pool:\n  - {name: a, runtime: pi}\n  - {name: b, runtime: codex}\n", `pool[1].command: required for runtime "codex"`},
 		{"entry end", "pool:\n  - {name: a, runtime: pi, hours: {end: stop}}\n", "pool[0].hours.end"},
 		{"entry window", "pool:\n  - name: a\n    runtime: pi\n    hours:\n      windows:\n        - {days: [mon], start: \"x\", end: \"10:00\"}\n", "pool[0].hours.windows[0].start"},
 		{"reset", "limits:\n  default_reset: soon\n", "limits.default_reset"},
@@ -521,5 +522,12 @@ func TestConnectedBlock(t *testing.T) {
 	c2 := mustLoad(t, string(out))
 	if c2.Connected.Idle() != 20*time.Minute || c2.Connected.Fallback() != time.Minute {
 		t.Fatalf("round trip = %v %v\n%s", c2.Connected.Idle(), c2.Connected.Fallback(), out)
+	}
+}
+
+func TestPoolRuntimeCommand(t *testing.T) {
+	c := mustLoad(t, "pool:\n  - {name: a, runtime: codex, command: codex}\n  - {name: b, runtime: pi}\n")
+	if c.Pool[0].Command != "codex" || c.Pool[1].Command != "pi" {
+		t.Fatalf("pool = %+v", c.Pool)
 	}
 }

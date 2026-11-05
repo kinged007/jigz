@@ -382,8 +382,10 @@ func configTemplateBody(repo string) string {
 		"  details: false\n" +
 		"  questions_interval: 2m\n" +
 		"  questions_window: 168h\n" +
-		"# Agent fleet. runtime is required: claude-code | pi; model passes\n" +
-		"# through to the CLI unvalidated. A name ending in TOKEN, KEY,\n" +
+		"# Agent fleet. runtime is required: any agent kind the engine\n" +
+		"# registers (command is required unless it is claude-code or\n" +
+		"# pi). model passes through to the CLI unvalidated. A name\n" +
+		"# ending in TOKEN, KEY,\n" +
 		"# SECRET or PASSWORD must be a { from_env: NAME } reference, never\n" +
 		"# a literal; an unset variable makes the agent unavailable.\n" +
 		"agents:\n" +

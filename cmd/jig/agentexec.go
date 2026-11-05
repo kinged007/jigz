@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"slices"
 	"sync"
 	"syscall"
 	"time"
@@ -55,19 +54,20 @@ func runAgentExec(args []string, stdin io.Reader, stdout, stderr io.Writer) int 
 	if _, ok := cfg.Agents[name]; ok {
 		return runAgentTarget(cfg, state, statePath, fail, name, childArgs, stdin, stdout, stderr)
 	}
-	if slices.Contains(machine.Runtimes, name) {
-		now := time.Now()
-		in := gateInputs{agents: cfg.Agents, refs: cfg.UnresolvedRefs(), state: state, operating: cfg.OperatingHours}
-		for _, aname := range sortedKeys(cfg.Agents) {
-			a := cfg.Agents[aname]
-			if a.Runtime != name {
-				continue
-			}
-			if in.block(aname, nil, now) != "" {
-				continue
-			}
-			return runAgentTarget(cfg, state, statePath, fail, aname, childArgs, stdin, stdout, stderr)
+	now := time.Now()
+	in := gateInputs{agents: cfg.Agents, refs: cfg.UnresolvedRefs(), state: state, operating: cfg.OperatingHours}
+	found := false
+	for _, aname := range sortedKeys(cfg.Agents) {
+		if cfg.Agents[aname].Runtime != name {
+			continue
 		}
+		found = true
+		if in.block(aname, nil, now) != "" {
+			continue
+		}
+		return runAgentTarget(cfg, state, statePath, fail, aname, childArgs, stdin, stdout, stderr)
+	}
+	if found {
 		return fail(exitNoAgent, "no %s agent is available", name)
 	}
 	return fail(2, "unknown agent %q: fleet agents live in .jigz/config.yaml", name)
@@ -80,9 +80,6 @@ func runAgentTarget(cfg *config.Config, state machine.State, statePath string, f
 	a, ok := cfg.Agents[name]
 	if !ok {
 		return fail(2, "unknown agent %q", name)
-	}
-	if !slices.Contains(machine.Runtimes, a.Runtime) {
-		return fail(2, "agent %s has unknown runtime %q", name, a.Runtime)
 	}
 	if until := state.Agents[name].ExhaustedUntil; time.Now().Before(until) {
 		// An unknown-model block records the model that failed; a config
@@ -124,7 +121,11 @@ func runAgentTarget(cfg *config.Config, state machine.State, statePath string, f
 	modelDetect := func(line string, isStderr bool) (string, bool) {
 		return machine.IsModelError(a.Runtime, line, isStderr)
 	}
-	return spawnAgentChild(stdin, stdout, stderr, fail, machine.DefaultCommand(a.Runtime), childArgs,
+	command := a.Command
+	if command == "" {
+		command = machine.DefaultCommand(a.Runtime)
+	}
+	return spawnAgentChild(stdin, stdout, stderr, fail, command, childArgs,
 		append(os.Environ(), env...), detect, modelDetect, name, name, a.Model, statePath, time.Now())
 }
 

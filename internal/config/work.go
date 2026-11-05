@@ -187,6 +187,7 @@ type Hooks struct {
 // that names a credential must be a reference.
 type Agent struct {
 	Runtime  string                 `yaml:"runtime"`
+	Command  string                 `yaml:"command"`
 	Model    string                 `yaml:"model"`
 	Schedule machine.Hours          `yaml:"schedule"`
 	Env      map[string]StringOrRef `yaml:"env"`
@@ -512,8 +513,11 @@ func (c *Config) validateModel() error {
 	for _, name := range sortedNames(c.Agents) {
 		a := c.Agents[name]
 		key := "agents." + name
-		if !slices.Contains(machine.Runtimes, a.Runtime) {
-			return fmt.Errorf("%s.runtime: unknown runtime %q (use %s)", key, a.Runtime, strings.Join(machine.Runtimes, " or "))
+		if a.Runtime == "" {
+			return fmt.Errorf("%s.runtime is required", key)
+		}
+		if a.Command == "" && machine.DefaultCommand(a.Runtime) == "" {
+			return fmt.Errorf("%s.command: required for runtime %q", key, a.Runtime)
 		}
 		if err := a.Schedule.Validate(key + ".schedule"); err != nil {
 			return err

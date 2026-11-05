@@ -8,7 +8,6 @@ import (
 
 	"github.com/kinged007/jigz/internal/config"
 	"github.com/kinged007/jigz/internal/engine"
-	"github.com/kinged007/jigz/internal/machine"
 	"github.com/kinged007/jigz/internal/plan"
 )
 
@@ -73,14 +72,15 @@ func capAlerts(g engine.Gate, files []loopFile, env, runtimes []string) []alert 
 			add("warn", "Feature off", lg.Off)
 		}
 	}
-	for _, rt := range machine.Runtimes {
-		var names []string
-		for _, rn := range runtimes {
-			if r, n, ok := strings.Cut(rn, "|"); ok && r == rt {
-				names = append(names, n)
-			}
+	byRuntime := map[string][]string{}
+	for _, rn := range runtimes {
+		if r, n, ok := strings.Cut(rn, "|"); ok {
+			byRuntime[r] = append(byRuntime[r], n)
 		}
-		if off := g.RuntimeOff(rt); off != "" && len(names) > 0 {
+	}
+	for _, rt := range sortedKeys(byRuntime) {
+		names := byRuntime[rt]
+		if off := g.RuntimeOff(rt); off != "" {
 			sort.Strings(names)
 			add("warn", "Pool", fmt.Sprintf("agents %s use runtime %s, which the engine does not register", strings.Join(names, ", "), rt))
 		}
