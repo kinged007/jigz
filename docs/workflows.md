@@ -155,6 +155,7 @@ runs the result as the agent's instructions:
 | `{{ .issue.url }}` | Item URL |
 | `{{ .issue.comments[].author }}`, `{{ .issue.comments[].body }}` | Comment thread |
 | `$JIG_TRACKER_PROJECT` | `owner/repo`, for `gh --repo` calls |
+| `$JIG_WORKSPACE` | The loop's worktree for this item |
 | `$JIG_WORKSPACES` | Worktree root (set per loop by jig) |
 
 Example rule prompt (`prompts/triage.md`):

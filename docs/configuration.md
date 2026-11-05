@@ -355,9 +355,10 @@ in hooks. Hooks run with a restricted environment: `PATH`, `HOME` and a few
 other standard variables plus the engine's `SORTIE_*` variables. Other
 variables of the supervisor are not passed.
 
-Agent processes do not receive the per-item variables. They see the
-environment of the loop process, which includes `JIG_TRACKER_PROJECT` and
-`JIG_WORKSPACES`, and they run inside the item's workspace.
+Agent processes do not receive the item id, identifier or attempt; prompts
+use `{{ .issue.identifier }}` instead. They receive `JIG_WORKSPACE` (their
+working directory, set by `jig agent-exec`), `JIG_TRACKER_PROJECT` and
+`JIG_WORKSPACES` (the workspace root).
 
 ```yaml
 hooks:
