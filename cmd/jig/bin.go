@@ -24,6 +24,7 @@ func resolveSortieBin() (string, error) {
 func writeEnvFile(dir string, cfg *config.Config) (string, error) {
 	path := filepath.Join(dir, ".jigz", ".env.loop")
 	body := "SORTIE_TRACKER_PROJECT=" + cfg.Tracker + "\n" +
+		"JIG_TRACKER_PROJECT=" + cfg.Tracker + "\n" +
 		"JIG_WORKSPACES=" + cfg.Workspaces + "\n" +
 		"SORTIE_TRACKER_API_KEY=" + cfg.Token + "\n"
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

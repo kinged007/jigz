@@ -7,7 +7,7 @@ default), edit that repo's `.jigz/workflows/prompts/review.md` Step 4
 clean branch to chain the merge loop instead of stopping:
 
 ```
-gh pr edit {{ .issue.identifier }} --repo $SORTIE_TRACKER_PROJECT \
+gh pr edit {{ .issue.identifier }} --repo $JIG_TRACKER_PROJECT \
   --remove-label "agent:review,in-progress" --add-label "agent:merge"
 ```
 

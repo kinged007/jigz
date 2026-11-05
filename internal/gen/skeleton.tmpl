@@ -34,8 +34,8 @@ workspace:
 
 hooks:
   # Hooks run with a restricted env (PATH/HOME plus the vars the CLI and
-  # the engine set), so the repo URL is built from the tracker project
-  # the engine already has.
+  # the engine set). Each script starts with a preamble that exports the
+  # JIG_* names from the engine's values.
   after_create: |
 {{ indent .Hooks.AfterCreate 4 }}
   before_run: |

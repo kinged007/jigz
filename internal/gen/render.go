@@ -168,7 +168,29 @@ func hooksOf(l Loop) hooksView {
 	h := l.Entry.Hooks
 	hv := hooksView{AfterCreate: h.AfterCreate, BeforeRun: h.BeforeRun, AfterRun: h.AfterRun, TimeoutMS: h.TimeoutMS}
 	defaultHooks(l.Entry.Tracker.Kind, &hv)
+	hv.AfterCreate = withPreamble(hv.AfterCreate, hookPreamble)
+	hv.BeforeRun = withPreamble(hv.BeforeRun, hookPreamble)
+	hv.AfterRun = withPreamble(hv.AfterRun, hookPreamble+afterRunPreamble)
 	return hv
+}
+
+// The preambles export the JIG_* names from the engine's SORTIE_* values.
+// The engine passes only SORTIE_* variables to hooks, so the JIG_* names
+// are assigned inside the hook script. A hook given as a file path is a
+// shell command line like any other, so the exported names reach the file.
+const hookPreamble = `JIG_ISSUE_ID=$SORTIE_ISSUE_ID JIG_ISSUE_IDENTIFIER=$SORTIE_ISSUE_IDENTIFIER JIG_WORKSPACE=$SORTIE_WORKSPACE JIG_ATTEMPT=$SORTIE_ATTEMPT JIG_TRACKER_PROJECT=$SORTIE_TRACKER_PROJECT
+export JIG_ISSUE_ID JIG_ISSUE_IDENTIFIER JIG_WORKSPACE JIG_ATTEMPT JIG_TRACKER_PROJECT
+`
+
+const afterRunPreamble = `JIG_SELF_REVIEW_STATUS=$SORTIE_SELF_REVIEW_STATUS JIG_SELF_REVIEW_SUMMARY_PATH=$SORTIE_SELF_REVIEW_SUMMARY_PATH
+export JIG_SELF_REVIEW_STATUS JIG_SELF_REVIEW_SUMMARY_PATH
+`
+
+func withPreamble(script, preamble string) string {
+	if script == "" {
+		return ""
+	}
+	return preamble + script
 }
 
 func polling(l Loop) int {

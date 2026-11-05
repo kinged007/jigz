@@ -57,6 +57,10 @@ func TestShippedDiff(t *testing.T) {
 		// safety net (shipped predates dispatch.default). The marker
 		// is already stripped by structure and db_path matches.
 		gotLines = filterShippedNoise(gotLines)
+		for i, l := range gotLines {
+			l = strings.ReplaceAll(l, "$JIG_ISSUE_IDENTIFIER", "$SORTIE_ISSUE_IDENTIFIER")
+			gotLines[i] = strings.ReplaceAll(l, "$JIG_TRACKER_PROJECT", "$SORTIE_TRACKER_PROJECT")
+		}
 		wantLines = filterShippedNoise(wantLines)
 		var diffs []string
 		for i := 0; i < len(gotLines) || i < len(wantLines); i++ {
@@ -165,12 +169,17 @@ func normalize(lines []string) []string {
 
 // filterShippedNoise drops the intentional differences until phase 3b
 // rewires the CLI: the agent command line, the standby pi block, and
-// the dispatch safety net the shipped files predate.
+// the dispatch safety net the shipped files predate. The hook preambles
+// and the JIG_* names in the default hooks map to the shipped SORTIE_* names.
 func filterShippedNoise(lines []string) []string {
 	var out []string
 	for _, l := range lines {
 		t := strings.TrimSpace(l)
 		switch {
+		case strings.HasPrefix(t, "JIG_ISSUE_ID="),
+			strings.HasPrefix(t, "JIG_SELF_REVIEW_STATUS="),
+			strings.HasPrefix(t, "export JIG_"):
+			continue
 		case strings.Contains(l, "command:"),
 			t == "pi:",
 			strings.Contains(l, `model: "sonnet"`),

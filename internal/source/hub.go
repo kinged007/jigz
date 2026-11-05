@@ -368,6 +368,7 @@ func validateEnv(repo, staged string) []string {
 	_ = os.MkdirAll(ws, 0o755)
 	env := []string{
 		"SORTIE_TRACKER_PROJECT=" + repo,
+		"JIG_TRACKER_PROJECT=" + repo,
 		"SORTIE_TRACKER_API_KEY=validate-only",
 		"JIG_WORKSPACES=" + ws,
 	}

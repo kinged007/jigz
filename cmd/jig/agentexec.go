@@ -95,6 +95,9 @@ func runAgentTarget(cfg *config.Config, state machine.State, statePath string, f
 		}
 	}
 	var env []string
+	if wd, err := os.Getwd(); err == nil {
+		env = append(env, "JIG_WORKSPACE="+wd)
+	}
 	for _, k := range sortedKeys(a.Env) {
 		v := a.Env[k]
 		if v.FromEnv != "" {

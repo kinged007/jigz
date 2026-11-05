@@ -88,7 +88,7 @@ tracker:                  # defaults for every work entry; work.<slug>.tracker o
   project: owner/repo
   in_progress_state: in-progress
   handoff_state: agent:done
-hooks:                    # defaults; work.<slug>.hooks overrides; timeout_ms >= 0
+hooks:                    # defaults; work.<slug>.hooks overrides; timeout_ms >= 0; variables: see Hook environment
   timeout_ms: 60000
 agents:                   # runtime is required: any agent kind the engine registers; model passes through unvalidated
   coder:
@@ -177,7 +177,7 @@ tracker:                     # defaults for every work entry; work.<slug>.tracke
   kind: github
   api_key: { from_env: JIG_TRACKER_TOKEN }  # credential: reference only
   project: owner/repo                       # a reference or a plain string
-hooks:                       # defaults; work.<slug>.hooks overrides
+hooks:                       # defaults; work.<slug>.hooks overrides; variables: see "Hook environment"
   after_create: ./hooks/create.sh
   before_run: ./hooks/before.sh
   after_run: ./hooks/after.sh
@@ -185,7 +185,7 @@ hooks:                       # defaults; work.<slug>.hooks overrides
 agents:
   builder:
     runtime: claude-code     # any agent kind the engine registers
-    # command: claude        # required unless the runtime is claude-code (claude) or pi (pi)
+    # command: claude        # required unless the runtime is claude-code (claude) or pi (pi); see Agent runtimes
     model: claude-sonnet-5-5 # passed to the runtime unvalidated
     schedule:                # omitted = always available
       timezone: Europe/Madrid
@@ -223,7 +223,7 @@ launch and validates and resolves the remaining sections.
 | `managed` | bool | `true` | `false` = the document is neither generated nor overwritten; `validate` reports it as unmanaged |
 | `query_filter` | string | shipped default for the loop | The complete tracker query; wins over `filters:` and the shipped default; `assignee:@me` is appended at launch |
 | `tracker` | mapping | top-level `tracker` | Overlay: `kind`, `api_key`, `project`, `active_states`, `in_progress_state`, `handoff_state` |
-| `hooks` | mapping | top-level `hooks` | Overlay: `after_create`, `before_run`, `after_run`, `timeout_ms` |
+| `hooks` | mapping | top-level `hooks` | Overlay: `after_create`, `before_run`, `after_run`, `timeout_ms`. Scripts can read the `JIG_*` variables in [Hook environment](#hook-environment) |
 | `max_concurrent_agents` | int | `1` in the generated document | `0`/absent renders `1` |
 | `max_turns` | int | `10` in the generated document | `0`/absent renders `10` |
 | `max_sessions` | int | none | Rendered as `agent.max_sessions` only when above `0`; `0`/absent renders nothing (the engine default, unlimited). See [Session cap](#session-cap) |
@@ -331,6 +331,43 @@ work:
     hooks:
       timeout_ms: 30000           # this entry only; scripts still inherit
 ```
+
+#### Hook environment
+
+Every hook script (`after_create`, `before_run`, `after_run`) starts with a
+short generated preamble that exports the variables below. Use these
+names in hook scripts, including scripts the config points at by path.
+
+| Variable | Meaning | Hooks |
+|---|---|---|
+| `JIG_ISSUE_ID` | Stable tracker-internal id of the item | all |
+| `JIG_ISSUE_IDENTIFIER` | Item identifier, for example `owner/repo#123` | all |
+| `JIG_WORKSPACE` | Absolute path of the item's workspace | all |
+| `JIG_ATTEMPT` | Current attempt number | all |
+| `JIG_TRACKER_PROJECT` | Tracker project, `owner/repo` | all |
+| `JIG_SELF_REVIEW_STATUS` | Self-review outcome: `disabled`, `passed`, `cap_reached` or `error` | `after_run` |
+| `JIG_SELF_REVIEW_SUMMARY_PATH` | Path of the self-review summary; empty when self-review wrote none | `after_run` |
+
+The engine's own names (`SORTIE_ISSUE_ID`, `SORTIE_ISSUE_IDENTIFIER`,
+`SORTIE_WORKSPACE`, `SORTIE_ATTEMPT`, `SORTIE_TRACKER_PROJECT`,
+`SORTIE_SELF_REVIEW_STATUS`, `SORTIE_SELF_REVIEW_SUMMARY_PATH`) still work
+in hooks. Hooks run with a restricted environment: `PATH`, `HOME` and a few
+other standard variables plus the engine's `SORTIE_*` variables. Other
+variables of the supervisor are not passed.
+
+Agent processes do not receive the item id, identifier or attempt; prompts
+use `{{ .issue.identifier }}` instead. They receive `JIG_WORKSPACE` (their
+working directory, set by `jig agent-exec`), `JIG_TRACKER_PROJECT` and
+`JIG_WORKSPACES` (the workspace root).
+
+```yaml
+hooks:
+  before_run: |
+    git checkout -B "auto/$JIG_ISSUE_IDENTIFIER" origin/main
+```
+
+A hook can be a file path, for example `before_run: ./hooks/before.sh`.
+The preamble runs first, so the file reads the same `JIG_*` variables.
 
 ### Workspace cleanup
 
@@ -665,9 +702,33 @@ agents:
   pi-api:       { runtime: pi, model: sonnet,
                   env: { ANTHROPIC_API_KEY: { from_env: ANTHROPIC_API_KEY } } }
 
+  codex-api:    { runtime: codex, command: codex, model: gpt-5.4,
+                  env: { OPENAI_API_KEY: { from_env: OPENAI_API_KEY } } }
+
 pools:
-  build-pool: [claude-main, claude-spare, pi-api]   # ordered fallback
+  build-pool: [claude-main, claude-spare, pi-api, codex-api]   # ordered fallback
 ```
+
+#### Agent runtimes
+
+`runtime` names an agent kind the engine registers. Generated documents run
+every agent through `jig agent-exec`, which starts the agent's `command`, so
+jig needs the executable name even where the engine has its own default.
+
+| Runtime | Default `command` | Notes |
+|---|---|---|
+| `claude-code` | `claude` | Usage-limit detection and transcript reading are built in |
+| `pi` | `pi` | Usage-limit detection and transcript reading are built in. Registered by the default engine only; the upstream engine profile lacks it |
+| `codex` | required | Set `command: codex` |
+| `opencode` | required | Set `command: opencode` |
+| `copilot-cli` | required | Set `command: copilot` |
+| `agent-client-protocol` | required | The engine has no default command either |
+| `mock` | required | Test agent of the engine |
+
+For every runtime, `model` is written to the settings block named after the
+runtime. `jig agent-exec` works with all of them. Stdout-based usage-limit
+detection and transcript viewing in the dashboard cover `claude-code` and
+`pi` only; for other runtimes limits are detected from stderr lines.
 
 A credential is always a reference to an environment variable of the
 supervising process (`{ from_env: NAME }`); a literal secret is
