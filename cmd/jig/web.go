@@ -122,8 +122,10 @@ func agentLabel(kind string) string {
 		return "Pi"
 	case "codex":
 		return "Codex"
-	case "cursor":
-		return "Cursor"
+	case "opencode":
+		return "OpenCode"
+	case "copilot-cli":
+		return "Copilot"
 	default:
 		return kind
 	}

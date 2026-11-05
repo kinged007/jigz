@@ -101,7 +101,7 @@ func TestNameResolution(t *testing.T) {
 		{"next names an earlier rule", "work:\n  issues:\n    rules:\n    - {name: a, prompt: p.md}\n    - {name: b, prompt: p.md, next: a}\n", `work.issues.rules[1].next: "a" does not name a later rule`},
 		{"next names a missing rule", "work:\n  issues:\n    rules:\n    - {name: a, prompt: p.md, next: ghost}\n", `work.issues.rules[0].next: "ghost" does not name a later rule`},
 		{"empty runtime", "agents:\n  a: {model: m}\n", "agents.a.runtime is required"},
-		{"runtime without default command", "agents:\n  a: {runtime: codex}\n", `agents.a.command: required for runtime "codex"`},
+		{"runtime without default command", "agents:\n  a: {runtime: agent-client-protocol}\n", `agents.a.command: required for runtime "agent-client-protocol"`},
 		{"bad engine version", "engine:\n  version: 1.28\n", "engine.version"},
 		{"bad work name", "work:\n  my slug:\n    query_filter: x\n", "work.my slug"},
 	}
@@ -230,5 +230,13 @@ func TestAgentRuntimeWithoutDefaultNeedsCommand(t *testing.T) {
 	}
 	if got := cfg.Agents["a"]; got.Runtime != "codex" || got.Command != "codex" {
 		t.Errorf("agent = %+v", got)
+	}
+}
+
+func TestAgentsWithoutCommandForEngineDefaultRuntimes(t *testing.T) {
+	for _, rt := range []string{"codex", "opencode", "copilot-cli"} {
+		if _, err := loadWithConfig(t, "agents:\n  a: {runtime: "+rt+"}\n", nil); err != nil {
+			t.Errorf("%s: %v", rt, err)
+		}
 	}
 }

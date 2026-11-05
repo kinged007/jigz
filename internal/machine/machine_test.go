@@ -125,7 +125,7 @@ func TestLoadValidation(t *testing.T) {
 		{"no name", "pool:\n  - runtime: pi\n", "pool[0].name"},
 		{"dup name", "pool:\n  - {name: a, runtime: pi}\n  - {name: a, runtime: pi}\n", "pool[1].name"},
 		{"empty runtime", "pool:\n  - {name: a}\n", "pool[0].runtime is required"},
-		{"runtime without default command", "pool:\n  - {name: a, runtime: pi}\n  - {name: b, runtime: codex}\n", `pool[1].command: required for runtime "codex"`},
+		{"runtime without default command", "pool:\n  - {name: a, runtime: pi}\n  - {name: b, runtime: agent-client-protocol}\n", `pool[1].command: required for runtime "agent-client-protocol"`},
 		{"entry end", "pool:\n  - {name: a, runtime: pi, hours: {end: stop}}\n", "pool[0].hours.end"},
 		{"entry window", "pool:\n  - name: a\n    runtime: pi\n    hours:\n      windows:\n        - {days: [mon], start: \"x\", end: \"10:00\"}\n", "pool[0].hours.windows[0].start"},
 		{"reset", "limits:\n  default_reset: soon\n", "limits.default_reset"},
@@ -529,5 +529,21 @@ func TestPoolRuntimeCommand(t *testing.T) {
 	c := mustLoad(t, "pool:\n  - {name: a, runtime: codex, command: codex}\n  - {name: b, runtime: pi}\n")
 	if c.Pool[0].Command != "codex" || c.Pool[1].Command != "pi" {
 		t.Fatalf("pool = %+v", c.Pool)
+	}
+}
+
+func TestDefaultCommand(t *testing.T) {
+	for runtime, want := range map[string]string{
+		"claude-code":           "claude",
+		"pi":                    "pi",
+		"codex":                 "codex app-server",
+		"opencode":              "opencode",
+		"copilot-cli":           "copilot",
+		"agent-client-protocol": "",
+		"mock":                  "",
+	} {
+		if got := DefaultCommand(runtime); got != want {
+			t.Errorf("DefaultCommand(%q) = %q, want %q", runtime, got, want)
+		}
 	}
 }

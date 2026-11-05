@@ -185,7 +185,7 @@ hooks:                       # defaults; work.<slug>.hooks overrides; variables:
 agents:
   builder:
     runtime: claude-code     # any agent kind the engine registers
-    # command: claude        # required unless the runtime is claude-code (claude) or pi (pi); see Agent runtimes
+    # command: claude        # split on whitespace, no shell; required only for agent-client-protocol and mock; see Agent runtimes
     model: claude-sonnet-5-5 # passed to the runtime unvalidated
     schedule:                # omitted = always available
       timezone: Europe/Madrid
@@ -702,7 +702,7 @@ agents:
   pi-api:       { runtime: pi, model: sonnet,
                   env: { ANTHROPIC_API_KEY: { from_env: ANTHROPIC_API_KEY } } }
 
-  codex-api:    { runtime: codex, command: codex, model: gpt-5.4,
+  codex-api:    { runtime: codex, model: gpt-5.4,
                   env: { OPENAI_API_KEY: { from_env: OPENAI_API_KEY } } }
 
 pools:
@@ -713,15 +713,17 @@ pools:
 
 `runtime` names an agent kind the engine registers. Generated documents run
 every agent through `jig agent-exec`, which starts the agent's `command`, so
-jig needs the executable name even where the engine has its own default.
+jig has its own default command per runtime. The engine's defaults are the same.
+A `command` is split on whitespace and run without a shell; the engine's
+arguments are appended.
 
 | Runtime | Default `command` | Notes |
 |---|---|---|
 | `claude-code` | `claude` | Usage-limit detection and transcript reading are built in |
 | `pi` | `pi` | Usage-limit detection and transcript reading are built in. Registered by the default engine only; the upstream engine profile lacks it |
-| `codex` | required | Set `command: codex` |
-| `opencode` | required | Set `command: opencode` |
-| `copilot-cli` | required | Set `command: copilot` |
+| `codex` | `codex app-server` | |
+| `opencode` | `opencode` | |
+| `copilot-cli` | `copilot` | |
 | `agent-client-protocol` | required | The engine has no default command either |
 | `mock` | required | Test agent of the engine |
 
