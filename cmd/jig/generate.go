@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -220,26 +221,24 @@ func ensurePrompts(root string, docs []generatedDoc) ([]string, error) {
 
 // copyDir copies a directory tree of files.
 func copyDir(src, dst string) error {
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(dst, 0o755); err != nil {
-		return err
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(src, e.Name()))
+	return filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(filepath.Join(dst, e.Name()), data, 0o644); err != nil {
+		rel, err := filepath.Rel(src, p)
+		if err != nil {
 			return err
 		}
-	}
-	return nil
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
 }
 
 // promptRefs lists the template paths a rendered document points at.
