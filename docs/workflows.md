@@ -166,7 +166,10 @@ and end by removing your trigger and adding `agent:done`.
 model rules), the engine profile per work entry (older than 1.27.0
 fails; unknown versions warn), generation drift per loop, `cleanup`,
 `budgets`, a token warning, `max_usd` warnings, then each installed
-workflow through the engine's own `validate` with capability gating:
+workflow through the engine's own `validate` with capability gating.
+Both the human and `--json` output start with the repo root and the
+exact `.jigz/config.yaml` path, so a failure says which checkout holds
+the config to fix.
 
 - engine too old → fail, no loop starts;
 - `tracker.kind` the engine did not register (e.g. `github-pr` on an

@@ -9,6 +9,8 @@ import (
 
 type validateOutput struct {
 	OK            bool            `json:"ok"`
+	Root          string          `json:"root"`
+	Config        string          `json:"config"`
 	Checks        []validateCheck `json:"checks"`
 	WorkflowFiles []string        `json:"workflow_files"`
 	Warnings      []string        `json:"warnings,omitempty"`
@@ -48,6 +50,13 @@ func runValidate(args []string) {
 
 func validateOutputFor(root string, asJSON bool) (string, bool) {
 	checks, files, warnings := collectValidateChecks(root)
+	// Absolute paths, so a failure says exactly which checkout's
+	// .jigz holds the config to fix — loop roots on a hub machine are
+	// not where the repo checkout is.
+	if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+	configPath := filepath.Join(root, ".jigz", "config.yaml")
 	ok := true
 	for _, c := range checks {
 		if !c.OK {
@@ -56,11 +65,13 @@ func validateOutputFor(root string, asJSON bool) (string, bool) {
 		}
 	}
 	if asJSON {
-		v := validateOutput{OK: ok, Checks: checks, WorkflowFiles: files, Warnings: warnings}
+		v := validateOutput{OK: ok, Root: root, Config: configPath, Checks: checks, WorkflowFiles: files, Warnings: warnings}
 		data, _ := json.MarshalIndent(v, "", "  ")
 		return string(data), ok
 	}
 	var b strings.Builder
+	fmt.Fprintf(&b, "root: %s\n", root)
+	fmt.Fprintf(&b, "config: %s\n", configPath)
 	if len(files) > 0 {
 		fmt.Fprintf(&b, "workflows: %s\n", strings.Join(files, ", "))
 	}
