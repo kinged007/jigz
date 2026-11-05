@@ -204,7 +204,7 @@ func ensurePrompts(root string, docs []generatedDoc) ([]string, error) {
 		if data, err := embeddedWorkflows.ReadFile("workflows/prompts/" + filepath.Base(clean)); err == nil {
 			body = data
 		} else {
-			body = []byte("# " + filepath.Base(clean) + "\n\nFill in the prompt for this rule.\n")
+			body = stubPrompt(filepath.Base(clean))
 		}
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 			return created, err

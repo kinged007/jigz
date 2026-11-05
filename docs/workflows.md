@@ -164,7 +164,9 @@ and end by removing your trigger and adding `agent:done`.
 
 `jig validate [--json]` checks, in order: the config (strict keys and
 model rules), the engine profile per work entry (older than 1.27.0
-fails; unknown versions warn), generation drift per loop, `cleanup`,
+fails; unknown versions warn), generation drift per loop, `prompts` (a
+rule prompt of a managed entry that is missing or still the generated
+stub fails), `cleanup`,
 `budgets`, a token warning, `max_usd` warnings, then each installed
 workflow through the engine's own `validate` with capability gating.
 Both the human and `--json` output start with the repo root and the

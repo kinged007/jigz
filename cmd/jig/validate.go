@@ -42,6 +42,7 @@ func collectValidateChecks(root string) ([]validateCheck, []string, []string) {
 
 	checks = append(checks, engineProfileCheck(cfg))
 	checks = append(checks, generationChecks(root)...)
+	checks = append(checks, promptsCheck(root, cfg))
 
 	if err := cfg.CheckCleanup(); err != nil {
 		checks = append(checks, validateCheck{Name: "cleanup", OK: false, Error: err.Error()})
