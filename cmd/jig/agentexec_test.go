@@ -93,7 +93,7 @@ printf 'sub=%s lit=%s\n' "$FROM_PARENT" "$LITERAL"
 }
 
 // The agent child sees its working directory, which is the item's
-// workspace, as JIG_WORKSPACE and as the engine's SORTIE_WORKSPACE.
+// workspace, as JIG_WORKSPACE.
 func TestAgentExecSetsWorkspace(t *testing.T) {
 	home := agentExecEnv(t)
 	mustWriteConfig(t, home, `repo: owner/repo
@@ -101,14 +101,14 @@ agents:
   builder: { runtime: claude-code }
 `)
 	t.Setenv("JIG_STATE_PATH", filepath.Join(home, ".jigz", "data", "state.json"))
-	t.Setenv("PATH", stubCommand(t, "claude", `printf '%s %s\n' "$JIG_WORKSPACE" "$SORTIE_WORKSPACE"
+	t.Setenv("PATH", stubCommand(t, "claude", `printf '%s\n' "$JIG_WORKSPACE"
 `)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
 	code, out, errs := execAgentExec("builder")
-	if want := wd + " " + wd + "\n"; code != 0 || out != want {
+	if want := wd + "\n"; code != 0 || out != want {
 		t.Fatalf("code=%d out=%q want=%q err=%q", code, out, want, errs)
 	}
 }
