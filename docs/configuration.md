@@ -724,7 +724,9 @@ re-reads it live; no restart follows. The return to the primary waits
 until the pick survives consecutive ticks, so a flapping limit does
 not rewrite the document twice. `jig status` shows the agent, the
 primary and the fallback reason per loop, and the Operations page
-alerts while a loop runs a standby agent.
+alerts while a loop runs a standby agent. A document rendered for any
+candidate agent is current: `jig validate` accepts it, and `setup`,
+`start` and `reload` leave it unchanged.
 
 A usage limit is usually detected by `agent-exec` during the engine's credential
 check, which runs before each worker run. The run then fails before the turn

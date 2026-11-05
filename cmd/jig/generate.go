@@ -33,6 +33,8 @@ type generatedDoc struct {
 	Loop    string
 	Text    []byte
 	Managed bool
+	// Standby holds the renders for the loop's other candidate agents.
+	Standby [][]byte
 }
 
 // generateDocs loads the config, resolves the engine profile per work
@@ -85,7 +87,7 @@ func generateDocs(root string) ([]generatedDoc, []string, error) {
 			if err != nil {
 				return nil, nil, fmt.Errorf("work.%s: %w", slug, err)
 			}
-			docs = append(docs, generatedDoc{Loop: l.Name, Text: text, Managed: res.Managed})
+			docs = append(docs, generatedDoc{Loop: l.Name, Text: text, Managed: res.Managed, Standby: standbyRenders(p, l, cfg.Agents, jigPath)})
 		}
 	}
 	sort.Slice(docs, func(i, j int) bool { return docs[i].Loop < docs[j].Loop })
@@ -139,6 +141,38 @@ func validateOutputSuffix(out string) string {
 	return ": " + strings.TrimSpace(out)
 }
 
+// standbyRenders renders the loop for each candidate agent except the
+// primary, the way the supervisor does when the gate picks a standby.
+// Candidates the engine profile does not support are left out.
+func standbyRenders(p gen.Profile, l gen.Loop, agents map[string]config.Agent, jigPath string) [][]byte {
+	var out [][]byte
+	for _, name := range l.Agents {
+		if name == l.Agent {
+			continue
+		}
+		alt, ok := l.ForAgent(agents, name)
+		if !ok || (alt.Runtime != "" && !p.SupportsAgent(alt.Runtime)) {
+			continue
+		}
+		text, err := gen.Render(p, alt, agents, jigPath, defaultPrompt)
+		if err != nil {
+			continue
+		}
+		out = append(out, text)
+	}
+	return out
+}
+
+// matchesAny reports whether disk equals one of the renders.
+func matchesAny(disk []byte, renders [][]byte) bool {
+	for _, r := range renders {
+		if string(disk) == string(r) {
+			return true
+		}
+	}
+	return false
+}
+
 // promoteDocs writes rendered documents, keeping a .bak copy when a
 // file on disk differs. Unmanaged loops are never written. It returns
 // what changed, so setup can report it and reload can decide.
@@ -157,9 +191,12 @@ func promoteDocs(root string, docs []generatedDoc) (genSummary, error) {
 		}
 		path := gen.DocPath(root, d.Loop)
 		text := d.Text
-		st, _, _, err := gen.Check(path, true, func() ([]byte, error) { return text, nil })
+		st, disk, _, err := gen.Check(path, true, func() ([]byte, error) { return text, nil })
 		if err != nil {
 			return sum, fmt.Errorf("loop %s: %w", d.Loop, err)
+		}
+		if st == gen.Drift && disk != nil && matchesAny(disk, d.Standby) {
+			st = gen.Clean
 		}
 		switch st {
 		case gen.Clean:
@@ -308,27 +345,8 @@ func driftReports(root string) (map[string]string, error) {
 			if err != nil {
 				return nil, fmt.Errorf("loop %s: %w", l.Name, err)
 			}
-			if st == gen.Drift && disk != nil {
-				// The supervisor rewrites the document for a standby
-				// agent at idle; disk holding another candidate's
-				// render is not a hand edit.
-				for _, name := range l.Agents {
-					if name == l.Agent {
-						continue
-					}
-					alt, ok := l.ForAgent(cfg.Agents, name)
-					if !ok || (alt.Runtime != "" && !p.SupportsAgent(alt.Runtime)) {
-						continue
-					}
-					altText, err := gen.Render(p, alt, cfg.Agents, jigPath, defaultPrompt)
-					if err != nil {
-						continue
-					}
-					if string(disk) == string(altText) {
-						st = gen.Clean
-						break
-					}
-				}
+			if st == gen.Drift && disk != nil && matchesAny(disk, standbyRenders(p, l, cfg.Agents, jigPath)) {
+				st = gen.Clean
 			}
 			switch st {
 			case gen.Clean:
