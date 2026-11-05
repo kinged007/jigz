@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -817,6 +818,10 @@ func labelOn(repo, name string) (*existingLabel, error) {
 		"--search", name, "--limit", "100", "--json", "name,color,description").Output()
 	if err != nil {
 		return nil, err
+	}
+	// gh prints nothing, not "[]", when the search matches no label.
+	if len(bytes.TrimSpace(out)) == 0 {
+		return nil, nil
 	}
 	var labels []struct {
 		Name        string `json:"name"`
