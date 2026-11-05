@@ -247,7 +247,12 @@ does not count. The running session is not counted. When an issue has
 used the cap, the engine stops dispatching it, posts one comment on the
 issue that names the cap and `agent.max_sessions` as the setting that
 raises it, and holds the issue until the cap is raised above the count or
-removed, or the issue leaves the active states. Use it to bound
+removed, or the issue leaves the active states.
+The generated document also lists a `tracker_comment` entry in
+`notifications` with the events `auto_merge.merged` and `budget.held`. The
+engine's implicit budget-hold comment is deprecated and draws a validate
+warning; the entry keeps that comment and the auto-merge comment posted.
+Without `max_sessions` the document has no `notifications` key. Use it to bound
 review-and-revise rounds on a PR: with one loop for the PR workflow and
 `max_sessions: 4`, a PR gets at most four sessions in that loop.
 

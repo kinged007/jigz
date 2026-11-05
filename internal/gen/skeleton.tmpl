@@ -61,7 +61,14 @@ agent:
 {{.RuntimeBlockName}}:
   model: "{{.Model}}"
 
-# The first matching rule wins, so an item carrying two rule labels runs
+{{if .MaxSessions}}# The engine's implicit budget-hold comment is deprecated. This entry
+# lists it with auto_merge.merged, the other implicit comment, so the
+# comments posted stay the same.
+notifications:
+  - kind: tracker_comment
+    events: [auto_merge.merged, budget.held]
+
+{{end}}# The first matching rule wins, so an item carrying two rule labels runs
 # the earlier rule first. dispatch.default is the safety net: the engine
 # dispatches a query-matching item that matches no rule, and this keeps
 # that dispatch inside a prompt of ours.
