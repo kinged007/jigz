@@ -33,52 +33,25 @@ completion, stop them and verify that each one is gone.
    Only signal PIDs or process groups you created and recorded. Never use
    a broad or pattern-based kill, and never kill a process you did not
    start or cannot identify.
-3. For the Obscura CDP server, use this one-hour bounded wrapper. Keep it
-   in the foreground when possible and record its PID and storage
-   directory if it must be backgrounded:
-
-   ```bash
-   timeout --signal=TERM --kill-after=15s 1h \
-     obscura serve --allow-private-network --storage-dir <session-dir>
-   ```
-
+3. Bound every background process with a timeout wrapper, for example
+   `timeout --signal=TERM --kill-after=15s 1h <command>`. Keep it in the
+   foreground when possible and record its PID if it must be backgrounded.
 4. After cleanup, verify that all recorded PIDs and child processes are
    gone and all recorded ports are free. Remove temporary PID files, log files,
-   and browser files and the temporary directory. If cleanup
+   and temporary directories. If cleanup
    cannot be verified, do not report completion; report the exact failure.
 
-## Dev environment and verification
+## Verification
 
-Only needed when the change has a UI or a runtime to exercise.
+Run the project's checks the way its docs and CI define them (AGENTS.md,
+CONTRIBUTING.md, README, Makefile/justfile/package scripts,
+.github/workflows). Name the commands you ran and where they came from. Do
+not invent or install a toolchain.
 
-1. Start the stack with the repo's own dev command (README, `AGENTS.md`,
-   `Makefile`, or equivalent) — it usually installs dependencies, migrates,
-   and seeds on first run. The process lifecycle rules above apply to
-   whatever it spawns.
-2. Read the repo's docs on seeding dev content (README, `docs/`, seed
-   scripts, fixtures) to find the seeded accounts; they also show in the
-   dev startup output. Log in with a seeded account for visual or manual
-   verification. If the task needs a different user shape, seed one
-   following the repo's existing seed patterns or register through the UI —
-   never hardcode ad-hoc credentials in the codebase.
-3. Pick the tool by what the check needs:
-   - `obscura` for a single page load: read text/html/markdown/links, run
-     `--eval`, take a screenshot. Fast, no setup.
-   - Playwright for everything stateful: clicks, form submits, login,
-     multi-step navigation, session state, and any claim that a flow
-     worked.
-
-   `obscura` keeps no session between steps and cannot interact with
-   elements, so it cannot verify a flow. Never cite it as evidence for one.
-4. For a Playwright run: pin `playwright` in the devDependencies of the app
-   that serves the UI and run the script from that app's directory, keep
-   chromium in the shared per-user cache (`npx playwright install chromium`
-   once — never a global install), launch headless inside a `timeout` and
-   close the browser in the same script, print the observable result
-   (`p.url()`, a fetched record, a visible error) instead of only
-   screenshotting, and keep artifacts in `/tmp`, removed at the end of the
-   run. Read `skill-search view browser-verification` for the full
-   procedure before the first Playwright check.
+If the change has a user interface and the repo documents how to verify it
+(a dev command, e2e tests, a browser tool), follow that and report the
+observable result. A single static page load does not prove a multi-step
+flow. The process lifecycle rules above apply to whatever you start.
 
 ## Step 1: Gather PR information and existing discussion
 
@@ -112,20 +85,14 @@ Combine all findings, categorized by severity (Critical, High, Medium,
 Low), and close with a recommendation (Approve, Approve with Conditions,
 or Request Changes).
 
-Frontend rule: if the diff touches the frontend directly or indirectly
-(web code, API shapes the UI consumes, emails the UI triggers), obtain
-visual evidence with screenshots and review the visual changes before
-posting. Start the dev stack from the workspace (`make dev`; fall back
-to the repo README's dev command) and capture the affected surfaces with
-the tools in **Dev environment and verification** above: `obscura fetch
---allow-private-network <url> -s shot.png` for server-rendered pages, and
-Playwright for anything that needs a login, a click, or a JS-rendered
-flow. A gated page is only valid when the screenshot was taken logged in
-with a seeded account. No visual evidence on a
-frontend-touching PR means no approval: cap the recommendation at
-Request Changes (pending screenshots) and post with `--comment` rather
-than `--approve`. If the app cannot run locally, note the reason under
-`## Visual Evidence`.
+Visual evidence: if the diff touches a user interface and the repo
+documents how to verify it, follow that method from the workspace and
+capture the affected surfaces as screenshots before posting. Gated
+surfaces need the access the repo documents for verification. When the
+repo documents a method and no visual evidence was obtained, cap the
+recommendation at Request Changes (pending screenshots) and post with
+`--comment` rather than `--approve`. If the repo documents no method or
+the app cannot run locally, note the reason under `## Visual Evidence`.
 
 `gh pr review` has no `--attach` flag, so screenshots cannot ride on
 the review call. Post the review first, then attach the images with a
@@ -137,7 +104,7 @@ Repeat `--attach` for additional shots (max 50 per comment). A
 `![alt](./shot.png)` reference in `--body` is rewritten to the uploaded
 asset URL; attached files the body does not reference are appended
 automatically. After the evidence is uploaded and cleanup is verified,
-remove the screenshots and Obscura storage.
+remove the screenshots and any tool storage.
 
 Post the review with:
 
