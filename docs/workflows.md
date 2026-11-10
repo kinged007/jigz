@@ -27,9 +27,16 @@ file, and while a legacy `WORKFLOW.plan.md`/`build.md`/`review.md`/
 `review-fix.md`/`merge.md` file exists, the consolidated
 `WORKFLOW.issues.md`/`WORKFLOW.prs.md` pair is not written.
 
-Custom loops are hand-written: drop in `WORKFLOW.triage.md` and it starts
-as a loop named `triage` on the next run, backed by a `work.triage`
-entry and its labels (full example below). Missing prompt files are
+Only `work:` entries are installed and run. Setup installs a shipped
+`WORKFLOW.<slug>.md` only when `work:` has an entry named `<slug>`, and
+installs none when the config cannot be loaded. A run starts only the
+loops named by `work:` keys. Any other `WORKFLOW.*.md` file in
+`.jigz/workflows/` is left in place and not started. A config with only
+`work.ops` runs one loop, `ops`, with no `issues` or `prs` loop.
+
+Custom loops are hand-written: drop in `WORKFLOW.triage.md` and add a
+`work.triage` entry and its labels (full example below); it starts as a
+loop named `triage` on the next run. Missing prompt files are
 stubbed at generation (`# triage.md — Fill in the prompt for this rule.`)
 for the owner to fill in.
 

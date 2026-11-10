@@ -139,8 +139,22 @@ func shippedQueryFilter(t *testing.T, slug string) string {
 	return ""
 }
 
+func unmanagedConfig(slugs ...string) string {
+	body := retireBase + "work:\n"
+	for _, slug := range slugs {
+		body += "  " + slug + `:
+    managed: false
+    query_filter: "label:agent:build,in-progress -label:needs-human"
+    agent: builder
+    rules:
+      - { name: build, match: { labels: [agent:build] }, prompt: prompts/build.md }
+`
+	}
+	return body
+}
+
 func TestSyncWorkflowsKeepsEditsFillsGaps(t *testing.T) {
-	root := t.TempDir()
+	root := writeGenConfig(t, unmanagedConfig("issues", "prs"))
 	if legacy := syncWorkflows(root); len(legacy) != 0 {
 		t.Fatalf("fresh repo reported legacy files %v", legacy)
 	}
@@ -173,7 +187,7 @@ func TestSyncWorkflowsKeepsEditsFillsGaps(t *testing.T) {
 }
 
 func TestSyncWorkflowsSkipsConsolidatedFilesWhileLegacyExist(t *testing.T) {
-	root := t.TempDir()
+	root := writeGenConfig(t, unmanagedConfig("issues", "prs", "plan", "merge"))
 	dir := filepath.Join(root, ".jigz", "workflows")
 	os.MkdirAll(dir, 0o755)
 	const old = "---\n# old plan\n"
@@ -345,7 +359,7 @@ func TestPromptQuestionTemplatesParse(t *testing.T) {
 }
 
 func TestWarnStaleWorkflows(t *testing.T) {
-	root := t.TempDir()
+	root := writeGenConfig(t, unmanagedConfig("issues"))
 	syncWorkflows(root)
 	if got := captureStderr(t, func() { warnStaleWorkflows(root) }); got != "" {
 		t.Errorf("shipped workflows warned: %q", got)
@@ -581,7 +595,7 @@ func captureStdout(t *testing.T, fn func()) string {
 }
 
 func TestDiscoverWorkflowsPicksUpNewFile(t *testing.T) {
-	root := t.TempDir()
+	root := writeGenConfig(t, unmanagedConfig("issues", "prs", "triage"))
 	syncWorkflows(root)
 	// A hand-added workflow (no rebuild, no code change) is discovered.
 	os.WriteFile(filepath.Join(root, ".jigz", "workflows", "WORKFLOW.triage.md"), []byte("---\n"), 0o644)
@@ -644,7 +658,7 @@ func TestSelectLoops(t *testing.T) {
 // workflows setup actually installs, so a renamed or dropped loop is
 // caught here rather than by a supervisor that names it.
 func TestSelectLoopsAgainstInstalledWorkflows(t *testing.T) {
-	root := t.TempDir()
+	root := writeGenConfig(t, unmanagedConfig("issues", "prs"))
 	syncWorkflows(root)
 	all := discoverWorkflows(root)
 	if got, err := selectLoops(all, ""); err != nil || len(got) != len(all) {
@@ -875,5 +889,45 @@ func TestEnsureMachineFileCreatesDefaults(t *testing.T) {
 	}
 	if raw, _ := os.ReadFile(path); string(raw) != custom {
 		t.Fatalf("existing file was overwritten: %q", raw)
+	}
+}
+
+func TestSyncWorkflowsInstallsOnlyConfiguredSlugs(t *testing.T) {
+	root := writeGenConfig(t, unmanagedConfig("ops"))
+	syncWorkflows(root)
+	dir := filepath.Join(root, ".jigz", "workflows")
+	for _, name := range []string{"WORKFLOW.issues.md", "WORKFLOW.prs.md"} {
+		if exists(filepath.Join(dir, name)) {
+			t.Errorf("%s installed although work has no such entry", name)
+		}
+	}
+	res := &setupResult{}
+	syncWorkflowsJSON(root, res)
+	for _, name := range []string{"WORKFLOW.issues.md", "WORKFLOW.prs.md"} {
+		if exists(filepath.Join(dir, name)) {
+			t.Errorf("setup --json installed %s although work has no such entry", name)
+		}
+	}
+}
+
+func TestStrayWorkflowFilesAreNotStarted(t *testing.T) {
+	root := writeGenConfig(t, unmanagedConfig("ops"))
+	writeLoopDoc(t, root, "ops", "---\n# ops\n")
+	stray := writeLoopDoc(t, root, "issues", "---\n# stray\n")
+	if got := loopNames(discoverWorkflows(root)); got != "ops" {
+		t.Errorf("discoverWorkflows = %s, want ops only", got)
+	}
+	if !exists(stray) {
+		t.Error("stray workflow file was deleted")
+	}
+}
+
+func TestConfiguredOnlyKeepsSplitEntryLoops(t *testing.T) {
+	root := writeGenConfig(t, retireBase+retireSplitWork)
+	for _, name := range []string{"issues-builder", "issues-light", "prs"} {
+		writeLoopDoc(t, root, name, "---\n# doc\n")
+	}
+	if got := loopNames(discoverWorkflows(root)); got != "issues-builder,issues-light" {
+		t.Errorf("discoverWorkflows = %s, want issues-builder,issues-light", got)
 	}
 }

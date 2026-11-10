@@ -56,8 +56,8 @@ func TestSyncWorkflowsSkipsShippedFilesOfManagedEntries(t *testing.T) {
 	if exists(filepath.Join(dir, "WORKFLOW.issues.md")) {
 		t.Error("shipped WORKFLOW.issues.md installed for a managed entry")
 	}
-	if !exists(filepath.Join(dir, "WORKFLOW.prs.md")) {
-		t.Error("shipped WORKFLOW.prs.md not installed for a slug without an entry")
+	if exists(filepath.Join(dir, "WORKFLOW.prs.md")) {
+		t.Error("shipped WORKFLOW.prs.md installed for a slug without an entry")
 	}
 }
 
@@ -69,8 +69,8 @@ func TestSyncWorkflowsJSONSkipsShippedFilesOfManagedEntries(t *testing.T) {
 	if exists(filepath.Join(dir, "WORKFLOW.issues.md")) {
 		t.Error("shipped WORKFLOW.issues.md installed for a managed entry")
 	}
-	if !exists(filepath.Join(dir, "WORKFLOW.prs.md")) {
-		t.Error("shipped WORKFLOW.prs.md not installed for a slug without an entry")
+	if exists(filepath.Join(dir, "WORKFLOW.prs.md")) {
+		t.Error("shipped WORKFLOW.prs.md installed for a slug without an entry")
 	}
 }
 
@@ -82,11 +82,11 @@ func TestSyncWorkflowsInstallsShippedFilesForUnmanagedEntries(t *testing.T) {
 	}
 }
 
-func TestSyncWorkflowsWithBrokenConfigInstallsShippedFiles(t *testing.T) {
+func TestSyncWorkflowsWithBrokenConfigInstallsNoShippedFiles(t *testing.T) {
 	root := writeGenConfig(t, "not: [valid\n")
 	syncWorkflows(root)
-	if !exists(filepath.Join(root, ".jigz", "workflows", "WORKFLOW.issues.md")) {
-		t.Error("shipped WORKFLOW.issues.md not installed without a loadable config")
+	if exists(filepath.Join(root, ".jigz", "workflows", "WORKFLOW.issues.md")) {
+		t.Error("shipped WORKFLOW.issues.md installed without a loadable config")
 	}
 }
 

@@ -25,6 +25,20 @@ func managedSlugs(root string) map[string]bool {
 	return out
 }
 
+// workSlugs returns the keys of the config's work map, or nil when the
+// config cannot be loaded.
+func workSlugs(root string) map[string]bool {
+	cfg, err := config.Load(root)
+	if err != nil {
+		return nil
+	}
+	out := map[string]bool{}
+	for slug := range cfg.Work {
+		out[slug] = true
+	}
+	return out
+}
+
 // shippedSlug is the work entry slug a shipped WORKFLOW.<slug>.md file
 // belongs to; generation owns that file when a managed entry has the slug.
 func shippedSlug(file string) string {
