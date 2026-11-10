@@ -505,10 +505,18 @@ description, in an HTML comment block around the question text:
 
 ```
 <!-- agent-question id="q-1" audience="project" blocking="true" resume="agent:plan" -->
-**Question:** Should this ship in the first release?
-**Suggested answer:** No; split the indexer into its own issue.
+**Question:**
+1. Should this ship in the first release?
+2. Should the indexer be a separate package?
+**Suggested answer:**
+1. No; split the indexer into its own issue.
+2. Yes.
 <!-- /agent-question -->
 ```
+
+A comment holds one block. All questions go in it, numbered 1 to N, and the
+suggested answers are numbered to match. The `Question` and `Suggested
+answer` text each end at the first blank line, so the block has none.
 
 `id` is required and matches `q-` followed by up to 64 letters, digits,
 `_` or `-`. `audience` is `product` or `project`. `blocking` is `true` or
