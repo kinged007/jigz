@@ -1,4 +1,15 @@
-.PHONY: verify test acceptance
+.PHONY: verify test acceptance install
+
+PREFIX ?= $(HOME)/.local
+
+# Builds next to the target and renames it into place, so a running jig
+# keeps its old binary instead of failing with "text file busy".
+install:
+	mkdir -p $(PREFIX)/bin
+	go build -trimpath -o $(PREFIX)/bin/.jig.new ./cmd/jig
+	chmod 755 $(PREFIX)/bin/.jig.new
+	mv -f $(PREFIX)/bin/.jig.new $(PREFIX)/bin/jig
+	@echo "installed $(PREFIX)/bin/jig"
 
 verify:
 	@test -z "$$(gofmt -l cmd internal)" || { echo "gofmt needed:"; gofmt -l cmd internal; exit 1; }
