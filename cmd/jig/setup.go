@@ -346,8 +346,8 @@ func configTemplateBody(repo string) string {
 	// WORKFLOW.prs.md documents: same queries, rules, prompts and
 	// agent. Generation derives the states, hooks, db path and runtime
 	// values, so they are not repeated here. project: follows the repo
-	// above; export JIG_TRACKER_TOKEN (a GitHub token) or the loops stay
-	// offline with a reason until it is set.
+	// above. The tracker api_key line is commented out: without it the
+	// loops use the token chain.
 	return body +
 		"# Operating hours gate every loop. Omitted or empty = 24/7; windows\n" +
 		"# use days mon..sun and \"HH:MM\"; an end earlier than start wraps\n" +
@@ -361,11 +361,12 @@ func configTemplateBody(repo string) string {
 		"#      end: \"18:00\"\n" +
 		"# Tracker defaults for every work entry; work.<slug>.tracker\n" +
 		"# overrides. api_key is a { from_env: NAME } reference, never a\n" +
-		"# literal. project follows the repo above; export JIG_TRACKER_TOKEN\n" +
-		"# (a GitHub token) or the loops stay offline with a reason.\n" +
+		"# literal. When set it is the loops' tracker token and wins over\n" +
+		"# JIG_TOKEN, token:, GITHUB_TOKEN and GH_TOKEN; the variable must\n" +
+		"# be exported. Unset, the loops use that chain.\n" +
 		"tracker:\n" +
 		"  kind: github\n" +
-		"  api_key: { from_env: JIG_TRACKER_TOKEN }\n" +
+		"  #api_key: { from_env: JIG_TRACKER_TOKEN }\n" +
 		"  project: " + repo + "\n" +
 		"  in_progress_state: in-progress\n" +
 		"  handoff_state: agent:done\n" +

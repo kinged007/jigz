@@ -165,7 +165,8 @@ func validateWorkflow(dir, path string) (plan.FileResult, error) {
 			}
 		}
 	} else if cfg, err := config.Load(dir); err == nil {
-		env = append(env, cfg.Env()...)
+		token, _ := cfg.TrackerToken(cfg.TrackerDefaults)
+		env = append(env, cfg.Env(token)...)
 	}
 	cmd := exec.Command(bin, "validate", "--format", "json", path)
 	cmd.Dir = dir
