@@ -769,8 +769,12 @@ future input the estimate is empty. A paused loop is never started.
 
 When the gate closes, the end behaviour is the `end` of the
 `operating_hours` block when operating hours closed it, otherwise the
-`schedule.end` of the candidate whose hours closed it, and `finish` in
-every other case.
+`schedule.end` of the candidate whose hours closed it. When every
+candidate is exhausted, the loop stops at once, without waiting for
+running sessions, because every retry would fail and use up one of the
+issue's `agent.max_sessions`. In every other case the behaviour is `finish`.
+The loop starts again at the earliest reset among its candidates; the
+first candidate that is available then runs the loop.
 
 With a pool, the supervisor starts each loop with the agent command set to
 `jig agent-exec <agent>`. `agent-exec` runs the CLI of that fleet agent
@@ -779,7 +783,8 @@ stdout through unchanged and exits with the CLI's exit code. An unset
 credential reference makes the agent unavailable and `agent-exec` exits
 75 without running anything. When the CLI output
 reports a usage limit, the agent is marked exhausted until the reset time in
-the message, or one hour later when the message carries none. The state is stored in
+the message (`resets 1:10am (UTC)` or an epoch after `|`), or one hour later
+when the message carries none. The state is stored in
 `<repo root>/.jigz/data/state.json`, created by `jig setup` and kept out
 of commits by the `.jigz/` gitignore rule. A `pool.json` written by an
 older jig in the per-user state directory is still read and never
@@ -800,6 +805,26 @@ primary and the fallback reason per loop, and the Operations page
 alerts while a loop runs a standby agent. A document rendered for any
 candidate agent is current: `jig validate` accepts it, and `setup`,
 `start` and `reload` leave it unchanged.
+
+A usage limit is recognised in these lines of the CLI output: an error
+event of the runtime on stdout (for `claude-code`, a `result` event with
+`is_error`; for `pi`, a message with `stopReason` `error`), a stderr line
+with error wording, and a plain line on stdout or stderr that starts with
+`You've hit your` (for example `You've hit your 5-hour limit · resets
+1:10am (UTC)`). The text must contain a phrase such as `usage limit`,
+`limit reached`, `hit your 5-hour limit`, `hit your weekly limit`,
+`insufficient_quota`, `quota exceeded` or `out of credits`, or match a
+pattern of the machine file's `limits` block. Agent prose inside
+`assistant` events is never checked. The run history class
+`failed_limit` uses the same phrases on the engine's error text, so a
+limit that surfaces as a failed credential check is classed `failed_limit`.
+
+The supervisor reads `state.json` every 2 seconds, so a limit reaches the
+gate before the engine's first retry. Each engine run, including one that
+`agent-exec` refuses with exit 75, is recorded in the workflow database and
+counts toward `agent.max_sessions` of that issue; the count survives a loop
+restart. Runs that fail on a limit therefore use up the budget unless the gate
+stops the loop first.
 
 A usage limit is usually detected by `agent-exec` during the engine's credential
 check, which runs before each worker run. The run then fails before the turn

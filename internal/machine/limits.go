@@ -8,7 +8,15 @@ import (
 	"time"
 )
 
-var BuiltinLimit = regexp.MustCompile(`(?i)usage limit|limit reached|limit exhausted|insufficient_quota|quota exceeded|out of credits`)
+// BuiltinLimit matches the usage-limit wordings of the agent CLIs,
+// including Claude's "You've hit your 5-hour limit" and "weekly limit".
+// The error classification of run history uses it too.
+var BuiltinLimit = regexp.MustCompile(`(?i)usage limit|limit reached|limit exhausted|hit your (?:[\w-]+ ){0,3}limit|\b\d+-(?:hour|day|week) limit|weekly limit|insufficient_quota|quota exceeded|out of credits`)
+
+// plainLimitRe matches a line that is a usage-limit message from its
+// first word, the form the claude-code CLI prints as plain text. Tool
+// output and prose that merely mention a limit do not start this way.
+var plainLimitRe = regexp.MustCompile(`(?i)^\W*(?:you(?:['’]ve| have) hit your\b|claude ai usage limit reached|(?:\d+-(?:hour|day|week)|weekly|monthly) limit reached)`)
 
 // BuiltinModelError matches a CLI line reporting an unknown or
 // unavailable model. The per-CLI message catalog grows as recorded
@@ -46,6 +54,9 @@ func stderrError(runtime, line string) string {
 	if s := stdoutError(runtime, line); s != "" {
 		return s
 	}
+	if plainLimitRe.MatchString(line) {
+		return strings.TrimSpace(line)
+	}
 	if !stderrErrorRe.MatchString(line) {
 		return ""
 	}
@@ -67,6 +78,9 @@ func (c *Config) DetectLimit(runtime, line string, stderr bool, now time.Time) (
 		text = stderrError(runtime, line)
 	} else {
 		text = stdoutError(runtime, line)
+		if text == "" && plainLimitRe.MatchString(line) {
+			text = strings.TrimSpace(line)
+		}
 	}
 	if text == "" || !c.isLimit(text) {
 		return time.Time{}, "", false
