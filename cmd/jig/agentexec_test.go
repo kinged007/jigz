@@ -398,3 +398,26 @@ func TestAgentExecDefaultCommandWithArguments(t *testing.T) {
 		t.Fatalf("code=%d out=%q err=%q", code, out, errs)
 	}
 }
+
+// The claude-code CLI prints its limit message as plain text, on stdout
+// or stderr, with a clock reset time.
+func TestAgentExecPlainLimitTextExhaustsTheAgent(t *testing.T) {
+	for _, tc := range []struct{ name, script string }{
+		{"stdout", `echo "You've hit your 5-hour limit · resets 1:10am (UTC)"`},
+		{"stderr", `echo "You've hit your 5-hour limit · resets 1:10am (UTC)" >&2`},
+		{"json result", `printf '{"type":"result","is_error":true,"result":"You'"'"'ve hit your 5-hour limit · resets 1:10am (UTC)"}\n'`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := agentExecEnv(t)
+			writeAgentRepo(t, home, "agents:\n  planner: { runtime: claude-code, model: m }\n")
+			t.Setenv("PATH", linkAs(t, writeAgentScript(t, tc.script+"\n"), "claude")+string(os.PathListSeparator)+os.Getenv("PATH"))
+			if code, _, _ := execAgentExec("planner"); code != 1 {
+				t.Fatalf("code=%d", code)
+			}
+			got := agentExhaustedUntil(t, "planner").UTC()
+			if !got.After(time.Now()) || got.Hour() != 1 || got.Minute() != 10 {
+				t.Fatalf("exhausted until %v, want the next 01:10 UTC", got)
+			}
+		})
+	}
+}

@@ -72,6 +72,10 @@ func TestClassifyOutcome(t *testing.T) {
 		{"usage limit port exit raw", "failed", "agent turn 1: agent: port_exit: runtime exited before responding: exit status 1: jig agent-exec: work hit a usage limit; exhausted until 2026-01-02T03:04:05Z", OutcomeFailedLimit},
 		{"usage limit port exit sentence", "failed", "The agent process ended unexpectedly: jig agent-exec: work hit a usage limit; exhausted until 2026-01-02T03:04:05Z.", OutcomeFailedLimit},
 		{"usage limit credential raw", "failed", "agent session start: agent: credential_unverified: the agent runtime refused its credential: out of credits", OutcomeFailedLimit},
+		{"5-hour limit turn raw", "failed", "agent turn 1: agent: turn_failed: You've hit your 5-hour limit · resets 1:10am (UTC)", OutcomeFailedLimit},
+		{"5-hour limit credential raw", "failed", "agent session start: agent: credential_unverified: the agent runtime did not complete a credential verification request: You've hit your 5-hour limit · resets 1:10am (UTC)", OutcomeFailedLimit},
+		{"5-hour limit credential sentence", "failed", "The agent could not confirm its credential before the first turn: the agent runtime did not complete a credential verification request: You've hit your 5-hour limit · resets 1:10am (UTC).", OutcomeFailedLimit},
+		{"weekly limit turn raw", "failed", "agent turn 1: agent: turn_failed: You've hit your weekly limit · resets 9am (UTC)", OutcomeFailedLimit},
 		{"usage limit credential sentence", "failed", "The agent could not confirm its credential before the first turn: the agent runtime refused its credential: out of credits.", OutcomeFailedLimit},
 	} {
 		t.Run(c.name, func(t *testing.T) {

@@ -152,7 +152,7 @@ func TestWorkGateDecide(t *testing.T) {
 			}},
 			now: now, loops: []gateLoop{{name: "plan", up: true}},
 			agent: "a", reason: reasonExhausted, eta: time.Date(2026, 10, 21, 14, 0, 0, 0, time.UTC),
-			end: machine.EndFinish, want: gateStopIdle,
+			end: machine.EndStop, want: gateStopNow,
 		},
 		{
 			name: "all from_env references unresolved",
@@ -644,5 +644,44 @@ func TestAnAccountClosingBetweenDecisionAndStartHoldsTheLoop(t *testing.T) {
 	r.step(t, 0)
 	if r.sup.empty() {
 		t.Fatal("the account opening did not start the held loop")
+	}
+}
+
+// When every pool member is exhausted, the loop stops at once, even with
+// a session running, and starts again at the earliest reset.
+func TestGateExhaustedPoolStopsAndRestartsAtEarliestReset(t *testing.T) {
+	r := newGateRig(t, "")
+	r.sup.sessions = r.sup.loopSessions
+	r.setConfig(t, "agents:\n  a: {runtime: pi}\n  b: {runtime: pi}\nwork:\n  plan:\n    agent: [a, b]\n")
+	r.step(t, time.Minute)
+	if r.sup.empty() {
+		t.Fatal("the loop did not start")
+	}
+	r.feed(t, dispatched7, tickBusy)
+	late, early := r.now.Add(3*time.Hour), r.now.Add(time.Hour)
+	statePath := machine.StatePath(r.root)
+	for name, until := range map[string]time.Time{"a": late, "b": early} {
+		if err := machine.MarkExhausted(statePath, name, until, "limit"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.sup.refreshState(r.now, true)
+	r.step(t, 0)
+	r.settle(t)
+	if !r.sup.empty() {
+		t.Fatal("an exhausted pool left the loop running")
+	}
+	w := r.workflow(t)
+	if w.State != "offline" || w.OfflineReason != reasonExhausted || w.ETA == nil || !w.ETA.Equal(early) {
+		t.Errorf("status %+v, want offline until %v", w, early)
+	}
+	r.now = early.Add(time.Second)
+	r.sup.refreshState(r.now, true)
+	r.step(t, 0)
+	if r.sup.empty() {
+		t.Fatal("the earliest reset did not start the loop")
+	}
+	if w := r.workflow(t); w.State != "running" || w.Agent != "b" {
+		t.Errorf("status after reset %+v, want running on b", w)
 	}
 }
