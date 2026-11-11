@@ -55,8 +55,10 @@ var promptIn *bufio.Reader
 // prompts/) into <root>/.jigz/workflows/ so they sit visible next to
 // the loop's config, env, and workspaces. A missing file is written and
 // an existing file is never changed or removed, because installed
-// workflows and prompts are hand-edited. A shipped workflow whose slug a
-// managed work entry owns is not installed. It returns the legacy workflow
+// workflows and prompts are hand-edited. A shipped workflow is installed
+// only when its slug is a key of the config's work map, and not when a
+// managed work entry owns the slug. When the config cannot be loaded, no
+// shipped workflow is installed. It returns the legacy workflow
 // files found; while there are any, WORKFLOW.issues.md and
 // WORKFLOW.prs.md are not written.
 // ponytail: no version stamp, so a file left untouched but outdated by a
@@ -80,8 +82,9 @@ func syncWorkflows(root string) []string {
 		fatal(err)
 	}
 	generated := managedSlugs(root)
+	configured := workSlugs(root)
 	for _, e := range entries {
-		if e.IsDir() || (len(legacy) > 0 && slices.Contains(consolidatedWorkflows, e.Name())) || generated[shippedSlug(e.Name())] {
+		if e.IsDir() || !configured[shippedSlug(e.Name())] || (len(legacy) > 0 && slices.Contains(consolidatedWorkflows, e.Name())) || generated[shippedSlug(e.Name())] {
 			continue
 		}
 		writeWorkflow(embeddedWorkflows, filepath.Join(dir, e.Name()), "workflows/"+e.Name(), keepEdits)
@@ -282,7 +285,38 @@ func discoverWorkflows(root string) []loopDef {
 // filesSource is the loop source of `jig <root>`: the workflows installed
 // in root, narrowed by only (JIG_ONLY).
 func filesSource(root, project, only string) source.Files {
-	return source.Files{Root: root, Project: project, Only: only, Sync: func(r string) { warnLegacy(syncWorkflows(r)) }}
+	return source.Files{Root: root, Project: project, Only: only,
+		Sync:   func(r string) { warnLegacy(syncWorkflows(r)) },
+		Filter: configuredOnly,
+	}
+}
+
+// configuredOnly keeps the discovered workflows that a work entry of
+// root's config produces: <key>, or <key>-<group> for an entry split by
+// agent (see gen.Split). Other WORKFLOW.*.md files stay on disk
+// and are not started. A config that cannot be loaded is an error. A hub
+// root holds only the files the hub served and is not filtered.
+func configuredOnly(root string, names []string) ([]string, error) {
+	if source.IsHubRoot(root) {
+		return names, nil
+	}
+	cfg, err := config.Load(root)
+	if err != nil {
+		return nil, err
+	}
+	produced := map[string]bool{}
+	for _, res := range cfg.Resolve() {
+		for _, l := range gen.Split(res, cfg.Agents) {
+			produced[l.Name] = true
+		}
+	}
+	var out []string
+	for _, n := range names {
+		if produced[n] {
+			out = append(out, n)
+		}
+	}
+	return out, nil
 }
 
 func loopDefs(loops []source.Loop) []loopDef {

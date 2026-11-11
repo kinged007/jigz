@@ -168,7 +168,8 @@ warning on stderr says so. To migrate:
 
 1. Delete the five old files, and their `.sortie-<name>.db` files if you
    do not need the run history.
-2. Rerun `jig setup` to install the two new files.
+2. Add `issues` and `prs` entries to `work:` and rerun `jig setup` to
+   install the two new files.
 3. In `.jigz/config.yaml`, rename old loop names to `issues` or `prs` in
    the `filters:` key, and move each `workflows:<name>.budget` block to
    `work:<name>.budget`. The keys `milestone`, `assignee` and `workflows`
@@ -186,14 +187,17 @@ warning on stderr says so. To migrate:
    rerun `setup`. `setup` only creates the labels in that list and prints a
    note for each shipped label that is missing from it.
 
-The loop set is just every `WORKFLOW.*.md` in `.jigz/workflows/` —
-drop in a new file (e.g. `WORKFLOW.triage.md`) and it starts as a loop
-named by its stem on the next run. Per-loop label queries can be
+The loop set is the `work:` entries of `.jigz/config.yaml`. A run starts
+a loop for each `work:` key that has a `WORKFLOW.<key>.md` in
+`.jigz/workflows/`, named by the key. Setup installs a shipped workflow
+only for a key of `work:`. A `WORKFLOW.*.md` file without a `work:` entry
+is not started. To add a loop, add a `work.<slug>` entry (e.g. `triage`)
+and its `WORKFLOW.<slug>.md`. Per-loop label queries can be
 narrowed via the `filters:` map in `.jigz/config.yaml` without
 re-running setup.
 
 `JIG_ONLY=issues` narrows the run to the named loops, for a
 supervisor that drives several repos and wants a different set per
-repo. Unset (the default) runs every installed loop. A name that
-matches no installed workflow is fatal rather than silently dropped, so
+repo. Unset (the default) runs every configured loop. A name that
+matches no configured workflow is fatal rather than silently dropped, so
 a typo cannot leave that loop's work unwatched.

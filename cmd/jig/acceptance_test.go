@@ -425,7 +425,9 @@ func TestAcceptance(t *testing.T) {
 work:
   issues:
     agent: a
-`, base, from.Format("15:04"), to.Format("15:04"))
+  prs:
+    managed: false
+`, bytes.Replace(base, []byte("work:\n  issues:\n    managed: false\n  prs:\n    managed: false\n"), nil, 1), from.Format("15:04"), to.Format("15:04"))
 			if err := os.WriteFile(cfgFile+".tmp", []byte(body), 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -1514,7 +1516,7 @@ func writeAcceptanceRepo(t *testing.T, dir, slug, token, endpoint string) {
 	if err := os.MkdirAll(filepath.Join(dir, ".jigz"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cfg := fmt.Sprintf("repo: %s\ntoken: %s\n", slug, token)
+	cfg := fmt.Sprintf("repo: %s\ntoken: %s\nwork:\n  issues:\n    managed: false\n  prs:\n    managed: false\n", slug, token)
 	if err := os.WriteFile(filepath.Join(dir, ".jigz", "config.yaml"), []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}

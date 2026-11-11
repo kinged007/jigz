@@ -3,7 +3,7 @@
 ```
 .jigz/
   config.yaml      # repo:, token:, work:, agents:, cleanup:, sleep: (all optional — see below)
-  workflows/       # installed by setup from the binary; edit freely, loop runs these
+  workflows/       # WORKFLOW.<slug>.md for each work: entry (generated, or shipped when one exists); edit freely
   .env.loop        # generated each run (resolved tracker, token, clone URL; mode 0600)
   workspaces/      # per-item agent checkouts (one subdir per loop)
   logs/            # engine child output, one <workflow>.log per loop
@@ -212,7 +212,8 @@ name, a list of names, or `{use: ..., model: ..., schedule: ...}` to
 override the fleet agent for that rule; `stage` and `next` are the
 engine's stage chaining. Work names are letters, digits and `-`; rule
 names within one entry are unique, and `next` names a later rule of the
-same entry. Loops still run the shipped `WORKFLOW.*.md` documents; the
+same entry. Only `work:` entries are installed and run: no loop exists for a
+slug that `work:` does not name. The
 supervisor reads `work.<slug>.query_filter` and `work.<slug>.budget` at
 launch and validates and resolves the remaining sections.
 

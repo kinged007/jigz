@@ -18,6 +18,9 @@ type Files struct {
 	// Sync installs the shipped workflows into Root before they are
 	// listed; nil lists what is on disk.
 	Sync func(root string)
+	// Filter narrows the discovered names before Only is applied; nil
+	// keeps them all.
+	Filter func(root string, names []string) ([]string, error)
 }
 
 func (f Files) Loops(context.Context) ([]Loop, error) {
@@ -27,6 +30,11 @@ func (f Files) Loops(context.Context) ([]Loop, error) {
 	names, err := Discover(f.Root)
 	if err != nil {
 		return nil, err
+	}
+	if f.Filter != nil {
+		if names, err = f.Filter(f.Root, names); err != nil {
+			return nil, err
+		}
 	}
 	if names, err = Select(names, f.Only); err != nil {
 		return nil, err

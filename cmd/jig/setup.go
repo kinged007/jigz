@@ -669,8 +669,13 @@ func syncWorkflowsJSON(root string, res *setupResult) []string {
 		return legacy
 	}
 	generated := managedSlugs(root)
+	configured := workSlugs(root)
 	for _, e := range entries {
 		if e.IsDir() {
+			continue
+		}
+		if !configured[shippedSlug(e.Name())] {
+			res.Skipped = append(res.Skipped, setupSkipped{Path: filepath.Join(dir, e.Name()), Reason: "not-configured"})
 			continue
 		}
 		if generated[shippedSlug(e.Name())] {
