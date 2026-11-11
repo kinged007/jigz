@@ -203,9 +203,6 @@ func (s *supervisor) childEnv(name string) (envFile string, env []string, runtim
 	if err != nil {
 		return "", nil, "", err
 	}
-	if envFile, err = writeEnvFile(s.root, cfg); err != nil {
-		return "", nil, "", err
-	}
 	s.refreshState(s.clock(), false)
 	s.mu.Lock()
 	in := s.gateInputsLocked()
@@ -227,12 +224,26 @@ func (s *supervisor) childEnv(name string) (envFile string, env []string, runtim
 			}
 		}
 	}
+	tracker, own := cfg.TrackerDefaults, ""
+	if ok {
+		tracker = res.Tracker
+		if tracker.ApiKey != cfg.TrackerDefaults.ApiKey {
+			own = name
+		}
+	}
+	token, err := cfg.TrackerToken(tracker)
+	if err != nil {
+		return "", nil, "", fmt.Errorf("%s: %w", name, err)
+	}
+	if envFile, err = writeEnvFile(s.root, own, cfg, token); err != nil {
+		return "", nil, "", err
+	}
 	// The env override replaces the workflow's query_filter; a filters:
 	// entry narrows further, it does not add to the default. For
 	// generated loops the query is the loop's narrowed filter, which
 	// keeps split loops from claiming each other's items; otherwise the
 	// legacy lookup by loop name applies.
-	env = append(os.Environ(), cfg.Env()...)
+	env = append(os.Environ(), cfg.Env(token)...)
 	env = append(env, "JIG_STATE_PATH="+machine.StatePath(s.root))
 	if q, ok := s.queryFor(name); ok && strings.TrimSpace(q) != "" {
 		env = append(env, "SORTIE_TRACKER_QUERY_FILTER="+q+" assignee:@me")

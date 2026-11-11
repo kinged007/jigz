@@ -595,24 +595,64 @@ func (c *Config) FilterFor(name string) string {
 	return base + " assignee:@me"
 }
 
-// Env returns the environment for one engine subprocess.
-// The token travels as SORTIE_TRACKER_API_KEY so it overrides
-// tracker.api_key through the engine's curated env layer.
-func (c *Config) Env() []string {
+// Env returns the environment for one engine subprocess. token is the
+// loop's tracker credential from TrackerToken; it travels as
+// SORTIE_TRACKER_API_KEY.
+func (c *Config) Env(token string) []string {
 	return []string{
 		"SORTIE_TRACKER_PROJECT=" + c.Tracker,
 		"JIG_TRACKER_PROJECT=" + c.Tracker,
-		"SORTIE_TRACKER_API_KEY=" + c.Token,
+		"SORTIE_TRACKER_API_KEY=" + token,
 		"JIG_WORKSPACES=" + c.Workspaces,
 	}
 }
 
-// CheckToken reports an error when no token resolved. An empty token
-// reaches the engine as SORTIE_TRACKER_API_KEY= and surfaces there as an
-// authentication failure partway into a run, with the loop already
-// claimed and the agent mid-work. Failing here names the cause instead.
+// TrackerToken returns the credential of a loop whose tracker settings
+// are t: the value of t.ApiKey when it is set, else the token chain
+// (JIG_TOKEN, token:, GITHUB_TOKEN, GH_TOKEN). A set api_key whose
+// variable is empty is an error; the chain is not a fallback.
+func (c *Config) TrackerToken(t Tracker) (string, error) {
+	if !t.ApiKey.set() {
+		return c.Token, nil
+	}
+	tok, ok := t.ApiKey.resolve()
+	if !ok {
+		return "", unsetKeyError("tracker.api_key", t.ApiKey.FromEnv)
+	}
+	return tok, nil
+}
+
+func unsetKeyError(key, name string) error {
+	return fmt.Errorf("%s refers to the environment variable %s, which is not set. Export %s or remove the api_key line to use JIG_TOKEN, token:, GITHUB_TOKEN or GH_TOKEN", key, name, name)
+}
+
+// CheckTrackerKeys reports a tracker.api_key, in the defaults or in a
+// work entry, whose environment variable is not set.
+func (c *Config) CheckTrackerKeys() error {
+	if name := c.TrackerDefaults.ApiKey.Unresolved(); name != "" {
+		return unsetKeyError("tracker.api_key", name)
+	}
+	for _, slug := range sortedNames(c.Work) {
+		if t := c.Work[slug].Tracker; t != nil {
+			if name := t.ApiKey.Unresolved(); name != "" {
+				return unsetKeyError("work."+slug+".tracker.api_key", name)
+			}
+		}
+	}
+	return nil
+}
+
+// CheckToken reports an error when no credential resolved: an unset
+// tracker.api_key variable, or, without tracker.api_key, an empty token
+// chain. An empty token reaches the engine as SORTIE_TRACKER_API_KEY= and
+// surfaces there as an authentication failure partway into a run, with
+// the loop already claimed and the agent mid-work. Failing here names
+// the cause instead.
 func (c *Config) CheckToken() error {
-	if c.Token != "" {
+	if err := c.CheckTrackerKeys(); err != nil {
+		return err
+	}
+	if c.Token != "" || c.TrackerDefaults.ApiKey.set() {
 		return nil
 	}
 	return errors.New("no GitHub token found. Set one of JIG_TOKEN, token: in .jigz/config.yaml, GITHUB_TOKEN, or GH_TOKEN (see the GitHub token section of the README)")

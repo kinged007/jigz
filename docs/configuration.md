@@ -4,7 +4,8 @@
 .jigz/
   config.yaml      # repo:, token:, work:, agents:, cleanup:, sleep: (all optional — see below)
   workflows/       # installed by setup from the binary; edit freely, loop runs these
-  .env.loop        # generated each run (resolved tracker, token, clone URL; mode 0600)
+  .env.loop         # generated each run (resolved tracker, token, clone URL; mode 0600)
+  .env.loop.<name>  # only for a loop whose work entry sets tracker.api_key; same content with that loop's token
   workspaces/      # per-item agent checkouts (one subdir per loop)
   logs/            # engine child output, one <workflow>.log per loop
 ```
@@ -355,6 +356,11 @@ in hooks. Hooks run with a restricted environment: `PATH`, `HOME` and a few
 other standard variables plus the engine's `SORTIE_*` variables. Other
 variables of the supervisor are not passed.
 
+The tracker token is available to hooks and agents as
+`SORTIE_TRACKER_API_KEY`. The engine passes every `SORTIE_*` variable of its
+process to hooks, and agents inherit the process environment. The value is
+the loop's resolved credential, see [Token and identity](#token-and-identity).
+
 Agent processes do not receive the item id, identifier or attempt; prompts
 use `{{ .issue.identifier }}` instead. They receive `JIG_WORKSPACE` (their
 working directory, set by `jig agent-exec`), `JIG_TRACKER_PROJECT` and
@@ -639,18 +645,31 @@ this token. Use a token for the account you want the work attributed
 to — a separate bot account keeps agent commits, comments, and PRs off
 your personal name.
 
-Precedence, first set wins:
+The loops' tracker token is the first of these that is set:
 
 | Order | Source | Notes |
 |---|---|---|
-| 1 | `JIG_TOKEN` | Overrides just the loop; the `gh` CLI does not read it |
-| 2 | `token:` in `.jigz/config.yaml` | For local-only setups; never commit a token |
-| 3 | `GITHUB_TOKEN` | Also read by the `gh` CLI, covering the agent's `gh` calls |
-| 4 | `GH_TOKEN` | Same as above, last resort |
+| 1 | `tracker.api_key` in `.jigz/config.yaml` | A `{ from_env: NAME }` reference. Wins over everything below, including `JIG_TOKEN`. A `work.<slug>.tracker.api_key` applies to that entry's loops only |
+| 2 | `JIG_TOKEN` | Overrides just the loop; the `gh` CLI does not read it |
+| 3 | `token:` in `.jigz/config.yaml` | For local-only setups; never commit a token |
+| 4 | `GITHUB_TOKEN` | Also read by the `gh` CLI, covering the agent's `gh` calls |
+| 5 | `GH_TOKEN` | Same as above, last resort |
+
+When `tracker.api_key` names a variable that is unset or empty, `jig
+validate` and `jig start` fail with an error that names the variable and
+`tracker.api_key`. The lower sources are not used as a fallback. Export the
+variable or remove the `api_key` line. `jig setup` writes the line
+commented out.
+
+The loops pass the token to the engine as `SORTIE_TRACKER_API_KEY`. The
+dashboard, the `github:` features (pull request enrichment, questions) and
+the agent's `gh` calls do not read `tracker.api_key`; they keep using
+`JIG_TOKEN`, `token:`, `GITHUB_TOKEN` and `GH_TOKEN`.
 
 Exporting `GITHUB_TOKEN`/`GH_TOKEN` covers both the loop and the agent.
-`JIG_TOKEN` covers only the loop, so the agent's `gh` calls still need
-one of the other three. With none set, `jig` refuses to start.
+`JIG_TOKEN` and `tracker.api_key` cover only the loop, so the agent's `gh`
+calls still need `GITHUB_TOKEN` or `GH_TOKEN`. With no `tracker.api_key`
+and none of the other four set, `jig` refuses to start.
 
 ```sh
 # classic token: repo scope; or fine-grained: Contents, Issues,
@@ -668,13 +687,13 @@ run). `JIG_ONLY=issues` starts only those loops; see
 
 | Variable | Effect |
 |---|---|
-| `JIG_TOKEN` | Highest-precedence tracker token; loop only (the `gh` CLI does not read it). See [Token and identity](#token-and-identity). |
+| `JIG_TOKEN` | Tracker token for the loops, used when `tracker.api_key` is not set; the dashboard and `github:` features use it too (the `gh` CLI does not read it). See [Token and identity](#token-and-identity). |
 | `JIG_REPO` | Pins the repo id (`owner/name`) instead of detecting it from git `origin`. |
 | `JIG_ONLY` | Comma-separated `WORKFLOW.*.md` stems to start; unset runs all. Unknown names are fatal. See [Selecting loops](usage.md#selecting-loops). |
 | `JIG_WORKSPACES` | Directory that holds the agent checkouts. `jig` sets it for each loop (`.jigz/workspaces` by default) and the shipped workflows use it as `workspace.root: $JIG_WORKSPACES/<loop>`. Set it by hand only when validating a workflow file with the engine directly. |
 | `JIG_BIN` | Path of the `jig` binary that the supervisor starts for each loop. Without it, `jig` uses a `jig` binary next to the running one, then `jig` on `PATH`. |
 | `JIG_REGISTRY_DIR` | Directory for the project registry and status files. Unset, they are kept in the shared user cache directory, so several `jig` processes on one machine see each other. |
-| `JIG_TRACKER_TOKEN` | The value `jig setup` seeds as `tracker.api_key: { from_env: JIG_TRACKER_TOKEN }`. Export it in the supervisor's environment or the loops stay offline. |
+| `JIG_TRACKER_TOKEN` | The variable `jig setup` writes as a commented `#api_key: { from_env: JIG_TRACKER_TOKEN }` line. When you enable the line, export the variable in the supervisor's environment; it then wins over `JIG_TOKEN` and the rest of the chain, and `jig validate` and `jig start` fail while it is unset. |
 | `JIG_ENGINE_BIN` | Use this engine binary; beats every other engine setting. |
 | `JIG_ENGINE_REPO` / `JIG_ENGINE_VERSION` | Fetch the engine from this repository's releases / at this version (`vX.Y.Z`) instead of the configured one. See [The engine](install.md#the-engine). |
 | `JIG_ENGINE_URL` / `JIG_ENGINE_SHA256` | Fetch one engine archive from this URL (verified against the SHA-256; URL without it warns). |
