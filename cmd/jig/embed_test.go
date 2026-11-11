@@ -261,7 +261,7 @@ var questionPrompts = map[string][]string{
 // questionExample is the example block every questions section shows, with
 // its resume attribute replaced by R.
 const questionExample = "\n\n<!-- agent-question id=\"q-<short-id>\" audience=\"product|project\" blocking=\"true|false\" resume=\"R\" -->\n" +
-	"**Question:** ...\n**Suggested answer:** ...\n<!-- /agent-question -->\n\n"
+	"**Question:**\n1. ...\n2. ...\n**Suggested answer:**\n1. ...\n2. ...\n<!-- /agent-question -->\n\n"
 
 var resumeAttr = regexp.MustCompile(`resume="([A-Za-z0-9:_-]+)"`)
 
