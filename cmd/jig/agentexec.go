@@ -45,6 +45,9 @@ func runAgentExec(args []string, stdin io.Reader, stdout, stderr io.Writer) int 
 	}
 	var cfg *config.Config
 	if root := agentExecRoot(); root != "" {
+		if err := loadRepoEnv(root); err != nil {
+			return fail(2, "%v", err)
+		}
 		if c, err := config.Load(root); err == nil {
 			cfg = c
 		}

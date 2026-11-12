@@ -4,7 +4,7 @@
 .jigz/
   config.yaml      # repo:, token:, work:, agents:, cleanup:, sleep: (all optional — see below)
   workflows/       # WORKFLOW.<slug>.md for each work: entry (generated, or shipped when one exists); edit freely
-  .env.loop        # generated each run (resolved tracker, token, clone URL; mode 0600)
+  .env.loop        # tracker, token and workspace root are set each run (mode 0600); other lines are kept
   workspaces/      # per-item agent checkouts (one subdir per loop)
   logs/            # engine child output, one <workflow>.log per loop
 ```
@@ -687,6 +687,42 @@ run). `JIG_ONLY=issues` starts only those loops; see
 | `JIG_ENGINE_BIN` | Use this engine binary; beats every other engine setting. |
 | `JIG_ENGINE_REPO` / `JIG_ENGINE_VERSION` | Fetch the engine from this repository's releases / at this version (`vX.Y.Z`) instead of the configured one. See [The engine](install.md#the-engine). |
 | `JIG_ENGINE_URL` / `JIG_ENGINE_SHA256` | Fetch one engine archive from this URL (verified against the SHA-256; URL without it warns). |
+
+### The env file
+
+Each time a loop starts, `jig` sets these keys in `.jigz/.env.loop` and passes
+the file to the engine with `--env-file`: `SORTIE_TRACKER_PROJECT`,
+`JIG_TRACKER_PROJECT`, `JIG_WORKSPACES` and `SORTIE_TRACKER_API_KEY`. The engine
+reads the tracker project and token only under the `SORTIE_*` names, and they
+override `tracker.project` and `tracker.api_key` of the workflow. The file is
+written with mode 0600 because it holds the token. A config reload updates
+the file at once, and each running loop drains and restarts when one of these
+values changed, because the engine reads the file only at start. A reload
+that changes none of them restarts no loop.
+
+`jig` replaces the value of each of these keys where it stands and appends the
+keys that are missing. Every other line stays as it is, with its comments and
+its order, so the file can hold your own variables, including engine overrides
+such as `SORTIE_AGENT_MAX_TURNS`. The engine ignores keys without the
+`SORTIE_` prefix in this file.
+
+### The `.env` file
+
+`.jigz/.env` is yours. `jig` reads it and never writes it. Put `JIG_*`
+settings, the variables that `from_env:` references name (for example
+`JIG_TRACKER_TOKEN`) and any other variables there, as `KEY=value` lines. Blank
+lines and lines starting with `#` are skipped, a leading `export ` is allowed,
+and one pair of quotes around a value is removed.
+
+Every command that takes a repo root loads the file first, so the loops, the
+engine and the agent processes see the values. A variable that is already in
+the environment is not overridden by the file. The file applies to its own
+repo only: each repo runs in its own process, and the dashboard that serves
+several repos passes a repo's `.env` only to the engine check it runs for that
+repo. `.jigz/` is ignored by git, so the file is not committed.
+
+`.env` and `.env.loop` differ: `.env` is for you and is never changed by
+`jig`, and `.env.loop` is the file `jig` generates for the engine.
 
 ### Working hours and agent accounts
 

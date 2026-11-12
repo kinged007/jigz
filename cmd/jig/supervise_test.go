@@ -284,3 +284,54 @@ func registryEntryFor(t *testing.T, root string) registryEntry {
 	}
 	return reg.Entries[root]
 }
+
+func reloadRig(t *testing.T) (*supervisor, string) {
+	t.Helper()
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".jigz", "config.yaml"), "repo: owner/before\n")
+	sup := newTestSup(t, root, "plan")
+	if _, _, _, err := sup.childEnv("plan"); err != nil {
+		t.Fatal(err)
+	}
+	envPath := filepath.Join(root, ".jigz", ".env.loop")
+	body, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, envPath, "# mine\nMY_VAR=1\n"+string(body))
+	sup.procs["plan"] = &loopProc{def: loopDef{name: "plan", file: "WORKFLOW.plan.md"}}
+	return sup, root
+}
+
+func TestReloadWithAChangedRepoRewritesTheEnvFileAndRecyclesLoops(t *testing.T) {
+	sup, root := reloadRig(t)
+	mustWrite(t, filepath.Join(root, ".jigz", "config.yaml"), "repo: owner/after\n")
+	sup.reload()
+	body, err := os.ReadFile(filepath.Join(root, ".jigz", ".env.loop"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(body), "# mine\nMY_VAR=1\n") {
+		t.Errorf("user lines lost:\n%s", body)
+	}
+	for _, key := range []string{"SORTIE_TRACKER_PROJECT", "JIG_TRACKER_PROJECT"} {
+		if got := envValue(t, root, key); got != "owner/after" {
+			t.Errorf("%s = %q, want owner/after", key, got)
+		}
+	}
+	if p := sup.procs["plan"]; !p.stopping || !p.drain || !p.recycle {
+		t.Errorf("the running loop was not recycled: %+v", p)
+	}
+}
+
+func TestReloadWithAnUnchangedConfigRecyclesNothing(t *testing.T) {
+	sup, root := reloadRig(t)
+	sup.reload()
+	if p := sup.procs["plan"]; p.stopping || p.drain || p.recycle {
+		t.Errorf("the loop was recycled without a change: %+v", p)
+	}
+	body, _ := os.ReadFile(filepath.Join(root, ".jigz", ".env.loop"))
+	if !strings.HasPrefix(string(body), "# mine\nMY_VAR=1\n") {
+		t.Errorf("user lines lost:\n%s", body)
+	}
+}

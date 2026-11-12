@@ -167,6 +167,16 @@ func validateWorkflow(dir, path string) (plan.FileResult, error) {
 	} else if cfg, err := config.Load(dir); err == nil {
 		env = append(env, cfg.Env()...)
 	}
+	// The dashboard of a --unite run validates documents of several
+	// repos in one process, so each repo's own .env goes into this
+	// child only.
+	if pairs, err := parseDotenv(filepath.Join(dir, ".jigz", ".env")); err == nil {
+		for _, kv := range pairs {
+			if _, set := os.LookupEnv(kv[0]); !set {
+				env = append(env, kv[0]+"="+kv[1])
+			}
+		}
+	}
 	cmd := exec.Command(bin, "validate", "--format", "json", path)
 	cmd.Dir = dir
 	cmd.Env = env

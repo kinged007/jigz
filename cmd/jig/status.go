@@ -88,6 +88,10 @@ func statusPath(root string) (string, error) {
 // writeFileAtomic replaces path through a temp file in the same
 // directory, so a reader never sees a partial file.
 func writeFileAtomic(path string, data []byte) error {
+	return writeFileAtomicMode(path, data, 0o644)
+}
+
+func writeFileAtomicMode(path string, data []byte, perm os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -97,7 +101,7 @@ func writeFileAtomic(path string, data []byte) error {
 	}
 	_, werr := tmp.Write(data)
 	cerr := tmp.Close()
-	if err := firstErr(werr, cerr, os.Chmod(tmp.Name(), 0o644)); err != nil {
+	if err := firstErr(werr, cerr, os.Chmod(tmp.Name(), perm)); err != nil {
 		_ = os.Remove(tmp.Name())
 		return err
 	}

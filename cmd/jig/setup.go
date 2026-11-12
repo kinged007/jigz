@@ -32,6 +32,9 @@ func runSetup(dir, repo string, asJSON bool) {
 	if err != nil {
 		fatal(err)
 	}
+	if err := loadRepoEnv(abs); err != nil {
+		fatal(err)
+	}
 	config.MigrateRepoDir(abs)
 	// Dogfooding is supported: setup runs in this checkout like any other
 	// repo. Everything it writes lands under .jigz/, which
@@ -448,6 +451,14 @@ func runSetupJSON(dir, repo string) {
 	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
+		printSetupJSONAndFatal(&setupResult{
+			Created: []setupCreated{}, Skipped: []setupSkipped{}, Removed: []string{},
+			SyncedLabels: []setupLabelResult{}, Warnings: []string{}, Errors: []string{},
+			Engine: setupEngineInfo{},
+		}, err)
+		return
+	}
+	if err := loadRepoEnv(abs); err != nil {
 		printSetupJSONAndFatal(&setupResult{
 			Created: []setupCreated{}, Skipped: []setupSkipped{}, Removed: []string{},
 			SyncedLabels: []setupLabelResult{}, Warnings: []string{}, Errors: []string{},

@@ -1,9 +1,11 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/kinged007/jigz/internal/config"
 	"github.com/kinged007/jigz/internal/engine"
@@ -19,22 +21,62 @@ func resolveSortieBin() (string, error) {
 	return bin, err
 }
 
+// managedEnv is the env file entries jig owns, in file order.
+func managedEnv(cfg *config.Config) [][2]string {
+	return [][2]string{
+		{"SORTIE_TRACKER_PROJECT", cfg.Tracker},
+		{"JIG_TRACKER_PROJECT", cfg.Tracker},
+		{"JIG_WORKSPACES", cfg.Workspaces},
+		{"SORTIE_TRACKER_API_KEY", cfg.Token},
+	}
+}
+
 // writeEnvFile writes the resolved settings to .jigz/.env.loop so the
 // workflows can load them via --env-file without touching the user's env.
-func writeEnvFile(dir string, cfg *config.Config) (string, error) {
-	path := filepath.Join(dir, ".jigz", ".env.loop")
-	body := "SORTIE_TRACKER_PROJECT=" + cfg.Tracker + "\n" +
-		"JIG_TRACKER_PROJECT=" + cfg.Tracker + "\n" +
-		"JIG_WORKSPACES=" + cfg.Workspaces + "\n" +
-		"SORTIE_TRACKER_API_KEY=" + cfg.Token + "\n"
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", err
+// Lines jig does not manage are kept as they are. changed reports whether
+// a managed value differs from the file as it was.
+func writeEnvFile(dir string, cfg *config.Config) (path string, changed bool, err error) {
+	path = filepath.Join(dir, ".jigz", ".env.loop")
+	old, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", false, err
 	}
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		return "", err
+	managed := managedEnv(cfg)
+	changed = mergeEnv(string(old), managed) != mergeEnv(string(old), nil)
+	if err := writeFileAtomicMode(path, []byte(mergeEnv(string(old), managed)), 0o600); err != nil {
+		return "", false, err
 	}
 	cfg.EnvFile = path
-	return path, nil
+	return path, changed, nil
+}
+
+// mergeEnv sets the managed keys in an env file body. A managed key is
+// replaced where it stands, or appended when missing. Other lines,
+// comments and the line order are unchanged.
+func mergeEnv(body string, managed [][2]string) string {
+	values := map[string]string{}
+	for _, kv := range managed {
+		values[kv[0]] = kv[1]
+	}
+	seen := map[string]bool{}
+	var lines []string
+	if body != "" {
+		lines = strings.Split(strings.TrimSuffix(body, "\n"), "\n")
+	}
+	for i, line := range lines {
+		key, _, ok := strings.Cut(strings.TrimPrefix(strings.TrimSpace(line), "export "), "=")
+		key = strings.TrimSpace(key)
+		if v, managed := values[key]; ok && managed {
+			lines[i] = key + "=" + v
+			seen[key] = true
+		}
+	}
+	for _, kv := range managed {
+		if !seen[kv[0]] {
+			lines = append(lines, kv[0]+"="+kv[1])
+		}
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
 // ensureSortieLink exposes the resolved sortie engine as `sortie` next to

@@ -203,7 +203,7 @@ func (s *supervisor) childEnv(name string) (envFile string, env []string, runtim
 	if err != nil {
 		return "", nil, "", err
 	}
-	if envFile, err = writeEnvFile(s.root, cfg); err != nil {
+	if envFile, _, err = writeEnvFile(s.root, cfg); err != nil {
 		return "", nil, "", err
 	}
 	s.refreshState(s.clock(), false)
@@ -386,9 +386,21 @@ func (s *supervisor) terminate(name string) {
 	}
 }
 
-// reload re-reads the configuration, picks up new loop documents, and
-// restarts the loops whose query changed: the engine reads the filter
-// only at start. A changed loop drains first, so in-flight work
+// runningNames lists the loops that have a process.
+func (s *supervisor) runningNames() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var names []string
+	for n := range s.procs {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// reload re-reads the configuration, picks up new loop documents, rewrites
+// the env file, and restarts the loops whose query or env file values
+// changed: the engine reads the filter and the env file only at start. A changed loop drains first, so in-flight work
 // finishes; a loop that is not running is held for the gate to start.
 func (s *supervisor) reload() {
 	cfg, err := config.Load(s.root)
@@ -416,6 +428,18 @@ func (s *supervisor) reload() {
 	s.sleepCfg = cfg.Sleep
 	s.mu.Unlock()
 	s.reloadCleanup(cfg)
+	_, envChanged, err := writeEnvFile(s.root, cfg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "jig: reload:", err)
+		s.republish()
+		return
+	}
+	if envChanged {
+		for _, name := range s.runningNames() {
+			fmt.Fprintf(os.Stderr, "jig: %s: env changed, draining and restarting\n", name)
+			s.recycleDrain(name)
+		}
+	}
 	old := s.querySnapshot()
 	s.refreshState(s.clock(), true)
 	for name, q := range s.querySnapshot() {
