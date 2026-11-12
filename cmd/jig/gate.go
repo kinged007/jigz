@@ -24,6 +24,7 @@ const stateReadEvery = 2 * time.Second
 const (
 	reasonOperatingHours = "outside operating hours"
 	reasonExhausted      = "every agent is exhausted"
+	reasonUnusable       = "agents need fixing"
 	reasonUnresolved     = "every agent has unresolved environment references"
 	reasonUnregistered   = "no agent runtime is registered on the engine"
 	reasonNoCandidate    = "no candidate agent is available"
@@ -150,7 +151,7 @@ func (in gateInputs) workView(res config.Resolved, now time.Time) loopView {
 	// closure ends with finish.
 	for _, name := range names {
 		b := in.blockOf(name, over, now)
-		if b.hours && !b.exhausted && !b.refs && !b.runtime {
+		if b.hours && !b.exhausted && !b.unusable && !b.refs && !b.runtime {
 			v.Reason = "agent " + name + " is outside its working hours"
 			v.End = endOrFinish(in.schedule(name, over).End)
 			break
@@ -158,13 +159,20 @@ func (in gateInputs) workView(res config.Resolved, now time.Time) loopView {
 	}
 	if v.Reason == "" {
 		all := blockAll{exhausted: true, refs: true, runtime: true}
+		var broken []string
 		for _, name := range names {
 			b := in.blockOf(name, over, now)
-			all.exhausted = all.exhausted && b.exhausted
+			if b.unusable {
+				broken = append(broken, name+": "+in.state.Agents[name].UnusableText())
+			}
+			all.exhausted = all.exhausted && (b.exhausted || b.unusable)
 			all.refs = all.refs && b.refs
 			all.runtime = all.runtime && b.runtime
 		}
 		switch {
+		case all.exhausted && len(broken) > 0:
+			v.Reason = reasonUnusable + ": " + strings.Join(broken, "; ")
+			v.End = machine.EndStop
 		case all.exhausted:
 			v.Reason = reasonExhausted
 			v.End = machine.EndStop
@@ -181,9 +189,10 @@ func (in gateInputs) workView(res config.Resolved, now time.Time) loopView {
 }
 
 // estimate fills the estimated start: the earliest of the next working
-// hours start of a candidate, the earliest exhaustion of a candidate and
-// the next operating hours start. No future input leaves the estimate
-// zero and the reason shows alone.
+// hours start of a candidate, the earliest usage-limit reset of a
+// candidate and the next operating hours start. An unusable agent has no
+// reset. No future input leaves the estimate zero and the reason shows
+// alone.
 func (v *loopView) estimate(res config.Resolved, in gateInputs, now time.Time) {
 	consider := func(t time.Time) {
 		if t.After(now) && (v.ETA.IsZero() || t.Before(v.ETA)) {
@@ -196,7 +205,9 @@ func (v *loopView) estimate(res config.Resolved, in gateInputs, now time.Time) {
 		if !sched.Open(now) {
 			consider(sched.Next(now))
 		}
-		consider(in.state.Agents[name].ExhaustedUntil)
+		if es := in.state.Agents[name]; !es.Unusable() {
+			consider(es.ExhaustedUntil)
+		}
 	}
 	if !in.operating.Open(now) {
 		consider(in.operating.Next(now))
@@ -249,14 +260,19 @@ type blockAll struct {
 
 // agentBlock is why one candidate cannot serve now.
 type agentBlock struct {
-	hours, exhausted, refs, runtime bool
+	hours, exhausted, unusable, refs, runtime bool
 }
 
+// blockOf separates a usage limit (exhausted) from a failure that needs a
+// fix and has no reset time (unusable).
 func (in gateInputs) blockOf(name string, over map[string]machine.Hours, now time.Time) agentBlock {
 	a, ok := in.agents[name]
+	es := in.state.Agents[name]
+	blocked := now.Before(es.ExhaustedUntil)
 	return agentBlock{
 		hours:     !ok || !in.schedule(name, over).Open(now),
-		exhausted: now.Before(in.state.Agents[name].ExhaustedUntil),
+		exhausted: blocked && !es.Unusable(),
+		unusable:  blocked && es.Unusable(),
 		refs:      len(in.refs.Agents[name]) > 0,
 		runtime:   ok && in.engine.RuntimeOff(a.Runtime) != "",
 	}
@@ -268,6 +284,8 @@ func (in gateInputs) block(name string, over map[string]machine.Hours, now time.
 	switch {
 	case b.hours:
 		return "agent " + name + " is outside its working hours"
+	case b.unusable:
+		return "agent " + name + " is unusable: " + in.state.Agents[name].UnusableText()
 	case b.exhausted:
 		return "agent " + name + " is exhausted"
 	case b.refs:
@@ -311,6 +329,7 @@ type machineState struct {
 
 func (s *supervisor) initState() {
 	s.statePath = machine.StatePath(s.root)
+	s.clearUnusable()
 	s.gateHeld = map[string]bool{}
 	s.recorded = map[string]machine.LoopState{}
 	s.refreshState(s.clock(), true)
@@ -341,6 +360,16 @@ func fileStamp(path string) string {
 	return fmt.Sprintf("%d/%d", fi.ModTime().UnixNano(), fi.Size())
 }
 
+// clearUnusable ends the unusable blocks of every agent. It runs when
+// the supervisor starts, when it reloads and when config.yaml changed, so
+// an agent that was fixed outside the loop runs again; one that is still
+// broken is marked again by its next failed run.
+func (s *supervisor) clearUnusable() {
+	if err := machine.ClearUnusable(s.statePath); err != nil {
+		fmt.Fprintln(os.Stderr, "jig: state:", err)
+	}
+}
+
 // refreshState re-reads the work config when its file changed and
 // state.json when it is stale.
 func (s *supervisor) refreshState(now time.Time, force bool) {
@@ -351,6 +380,10 @@ func (s *supervisor) refreshState(now time.Time, force bool) {
 	workStamp := fileStamp(filepath.Join(s.root, ".jigz", "config.yaml"))
 	if force || workStamp != workOld {
 		s.refreshWork(workStamp)
+		if !force {
+			s.clearUnusable()
+			force = true
+		}
 	}
 
 	s.mu.Lock()
@@ -752,6 +785,8 @@ func fallbackTrigger(in gateInputs, res config.Resolved, prev string, now time.T
 	switch {
 	case strings.HasPrefix(in.state.Agents[prev].Reason, "model unavailable:"):
 		return "model unavailable", time.Time{}
+	case b.unusable:
+		return "agent unusable: " + in.state.Agents[prev].UnusableText(), time.Time{}
 	case b.exhausted:
 		return "usage limit", in.state.Agents[prev].ExhaustedUntil
 	case b.hours:

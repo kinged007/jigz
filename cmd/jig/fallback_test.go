@@ -330,6 +330,36 @@ func TestFallbackLabelsModelError(t *testing.T) {
 	}
 }
 
+// TestFallbackOnUnusableAgent switches the document to the next
+// candidate and shows the unusable reason as the fallback trigger.
+func TestFallbackOnUnusableAgent(t *testing.T) {
+	root := writeFallbackConfig(t)
+	docs, _, err := generateDocs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := promoteDocs(root, docs); err != nil {
+		t.Fatal(err)
+	}
+	s := fallbackSupervisor(t, root)
+	now := time.Now()
+	if err := machine.MarkUnusable(machine.StatePath(root), "main", now, "Invalid API key"); err != nil {
+		t.Fatal(err)
+	}
+	in, views := gateViews(t, s, now)
+	if views["delivery"].Agent != "spare" {
+		t.Fatalf("gate picks %q, want spare", views["delivery"].Agent)
+	}
+	s.fallbackStep(in, views, now)
+	if got := docText(t, root, "delivery"); !strings.Contains(got, "agent-exec spare") {
+		t.Errorf("document not switched to spare:\n%s", got)
+	}
+	fb := s.fallback["delivery"]
+	if fb.trigger != "agent unusable: Invalid API key" || !fb.usable.IsZero() {
+		t.Errorf("fallback = %+v", fb)
+	}
+}
+
 // TestFallbackWaitsForIdle keeps the document while sessions run.
 func TestFallbackWaitsForIdle(t *testing.T) {
 	root := writeFallbackConfig(t)

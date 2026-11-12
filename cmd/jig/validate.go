@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -8,10 +9,12 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/kinged007/jigz/internal/config"
 	"github.com/kinged007/jigz/internal/engine"
 	"github.com/kinged007/jigz/internal/gen"
+	"github.com/kinged007/jigz/internal/machine"
 	"github.com/kinged007/jigz/internal/plan"
 )
 
@@ -54,6 +57,7 @@ func collectValidateChecks(root string) ([]validateCheck, []string, []string) {
 	} else {
 		checks = append(checks, validateCheck{Name: "budgets", OK: true})
 	}
+	checks = append(checks, agentVersionChecks(cfg)...)
 	if err := cfg.CheckToken(); err != nil {
 		warnings = append(warnings, err.Error())
 	}
@@ -66,6 +70,55 @@ func collectValidateChecks(root string) ([]validateCheck, []string, []string) {
 	wfChecks, files := workflowValidateChecks(root, cfg)
 	checks = append(checks, wfChecks...)
 	return checks, files, warnings
+}
+
+// agentVersionTimeout bounds one `<command> --version` call.
+const agentVersionTimeout = 10 * time.Second
+
+// agentVersionOutput runs the agent command with --version and returns its
+// stdout. Tests replace it.
+var agentVersionOutput = func(command string) (string, error) {
+	words := strings.Fields(command)
+	if len(words) == 0 {
+		return "", errors.New("the command is empty")
+	}
+	path, err := exec.LookPath(words[0])
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), agentVersionTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, path, append(words[1:], "--version")...).Output()
+	return string(out), err
+}
+
+// agentVersionChecks runs the command of every agent whose runtime the
+// engine refuses below a minimum release, the same check the engine makes
+// at each session start.
+func agentVersionChecks(cfg *config.Config) []validateCheck {
+	var checks []validateCheck
+	for _, name := range sortedKeys(cfg.Agents) {
+		a := cfg.Agents[name]
+		if !machine.VersionChecked(a.Runtime) {
+			continue
+		}
+		command := a.Command
+		if command == "" {
+			command = machine.DefaultCommand(a.Runtime)
+		}
+		c := validateCheck{Name: "agent-version:" + name, OK: true}
+		out, err := agentVersionOutput(command)
+		switch {
+		case err != nil && out == "":
+			c.OK, c.Error = false, fmt.Sprintf("agent %s: could not run %q --version: %v", name, command, err)
+		default:
+			if msg := machine.VersionProblem(a.Runtime, out); msg != "" {
+				c.OK, c.Error = false, fmt.Sprintf("agent %s: %s", name, msg)
+			}
+		}
+		checks = append(checks, c)
+	}
+	return checks
 }
 
 // engineProfileCheck resolves every work entry against the engine

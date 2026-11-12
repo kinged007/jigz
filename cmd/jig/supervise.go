@@ -417,6 +417,7 @@ func (s *supervisor) reload() {
 	s.mu.Unlock()
 	s.reloadCleanup(cfg)
 	old := s.querySnapshot()
+	s.clearUnusable()
 	s.refreshState(s.clock(), true)
 	for name, q := range s.querySnapshot() {
 		if oq, ok := old[name]; ok && oq != q {

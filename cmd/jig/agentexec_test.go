@@ -421,3 +421,86 @@ func TestAgentExecPlainLimitTextExhaustsTheAgent(t *testing.T) {
 		})
 	}
 }
+
+func execUnusableAgent(t *testing.T, runtime, bin, script string, args ...string) (int, string, machine.EntryState) {
+	t.Helper()
+	home := agentExecEnv(t)
+	writeAgentRepo(t, home, "agents:\n  a: { runtime: "+runtime+", model: m }\n")
+	t.Setenv("PATH", linkAs(t, writeAgentScript(t, script+"\n"), bin)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	code, _, errs := execAgentExec(append([]string{"a"}, args...)...)
+	st, err := machine.LoadState(os.Getenv("JIG_STATE_PATH"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return code, errs, st.Agents["a"]
+}
+
+// A credential or model failure that no retry fixes marks the agent
+// unusable, with the CLI's text as the reason.
+func TestAgentExecUnusableOutputMarksTheAgent(t *testing.T) {
+	for _, tc := range []struct{ name, runtime, bin, script, reason string }{
+		{"claude invalid key", "claude-code", "claude", `echo "Invalid API key · Please run /login"`, "Invalid API key"},
+		{"claude result event", "claude-code", "claude", `echo '{"type":"result","is_error":true,"result":"Not logged in · Please run /login"}'`, "Not logged in"},
+		{"codex stderr", "codex", "codex", `echo "ERROR: 401 Unauthorized: Missing bearer or basic authentication in header" >&2`, "401 Unauthorized"},
+		{"pi no model", "pi", "pi", `echo '{"type":"x","stopReason":"error","errorMessage":"No models available. Set an API key."}'`, "No models available"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, errs, e := execUnusableAgent(t, tc.runtime, tc.bin, tc.script)
+			if code != 1 || !strings.Contains(errs, "is unusable") {
+				t.Fatalf("code=%d err=%q", code, errs)
+			}
+			if !e.Unusable() || !e.ExhaustedUntil.After(time.Now().AddDate(50, 0, 0)) || !strings.Contains(e.Reason, tc.reason) {
+				t.Errorf("entry %+v", e)
+			}
+		})
+	}
+}
+
+// A usage limit wrapped in credential_unverified stays a usage limit.
+func TestAgentExecLimitBeatsCredentialWording(t *testing.T) {
+	code, _, e := execUnusableAgent(t, "claude-code", "claude", `echo '{"type":"result","is_error":true,"result":"credential_unverified: You'"'"'ve hit your 5-hour limit · resets 1:10am (UTC) Invalid API key"}'`)
+	if code != 1 || e.Unusable() || e.ExhaustedUntil.Minute() != 10 {
+		t.Fatalf("code=%d entry %+v", code, e)
+	}
+}
+
+// The engine reads the version through the agent command; an unsupported
+// release marks the agent before the first session retry.
+func TestAgentExecVersionCheck(t *testing.T) {
+	for _, tc := range []struct {
+		name, runtime, bin, out string
+		unusable                bool
+		reason                  string
+	}{
+		{"opencode 1.x", "opencode", "opencode", "1.18.29", true, "OpenCode 1.18.29 is not supported; install OpenCode 2.x"},
+		{"opencode 2.x", "opencode", "opencode", "2.0.3", false, ""},
+		{"pi old", "pi", "pi", "0.98.0", true, "Pi 0.98.0 is not supported"},
+		{"claude is not checked", "claude-code", "claude", "1.0.0", false, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, _, e := execUnusableAgent(t, tc.runtime, tc.bin, "echo "+tc.out, "--version")
+			if code != 0 || e.Unusable() != tc.unusable || !strings.Contains(e.Reason, tc.reason) {
+				t.Fatalf("code=%d entry %+v", code, e)
+			}
+		})
+	}
+	t.Run("a real run is not version checked", func(t *testing.T) {
+		code, _, e := execUnusableAgent(t, "opencode", "opencode", "echo 1.18.29", "run")
+		if code != 0 || e.Unusable() {
+			t.Fatalf("code=%d entry %+v", code, e)
+		}
+	})
+}
+
+func TestAgentExecMissingCommandMarksTheAgent(t *testing.T) {
+	home := agentExecEnv(t)
+	writeAgentRepo(t, home, "agents:\n  a: { runtime: opencode, command: jig-no-such-agent-cli }\n")
+	code, _, _ := execAgentExec("a")
+	st, _ := machine.LoadState(os.Getenv("JIG_STATE_PATH"))
+	if code != 127 || !st.Agents["a"].Unusable() || !strings.Contains(st.Agents["a"].Reason, "agent command not found") {
+		t.Fatalf("code=%d entry %+v", code, st.Agents["a"])
+	}
+	if code, _, errs := execAgentExec("a"); code != exitNoAgent || !strings.Contains(errs, "is unusable: agent command not found") {
+		t.Fatalf("second run code=%d err=%q", code, errs)
+	}
+}
