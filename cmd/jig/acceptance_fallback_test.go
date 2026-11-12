@@ -17,7 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kinged007/jigz/internal/config"
 	"github.com/kinged007/jigz/internal/fakegithub"
 	_ "modernc.org/sqlite"
 )
@@ -38,7 +37,7 @@ func TestAcceptanceFallback(t *testing.T) {
 	)
 	gh := fakegithub.New(owner, token)
 	gh.Logf = t.Logf
-	gh.AddRepo(slug, labelNames(config.DefaultLabels)...)
+	gh.AddRepo(slug, labelNames(scaffoldLabels)...)
 	srv := httptest.NewServer(gh)
 	defer srv.Close()
 

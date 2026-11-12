@@ -49,47 +49,6 @@ func exists(path string) bool {
 	return err == nil
 }
 
-func TestSyncWorkflowsSkipsShippedFilesOfManagedEntries(t *testing.T) {
-	root := writeGenConfig(t, retireBase+retireSplitWork)
-	syncWorkflows(root)
-	dir := filepath.Join(root, ".jigz", "workflows")
-	if exists(filepath.Join(dir, "WORKFLOW.issues.md")) {
-		t.Error("shipped WORKFLOW.issues.md installed for a managed entry")
-	}
-	if exists(filepath.Join(dir, "WORKFLOW.prs.md")) {
-		t.Error("shipped WORKFLOW.prs.md installed for a slug without an entry")
-	}
-}
-
-func TestSyncWorkflowsJSONSkipsShippedFilesOfManagedEntries(t *testing.T) {
-	root := writeGenConfig(t, retireBase+retireSplitWork)
-	res := &setupResult{}
-	syncWorkflowsJSON(root, res)
-	dir := filepath.Join(root, ".jigz", "workflows")
-	if exists(filepath.Join(dir, "WORKFLOW.issues.md")) {
-		t.Error("shipped WORKFLOW.issues.md installed for a managed entry")
-	}
-	if exists(filepath.Join(dir, "WORKFLOW.prs.md")) {
-		t.Error("shipped WORKFLOW.prs.md installed for a slug without an entry")
-	}
-}
-
-func TestSyncWorkflowsInstallsShippedFilesForUnmanagedEntries(t *testing.T) {
-	root := writeGenConfig(t, retireBase+strings.Replace(retireSplitWork, "  issues:\n", "  issues:\n    managed: false\n", 1))
-	syncWorkflows(root)
-	if !exists(filepath.Join(root, ".jigz", "workflows", "WORKFLOW.issues.md")) {
-		t.Error("shipped WORKFLOW.issues.md not installed for an unmanaged entry")
-	}
-}
-
-func TestSyncWorkflowsWithBrokenConfigInstallsNoShippedFiles(t *testing.T) {
-	root := writeGenConfig(t, "not: [valid\n")
-	syncWorkflows(root)
-	if exists(filepath.Join(root, ".jigz", "workflows", "WORKFLOW.issues.md")) {
-		t.Error("shipped WORKFLOW.issues.md installed without a loadable config")
-	}
-}
-
 func TestRetireStaleLoops(t *testing.T) {
 	root := writeGenConfig(t, retireBase+retireSplitWork)
 	docs, _, err := generateDocs(root)
@@ -99,24 +58,19 @@ func TestRetireStaleLoops(t *testing.T) {
 	if _, err := promoteDocs(root, docs); err != nil {
 		t.Fatal(err)
 	}
-	shipped, err := embeddedWorkflows.ReadFile("workflows/WORKFLOW.issues.md")
-	if err != nil {
-		t.Fatal(err)
-	}
-	unedited := writeLoopDoc(t, root, "issues", string(shipped))
 	generatedOld := writeLoopDoc(t, root, "issues-gone", gen.MarkerPrefix+" digest\n")
 	handWritten := writeLoopDoc(t, root, "issues-mine", "---\n# mine\n")
-	edited := writeLoopDoc(t, root, "issues-edited", string(shipped)+"\n# tweak\n")
+	edited := writeLoopDoc(t, root, "issues-edited", "---\n# edited\n")
 	other := writeLoopDoc(t, root, "triage", "---\n# triage\n")
 
 	removed, notes, err := retireStaleLoops(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(removed, ",") != "issues-gone,issues" {
+	if strings.Join(removed, ",") != "issues-gone" {
 		t.Errorf("removed = %v", removed)
 	}
-	if exists(unedited) || exists(generatedOld) {
+	if exists(generatedOld) {
 		t.Error("retired documents are still on disk")
 	}
 	for _, p := range []string{handWritten, edited, other} {

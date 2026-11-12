@@ -2,9 +2,9 @@
 
 ```sh
 cd your-repo
-jig setup    # writes .jigz/config.yaml, updates .gitignore, creates the labels,
-             # installs the engine, and installs .jigz/pm-agent.md
-             # (a project-manager prompt)
+jig setup    # writes .jigz/config.yaml when missing, generates the workflow
+             # files from it, updates .gitignore, creates the labels listed in
+             # it, and installs the engine
 jig          # run every WORKFLOW.*.md loop in the foreground (Ctrl-C stops all)
 jig start    # the same run in the background
 ```
@@ -32,8 +32,18 @@ in time, it prints the last log lines and exits non-zero. Stop the run with
 `validate`), Setup (`setup`), run options (`--host`, `--dashboard-port`,
 `--no-dashboard`, `--unite`) and Other (`--version`, `--dump-version`).
 
-`setup` confirms before changing a label whose colour or description
-differs from the shipped one. It never changes an existing workflow file.
+`setup` reads `.jigz/config.yaml`, generates the workflow files from its
+work entries and creates the labels listed under `labels:`. It writes the
+config, the prompts and the cleanup script only when they
+are missing and never overwrites them. It confirms before changing a label
+whose colour or description differs from the config. It loads and validates
+the config before it writes anything derived from it.
+
+`jig setup --skip-build` does everything except generating the workflow
+files and creating or updating the labels: it still writes the missing
+config, prompts and cleanup script, updates `.gitignore`,
+creates the data directory and `machine.yaml`, and still fails on an invalid
+config. It works with `--json` too.
 
 `jig status [--json] [repo-root]` reports the run serving the
 repo-root: version, pid, state, and per workflow its state (`running`,

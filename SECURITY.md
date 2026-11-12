@@ -27,7 +27,7 @@ Three things run on your machine, and you are trusting all of them.
 3. **The agent** — a coding agent such as [pi](https://github.com/badlogic/pi-mono).
    This is the component that reads your files and runs your commands.
 
-The shipped workflows need two pieces the engine does not always ship:
+The generated workflows need two pieces the engine does not always ship:
 the **pi agent adapter** and the **github-pr tracker** (which treats pull
 requests as work items). The default engine release carries both. The
 `engine:` block of `machine.yaml` and `JIG_ENGINE_REPO` select a
@@ -87,7 +87,7 @@ own test and build commands. In practice:
 - Read the summary comments the agents post. `needs-human` means an
   agent stopped and wants you.
 - Loops merge pull requests when labelled `agent:merge`. Nothing applies
-  that label automatically; a person or the PM prompt does.
+  that label automatically; a person does.
 
 ## Reporting a vulnerability
 

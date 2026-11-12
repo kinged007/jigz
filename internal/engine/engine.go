@@ -21,7 +21,7 @@ import (
 
 // The engine is the sortie binary this tool drives. The default fork is
 // required: upstream sortie-ai/sortie ships neither the pi agent adapter
-// nor the github-pr tracker in every release, and the shipped workflows
+// nor the github-pr tracker in every release, and the generated workflows
 // depend on both. A repository set in machine.yaml or JIG_ENGINE_REPO must
 // still carry both adapters.
 

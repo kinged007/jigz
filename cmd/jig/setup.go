@@ -12,17 +12,19 @@ import (
 	"strings"
 
 	"github.com/kinged007/jigz/internal/config"
-	"github.com/kinged007/jigz/internal/gen"
 	"github.com/kinged007/jigz/internal/machine"
 )
 
-// runSetup creates .jigz/config.yaml if missing, syncs labels via gh,
-// and ensures .gitignore covers the loop's local state. dir is the repo
-// root, empty for the current directory; repo is the --repo value, a repo
-// slug and never a directory. asJSON enables non-interactive JSON output.
-func runSetup(dir, repo string, asJSON bool) {
+// runSetup creates .jigz/config.yaml, the prompts and the cleanup script
+// when missing, validates the config, generates the workflow documents from the
+// config, syncs the labels listed in it via gh, and ensures .gitignore
+// covers the loop's local state. skipBuild leaves out the workflow
+// documents and the labels. dir is the repo root, empty for the current
+// directory; repo is the --repo value, a repo slug and never a directory.
+// asJSON enables non-interactive JSON output.
+func runSetup(dir, repo string, asJSON, skipBuild bool) {
 	if asJSON {
-		runSetupJSON(dir, repo)
+		runSetupJSON(dir, repo, skipBuild)
 		return
 	}
 	if dir == "" {
@@ -53,25 +55,29 @@ func runSetup(dir, repo string, asJSON bool) {
 		}
 		fmt.Println("created", cfgPath)
 	}
+	// Nothing derived from the config is written before it loads.
+	cfg, err := config.Load(abs)
+	if err != nil {
+		fatal(err)
+	}
 	if path, created, err := ensureMachineFile(); err != nil {
 		fmt.Fprintln(os.Stderr, "warning: machine file not created:", err)
 	} else if created {
 		fmt.Println("created", path)
 	}
-	sum, err := generateAll(abs)
-	if err != nil {
-		fatal(err)
-	}
-	reportGeneration(abs, sum)
-	warnLegacy(syncWorkflows(abs))
+	syncPrompts(abs)
 	warnStalePrompts(abs)
-	warnStaleWorkflows(abs)
-	fmt.Println("workflows ready in", filepath.Join(abs, ".jigz", "workflows"))
+	fmt.Println("prompts ready in", filepath.Join(abs, ".jigz", "workflows", "prompts"))
+	if !skipBuild {
+		sum, err := generateAll(abs)
+		if err != nil {
+			fatal(err)
+		}
+		reportGeneration(abs, sum)
+	}
 	if p := syncScripts(abs); p != "" {
 		fmt.Println("cleanup script ready in", p)
 	}
-	syncPMAgent(abs, askBeforeOverwrite)
-	fmt.Println("project manager prompt ready in", filepath.Join(abs, ".jigz", "pm-agent.md"))
 	// The engine is resolved here so a working setup leaves a bare
 	// `sortie` on PATH, for go install users and for anyone who only
 	// ever runs setup. A missing engine is a warning: config and labels
@@ -85,20 +91,17 @@ func runSetup(dir, repo string, asJSON bool) {
 		fatal(err)
 	}
 	ensureGitignore(abs)
-	// Labels come from the config file so custom loops can add their own:
-	// list entries under `labels:`, re-run setup, and they are created.
-	// Sync is additive — labels absent from the list are left alone.
-	// An existing label whose colour or description differs is a hand
-	// edit, so it is confirmed before being overwritten, the same as the
-	// project-manager prompt.
-	cfg, err := config.Load(abs)
-	if err != nil {
-		fatal(err)
+	// Labels come from the config file only: list entries under
+	// `labels:`, re-run setup, and they are created. Sync is additive;
+	// labels absent from the list are left alone. An existing label whose
+	// colour or description differs is a hand edit, so it is confirmed
+	// before being overwritten.
+	if skipBuild {
+		return
 	}
 	if len(cfg.Work) == 0 {
 		fmt.Fprintln(os.Stderr, "note: .jigz/config.yaml has no work: entries, so no workflow documents are generated; add them (docs/configuration.md \"Fleet and work\") and re-run setup.")
 	}
-	warnMissingLabels(cfg.Labels)
 	for _, l := range cfg.Labels {
 		cur, err := labelOn(repo, l.Name)
 		if err != nil {
@@ -300,19 +303,44 @@ func ensureMachineFile() (path string, created bool, err error) {
 	return path, true, nil
 }
 
+// scaffoldLabels fill the labels: list of the config.yaml that setup
+// writes when the file is missing. Setup reads the list back from the
+// file, so editing the file changes which labels are created.
+//
+// Three roles, one colour each: a yellow trigger starts a loop, in-progress
+// is the claim an agent holds while it works, agent:done is the state an
+// agent leaves behind when it finishes, and needs-human escalates to a
+// person.
+var scaffoldLabels = []config.Label{
+	{Name: "agent:plan", Color: "fbca04", Description: "Trigger: write an implementation plan for this issue"},
+	{Name: "agent:plan-build", Color: "fbca04", Description: "Trigger: plan this issue, then implement it with no human step"},
+	{Name: "agent:build", Color: "fbca04", Description: "Trigger: implement this issue, or apply review feedback on this PR"},
+	{Name: "agent:review", Color: "fbca04", Description: "Trigger: review this PR"},
+	{Name: "agent:merge", Color: "fbca04", Description: "Trigger: merge this PR"},
+	{Name: "agent:docs", Color: "fbca04", Description: "Trigger: update the docs for merged changes and open a PR"},
+	{Name: "in-progress", Color: "5319e7", Description: "State: claimed by an agent"},
+	{Name: "agent:done", Color: "0e8a16", Description: "State: agent finished"},
+	{Name: "needs-human", Color: "d73a4a", Description: "Escalation: agent needs a person"},
+	{Name: "united-into", Color: "c5def5", Description: "State: work folded into another issue's fix; that issue is the one to read"},
+	{Name: "backlog", Color: "ededed", Description: "Deferred by a person; do not dispatch"},
+	{Name: "P0", Color: "d73a4a", Description: "Priority: highest, dispatch before everything else"},
+	{Name: "P1", Color: "f9826c", Description: "Priority: high"},
+	{Name: "P2", Color: "fbca04", Description: "Priority: normal"},
+	{Name: "P3", Color: "ededed", Description: "Priority: lowest"},
+}
+
 // configTemplateBody builds the first .jigz/config.yaml `jig setup`
-// writes. The work entries mirror the shipped WORKFLOW.issues.md and
-// WORKFLOW.prs.md documents, so setup (and start and reload) generate
-// those documents from this config; the generated files are not edited
-// by hand. The fleet and work shapes are documented in
-// docs/configuration.md under "Fleet and work".
+// writes. Setup, start and reload generate the workflow documents from
+// its work entries; the generated files are not edited by hand. The
+// fleet and work shapes are documented in docs/configuration.md under
+// "Fleet and work".
 func configTemplateBody(repo string) string {
 	body := "# Repo id (owner/name). Empty = detect from git remote at runtime.\n" +
 		"repo: " + repo + "\n" +
 		"# Token for the tracker. Empty = JIG_TOKEN, then GITHUB_TOKEN / GH_TOKEN env.\n" +
 		"token: \"\"\n" +
-		"# Per-loop query-filter overrides, keyed by WORKFLOW.*.md stem.\n" +
-		"# New loops start on the default filter; narrow them here, e.g.:\n" +
+		"# Query filter of a work entry that has no query_filter of its own,\n" +
+		"# keyed by work slug, e.g.:\n" +
 		"#filters:\n" +
 		"#  triage: \"label:agent:triage -label:needs-human\"\n" +
 		"# Workspace cleanup: runs your command every interval (installed by\n" +
@@ -336,18 +364,14 @@ func configTemplateBody(repo string) string {
 		"#  idle_timeout: 15m\n" +
 		"#  wake_interval: 1h\n"
 	labelsBody := ""
-	for _, l := range config.DefaultLabels {
+	for _, l := range scaffoldLabels {
 		labelsBody += fmt.Sprintf("- {name: %q, color: %q, description: %q}\n", l.Name, l.Color, l.Description)
 	}
 	body += "# GitHub labels setup ensures exist (create-or-edit; others left alone).\n" +
 		"# Add a custom loop's labels here, then re-run setup.\n" +
 		"labels:\n" + labelsBody
-	// The work entries mirror the shipped WORKFLOW.issues.md and
-	// WORKFLOW.prs.md documents: same queries, rules, prompts and
-	// agent. Generation derives the states, hooks, db path and runtime
-	// values, so they are not repeated here. project: follows the repo
-	// above; export JIG_TRACKER_TOKEN (a GitHub token) or the loops stay
-	// offline with a reason until it is set.
+	// Generation derives the states, hooks, db path and runtime values of
+	// a work entry, so they are not repeated here.
 	return body +
 		"# Operating hours gate every loop. Omitted or empty = 24/7; windows\n" +
 		"# use days mon..sun and \"HH:MM\"; an end earlier than start wraps\n" +
@@ -406,10 +430,9 @@ func configTemplateBody(repo string) string {
 		"# pool names share one space.\n" +
 		"#pools:\n" +
 		"#  build-pool: [coder, night-owl]\n" +
-		"# Work entries mirror the shipped WORKFLOW.issues.md and\n" +
-		"# WORKFLOW.prs.md documents: the same queries, rules, prompts and\n" +
-		"# agent. setup, start and reload generate the documents from these\n" +
-		"# entries; the generated files are not edited by hand. max_turns,\n" +
+		"# Work entries. Each needs a query_filter (or a filters entry) and\n" +
+		"# rules. setup, start and reload generate a workflow document from\n" +
+		"# each entry; the generated files are not edited by hand. max_turns,\n" +
 		"# max_concurrent_agents and polling_interval_ms default to 10, 1\n" +
 		"# and 60000 in the generated document; managed: false leaves a\n" +
 		"# hand-written document alone. A rule's agent may be a name, a\n" +
@@ -442,7 +465,7 @@ func configTemplateBody(repo string) string {
 		"    - { name: merge, match: { labels: [agent:merge] }, prompt: prompts/merge.md }\n"
 }
 
-func runSetupJSON(dir, repo string) {
+func runSetupJSON(dir, repo string, skipBuild bool) {
 	if dir == "" {
 		dir = "."
 	}
@@ -483,6 +506,12 @@ func runSetupJSON(dir, repo string) {
 	} else {
 		res.Skipped = append(res.Skipped, setupSkipped{Path: cfgPath, Reason: "exists"})
 	}
+	// Nothing derived from the config is written before it loads.
+	cfg, err := config.Load(abs)
+	if err != nil {
+		printSetupJSONAndFatal(res, err)
+		return
+	}
 	if path, created, err := ensureMachineFile(); err != nil {
 		res.Warnings = append(res.Warnings, fmt.Sprintf("machine file not created: %s", err))
 	} else if created {
@@ -490,30 +519,26 @@ func runSetupJSON(dir, repo string) {
 	} else {
 		res.Skipped = append(res.Skipped, setupSkipped{Path: path, Reason: "exists"})
 	}
-	sum, err := generateAll(abs)
-	if err != nil {
-		printSetupJSONAndFatal(res, err)
-		return
-	}
-	for _, l := range sum.Generated {
-		res.Created = append(res.Created, setupCreated{Path: genDocPath(abs, l), Kind: "workflow"})
-	}
-	for _, l := range sum.Drifted {
-		res.Created = append(res.Created, setupCreated{Path: genDocPath(abs, l), Kind: "workflow"})
-	}
-	for _, l := range sum.Retired {
-		res.Removed = append(res.Removed, genDocPath(abs, l))
-	}
-	for _, p := range sum.Prompts {
-		res.Created = append(res.Created, setupCreated{Path: p, Kind: "prompt"})
-	}
-	res.Warnings = append(res.Warnings, sum.Warnings...)
-	// Workflows and prompts.
-	legacy := syncWorkflowsJSON(abs, res)
-	if len(legacy) > 0 {
-		msg := fmt.Sprintf("warning: legacy workflow files found in .jigz/workflows/ (%s).", strings.Join(legacy, ", ")) +
-			" WORKFLOW.issues.md and WORKFLOW.prs.md are skipped until the legacy files are deleted. Delete them, then rerun `jig setup`."
-		res.Warnings = append(res.Warnings, msg)
+	syncPromptsJSON(abs, res)
+	if !skipBuild {
+		sum, err := generateAll(abs)
+		if err != nil {
+			printSetupJSONAndFatal(res, err)
+			return
+		}
+		for _, l := range sum.Generated {
+			res.Created = append(res.Created, setupCreated{Path: genDocPath(abs, l), Kind: "workflow"})
+		}
+		for _, l := range sum.Drifted {
+			res.Created = append(res.Created, setupCreated{Path: genDocPath(abs, l), Kind: "workflow"})
+		}
+		for _, l := range sum.Retired {
+			res.Removed = append(res.Removed, genDocPath(abs, l))
+		}
+		for _, p := range sum.Prompts {
+			res.Created = append(res.Created, setupCreated{Path: p, Kind: "prompt"})
+		}
+		res.Warnings = append(res.Warnings, sum.Warnings...)
 	}
 	// Cleanup script (installed by setup, never overwritten).
 	scriptDest := filepath.Join(abs, ".jigz", "scripts", "cleanup.sh")
@@ -534,22 +559,6 @@ func runSetupJSON(dir, repo string) {
 			res.Warnings = append(res.Warnings, msg)
 		}
 	}
-	for _, name := range consolidatedWorkflows {
-		cur, err := os.ReadFile(filepath.Join(abs, ".jigz", "workflows", name))
-		if err != nil {
-			continue
-		}
-		if gen.Managed(cur) {
-			continue
-		}
-		want, err := embeddedWorkflows.ReadFile("workflows/" + name)
-		if err == nil && string(cur) != string(want) {
-			msg := fmt.Sprintf("note: .jigz/workflows/%s differs from the shipped copy; diff it or delete it and rerun setup to take the shipped version.", name)
-			res.Warnings = append(res.Warnings, msg)
-		}
-	}
-	// pm-agent.
-	syncPMAgentJSON(abs, res)
 	// Engine.
 	if p, err := resolveSortieBin(); err != nil {
 		msg := err.Error()
@@ -565,25 +574,13 @@ func runSetupJSON(dir, repo string) {
 		return
 	}
 	ensureGitignoreJSON(abs, res)
-	// Config.
-	cfg, err := config.Load(abs)
-	if err != nil {
-		printSetupJSONAndFatal(res, err)
+	if skipBuild {
+		out, _ := json.MarshalIndent(res, "", "  ")
+		fmt.Println(string(out))
 		return
 	}
 	if len(cfg.Work) == 0 {
 		res.Warnings = append(res.Warnings, "config has no work: entries, so no workflow documents are generated; add them (docs/configuration.md \"Fleet and work\") and re-run setup.")
-	}
-	// Missing labels warning.
-	have := map[string]bool{}
-	for _, l := range cfg.Labels {
-		have[l.Name] = true
-	}
-	for _, l := range config.DefaultLabels {
-		if !have[l.Name] {
-			msg := fmt.Sprintf("note: label %q is not in the labels list of .jigz/config.yaml, so setup does not create it.", l.Name)
-			res.Warnings = append(res.Warnings, msg)
-		}
 	}
 	res.Warnings = append(res.Warnings, ruleLabelWarnings(cfg)...)
 	// Labels.
@@ -655,78 +652,26 @@ func printSetupJSONAndFatal(res *setupResult, err error) {
 	fatal(err)
 }
 
-func syncWorkflowsJSON(root string, res *setupResult) []string {
+func syncPromptsJSON(root string, res *setupResult) {
 	dir := filepath.Join(root, ".jigz", "workflows")
-	var legacy []string
-	for _, name := range legacyWorkflows {
-		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
-			legacy = append(legacy, name)
-		}
-	}
-	entries, err := embeddedWorkflows.ReadDir("workflows")
-	if err != nil {
-		printSetupJSONAndFatal(res, err)
-		return legacy
-	}
-	generated := managedSlugs(root)
-	configured := workSlugs(root)
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		if !configured[shippedSlug(e.Name())] {
-			res.Skipped = append(res.Skipped, setupSkipped{Path: filepath.Join(dir, e.Name()), Reason: "not-configured"})
-			continue
-		}
-		if generated[shippedSlug(e.Name())] {
-			res.Skipped = append(res.Skipped, setupSkipped{Path: filepath.Join(dir, e.Name()), Reason: "generated"})
-			continue
-		}
-		if len(legacy) > 0 && containsConsolidated(e.Name()) {
-			dest := filepath.Join(dir, e.Name())
-			res.Skipped = append(res.Skipped, setupSkipped{Path: dest, Reason: "legacy-present"})
-			continue
-		}
-		writeWorkflowJSON(embeddedWorkflows, filepath.Join(dir, e.Name()), "workflows/"+e.Name(), keepEdits, "workflow", res)
-	}
 	prompts, err := embeddedWorkflows.ReadDir("workflows/prompts")
-	if err != nil {
-		printSetupJSONAndFatal(res, err)
-		return legacy
-	}
-	for _, p := range prompts {
-		writeWorkflowJSON(embeddedWorkflows, filepath.Join(dir, "prompts", p.Name()), "workflows/prompts/"+p.Name(), keepEdits, "prompt", res)
-	}
-	return legacy
-}
-
-func containsConsolidated(name string) bool {
-	for _, n := range consolidatedWorkflows {
-		if n == name {
-			return true
-		}
-	}
-	return false
-}
-
-func writeWorkflowJSON(fsys fs.FS, dest, src string, policy writePolicy, kind string, res *setupResult) {
-	data, err := fs.ReadFile(fsys, src)
 	if err != nil {
 		printSetupJSONAndFatal(res, err)
 		return
 	}
-	if cur, err := os.ReadFile(dest); err == nil {
-		if string(cur) == string(data) {
-			res.Skipped = append(res.Skipped, setupSkipped{Path: dest, Reason: "exists"})
-			return
-		}
-		// In JSON mode, any existing differing file is kept (auto-decline for pm-agent, keepEdits for workflows).
-		// For workflows the policy is keepEdits, for pm-agent it is askBeforeOverwrite.
-		if policy == keepEdits {
-			res.Skipped = append(res.Skipped, setupSkipped{Path: dest, Reason: "exists"})
-			return
-		}
-		res.Skipped = append(res.Skipped, setupSkipped{Path: dest, Reason: "confirm-declined"})
+	for _, p := range prompts {
+		writeIfMissingJSON(embeddedWorkflows, filepath.Join(dir, "prompts", p.Name()), "workflows/prompts/"+p.Name(), "prompt", res)
+	}
+}
+
+func writeIfMissingJSON(fsys fs.FS, dest, src, kind string, res *setupResult) {
+	if _, err := os.Stat(dest); err == nil {
+		res.Skipped = append(res.Skipped, setupSkipped{Path: dest, Reason: "exists"})
+		return
+	}
+	data, err := fs.ReadFile(fsys, src)
+	if err != nil {
+		printSetupJSONAndFatal(res, err)
 		return
 	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
@@ -738,10 +683,6 @@ func writeWorkflowJSON(fsys fs.FS, dest, src string, policy writePolicy, kind st
 		return
 	}
 	res.Created = append(res.Created, setupCreated{Path: dest, Kind: kind})
-}
-
-func syncPMAgentJSON(root string, res *setupResult) {
-	writeWorkflowJSON(embeddedPMAgent, filepath.Join(root, ".jigz", "pm-agent.md"), "pm-agent.md", askBeforeOverwrite, "pm-agent", res)
 }
 
 func ensureGitignoreJSON(dir string, res *setupResult) {
