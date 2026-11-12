@@ -187,12 +187,20 @@ fails; unknown versions warn), generation drift per loop, `loops` (an owned docu
 generation does not produce fails), `prompts` (a
 rule prompt of a managed entry that is missing or still the generated
 stub fails), `cleanup`,
-`budgets`, a token warning, `max_usd` warnings, then each installed
+`budgets`, `agent-version:<agent>` (see below), a token warning, `max_usd`
+warnings, then each installed
 workflow through the engine's own `validate` with capability gating.
 Both the human and `--json` output start with the repo root and the
 exact `.jigz/config.yaml` path, so a failure says which checkout holds
 the config to fix.
 
+- agent CLI version → for each agent with runtime `opencode`, the agent's
+  `command` (default `opencode`) runs with `--version` and validation fails
+  unless the major version is 2, the engine's own rule, with an error naming
+  the agent, the version found and `install OpenCode 2.x, published on npm
+  as @opencode/cli`. A `pi` agent fails below 0.99.0. A command that is not
+  installed or does not run fails with the error of the call. Other runtimes
+  are not run;
 - engine too old → fail, no loop starts;
 - `tracker.kind` the engine did not register (e.g. `github-pr` on an
   engine without it) → `disabled`, not an error; the loop stays offline;

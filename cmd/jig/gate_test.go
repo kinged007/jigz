@@ -75,6 +75,10 @@ const (
 	opHoursMorning = "operating_hours:\n  timezone: UTC\n  windows:\n    - {days: [mon, tue, wed, thu, fri, sat, sun], start: \"09:00\", end: \"11:00\"}\n"
 )
 
+func unusableEntry(now time.Time, reason string) machine.EntryState {
+	return machine.EntryState{ExhaustedUntil: now.AddDate(100, 0, 0), Reason: machine.UnusablePrefix + reason}
+}
+
 func TestWorkGateDecide(t *testing.T) {
 	// 2026-10-21 12:00 UTC is outside the 09:00-11:00 windows.
 	now := gateOpenAt
@@ -152,6 +156,33 @@ func TestWorkGateDecide(t *testing.T) {
 			}},
 			now: now, loops: []gateLoop{{name: "plan", up: true}},
 			agent: "a", reason: reasonExhausted, eta: time.Date(2026, 10, 21, 14, 0, 0, 0, time.UTC),
+			end: machine.EndStop, want: gateStopNow,
+		},
+		{
+			name: "an unusable candidate is skipped", cfg: agentsAB + "work:\n  plan:\n    agent: [a, b]\n",
+			st:  machine.State{Agents: map[string]machine.EntryState{"a": unusableEntry(now, "Invalid API key")}},
+			now: now, loops: []gateLoop{{name: "plan", up: true}}, open: true, agent: "b", want: gateNone,
+		},
+		{
+			name: "all candidates unusable",
+			cfg:  agentsAB + "work:\n  plan:\n    agent: [a, b]\n",
+			st: machine.State{Agents: map[string]machine.EntryState{
+				"a": unusableEntry(now, "OpenCode 1.18.29 is not supported; install OpenCode 2.x"),
+				"b": unusableEntry(now, "Invalid API key"),
+			}},
+			now: now, loops: []gateLoop{{name: "plan", up: true}},
+			agent: "a", reason: reasonUnusable + ": a: OpenCode 1.18.29 is not supported; install OpenCode 2.x; b: Invalid API key",
+			end: machine.EndStop, want: gateStopNow,
+		},
+		{
+			name: "unusable and limited candidates wait for the limit reset",
+			cfg:  agentsAB + "work:\n  plan:\n    agent: [a, b]\n",
+			st: machine.State{Agents: map[string]machine.EntryState{
+				"a": unusableEntry(now, "Invalid API key"),
+				"b": {ExhaustedUntil: time.Date(2026, 10, 21, 15, 0, 0, 0, time.UTC), Reason: "usage limit"},
+			}},
+			now: now, loops: []gateLoop{{name: "plan", up: true}},
+			agent: "a", reason: reasonUnusable + ": a: Invalid API key", eta: time.Date(2026, 10, 21, 15, 0, 0, 0, time.UTC),
 			end: machine.EndStop, want: gateStopNow,
 		},
 		{
@@ -683,5 +714,45 @@ func TestGateExhaustedPoolStopsAndRestartsAtEarliestReset(t *testing.T) {
 	}
 	if w := r.workflow(t); w.State != "running" || w.Agent != "b" {
 		t.Errorf("status after reset %+v, want running on b", w)
+	}
+}
+
+// An unusable pool stops the loop at once, with no estimated start, and
+// keeps it down until the block is cleared; a reload clears it.
+func TestGateUnusablePoolHoldsUntilCleared(t *testing.T) {
+	r := newGateRig(t, "")
+	r.sup.sessions = r.sup.loopSessions
+	r.setConfig(t, "agents:\n  a: {runtime: pi}\n  b: {runtime: pi}\nwork:\n  plan:\n    agent: [a, b]\n")
+	r.step(t, time.Minute)
+	if r.sup.empty() {
+		t.Fatal("the loop did not start")
+	}
+	r.feed(t, dispatched7, tickBusy)
+	statePath := machine.StatePath(r.root)
+	for name, reason := range map[string]string{"a": "Pi 0.98.0 is not supported", "b": "Invalid API key"} {
+		if err := machine.MarkUnusable(statePath, name, r.now, reason); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.sup.refreshState(r.now, true)
+	r.step(t, 0)
+	r.settle(t)
+	if !r.sup.empty() {
+		t.Fatal("an unusable pool left the loop running")
+	}
+	w := r.workflow(t)
+	if w.State != "offline" || !strings.HasPrefix(w.OfflineReason, reasonUnusable) || !strings.Contains(w.OfflineReason, "Invalid API key") || w.ETA != nil {
+		t.Errorf("status %+v, want offline with the unusable reason and no estimate", w)
+	}
+	for _, d := range []time.Duration{time.Hour, 48 * time.Hour, 24 * 365 * time.Hour} {
+		r.step(t, d)
+		if !r.sup.empty() {
+			t.Fatalf("the loop restarted %v after the block, before it was cleared", d)
+		}
+	}
+	r.sup.reload()
+	r.step(t, 0)
+	if r.sup.empty() {
+		t.Fatal("the reload did not start the loop")
 	}
 }
