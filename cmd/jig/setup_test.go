@@ -158,3 +158,30 @@ func TestSetupInvalidConfigWritesNothing(t *testing.T) {
 		}
 	}
 }
+
+func TestConfirmOverwriteAllAnswersOnce(t *testing.T) {
+	withStdin(t, "a\n", func() {
+		all := false
+		if !confirmOverwrite("label one", &all) {
+			t.Fatal("first label declined, want accepted")
+		}
+		if !all {
+			t.Fatal("answer a did not set yes-to-all")
+		}
+		if !confirmOverwrite("label two", &all) {
+			t.Fatal("second label asked again, want accepted without a prompt")
+		}
+	})
+}
+
+func TestConfirmOverwriteYesAsksEachTime(t *testing.T) {
+	withStdin(t, "y\n", func() {
+		all := false
+		if !confirmOverwrite("label one", &all) || all {
+			t.Fatalf("y: all = %v, want false and accepted", all)
+		}
+		if confirmOverwrite("label two", &all) {
+			t.Fatal("second label accepted without an answer")
+		}
+	})
+}

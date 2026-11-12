@@ -115,11 +115,16 @@ func writeIfMissing(fsys fs.FS, dest, src string) {
 }
 
 // confirmOverwrite asks before replacing something a person may have
-// changed: an existing label whose colour or description differs. what is the text to show. Only an explicit yes
-// proceeds, so a closed, piped, or non-interactive stdin declines instead
-// of guessing.
-func confirmOverwrite(what string) bool {
-	fmt.Printf("  %s differs from what Jigz ships. Overwrite? [y/N] ", what)
+// changed: an existing label whose colour or description differs. what is
+// the text to show. Only an explicit yes proceeds, so a closed, piped, or
+// non-interactive stdin declines instead of guessing. Answering "a" or
+// "all" sets *all, and later calls with the same *all proceed without
+// asking.
+func confirmOverwrite(what string, all *bool) bool {
+	if *all {
+		return true
+	}
+	fmt.Printf("  %s differs from what Jigz ships. Overwrite? [y/N/a] ", what)
 	if promptIn == nil {
 		promptIn = bufio.NewReader(os.Stdin)
 	}
@@ -129,6 +134,9 @@ func confirmOverwrite(what string) bool {
 	}
 	switch strings.ToLower(strings.TrimSpace(line)) {
 	case "y", "yes":
+		return true
+	case "a", "all":
+		*all = true
 		return true
 	}
 	fmt.Printf("  kept %s — delete it and re-run setup to take the shipped version\n", what)

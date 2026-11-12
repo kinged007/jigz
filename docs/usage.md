@@ -36,7 +36,9 @@ in time, it prints the last log lines and exits non-zero. Stop the run with
 work entries and creates the labels listed under `labels:`. It writes the
 config, the prompts and the cleanup script only when they
 are missing and never overwrites them. It confirms before changing a label
-whose colour or description differs from the config. It loads and validates
+whose colour or description differs from the config; answer `y` to update
+one label, `n` to keep it, or `a` (or `all`) to update it and every later
+differing label without asking again. It loads and validates
 the config before it writes anything derived from it.
 
 `jig setup --skip-build` does everything except generating the workflow

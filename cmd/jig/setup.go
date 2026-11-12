@@ -102,6 +102,7 @@ func runSetup(dir, repo string, asJSON, skipBuild bool) {
 	if len(cfg.Work) == 0 {
 		fmt.Fprintln(os.Stderr, "note: .jigz/config.yaml has no work: entries, so no workflow documents are generated; add them (docs/configuration.md \"Fleet and work\") and re-run setup.")
 	}
+	overwriteAll := false
 	for _, l := range cfg.Labels {
 		cur, err := labelOn(repo, l.Name)
 		if err != nil {
@@ -111,7 +112,7 @@ func runSetup(dir, repo string, asJSON, skipBuild bool) {
 			if cur.color == l.Color && cur.description == l.Description {
 				continue
 			}
-			if !confirmOverwrite(fmt.Sprintf("label %s (colour %s, description %q)", l.Name, cur.color, cur.description)) {
+			if !confirmOverwrite(fmt.Sprintf("label %s (colour %s, description %q)", l.Name, cur.color, cur.description), &overwriteAll) {
 				continue
 			}
 		}
