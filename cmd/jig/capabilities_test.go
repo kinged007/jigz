@@ -57,7 +57,7 @@ func TestCapAlerts(t *testing.T) {
 			`err|Agent kind|o/a/issues: Agent kind "pi" is not available: engine sortie-ai/sortie v1.29.0 registers claude-code, codex, mock. The loop is not started.`}},
 		{"codex in the file", upstream, []loopFile{{"o/a", "issues", flow("github", "codex")}}, nil, nil, nil},
 		{"old engine", old, []loopFile{issues, prs}, nil, nil, []string{
-			"err|Engine|Loops are off: engine sortie-ai/sortie v1.26.0 is older than 1.27.0, the oldest the shipped workflows run on."}},
+			"err|Engine|Loops are off: engine sortie-ai/sortie v1.26.0 is older than 1.27.0, the oldest the generated workflows run on."}},
 		{"unknown", unknown, []loopFile{issues, prs}, nil, []string{"pi"}, []string{
 			"warn|Engine|The engine's features could not be detected, so none is disabled: exit status 3"}},
 	} {
@@ -148,20 +148,16 @@ func TestAnExplicitPiKindOnAnEngineWithoutPiDoesNotStart(t *testing.T) {
 	}
 }
 
-// The shipped workflows parse to the claude-code agent, the claude
-// command and the claude-haiku-5-5 model in the claude-code block.
-func TestShippedWorkflowsUseTheClaudeCodeDefault(t *testing.T) {
-	for _, name := range []string{"WORKFLOW.issues.md", "WORKFLOW.prs.md"} {
-		raw, err := embeddedWorkflows.ReadFile("workflows/" + name)
+// The workflows generated from the setup scaffold parse to the claude-code
+// agent and the claude-haiku-5-5 model in the claude-code block.
+func TestScaffoldWorkflowsUseTheClaudeCodeDefault(t *testing.T) {
+	for _, loop := range []string{"issues", "prs"} {
+		wf, err := plan.ParseWorkflow(generatedLoopDoc(t, "o/r", loop))
 		if err != nil {
 			t.Fatal(err)
 		}
-		wf, err := plan.ParseWorkflow(string(raw))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if wf.AgentKind != "claude-code" || wf.Knobs["command"] != "claude" || wf.Model != "claude-haiku-5-5" {
-			t.Errorf("%s: agent %q command %q model %q, want claude-code, claude, claude-haiku-5-5", name, wf.AgentKind, wf.Knobs["command"], wf.Model)
+		if wf.AgentKind != "claude-code" || wf.Model != "claude-haiku-5-5" {
+			t.Errorf("%s: agent %q model %q, want claude-code, claude-haiku-5-5", loop, wf.AgentKind, wf.Model)
 		}
 	}
 }

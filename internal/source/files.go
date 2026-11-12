@@ -15,7 +15,7 @@ type Files struct {
 	Root    string
 	Project string
 	Only    string
-	// Sync installs the shipped workflows into Root before they are
+	// Sync installs the shipped prompts into Root before the workflows are
 	// listed; nil lists what is on disk.
 	Sync func(root string)
 	// Filter narrows the discovered names before Only is applied; nil

@@ -604,6 +604,12 @@ func (c *Config) validateWorkEntry(slug string) error {
 			return fmt.Errorf("%s.rules[%d].next: %q does not name a later rule of %s", key, i, r.Next, key)
 		}
 	}
+	if w.QueryFilter == "" && c.Filters[slug] == "" {
+		return fmt.Errorf("%s needs query_filter (or a filters.%s entry)", key, slug)
+	}
+	if w.Managed && len(w.Rules) == 0 {
+		return fmt.Errorf("%s needs rules (or managed: false for a hand-written workflow document)", key)
+	}
 	// A split entry runs one loop per candidate list with the base
 	// query narrowed to the loop's labels (see gen.Split): a loop with
 	// no labels keeps the un-narrowed query and claims every other

@@ -42,8 +42,8 @@ import (
 // Jigz binary, against an in-memory fake GitHub. The engine runs its
 // `mock` agent, so no model, Docker, or real GitHub is involved.
 //
-// The shipped issues workflow and prompts are used unchanged except for
-// these front matter fields, which are replaced because they need the
+// The issues workflow generated from the setup scaffold and the shipped
+// prompts are used unchanged except for these front matter fields, which are replaced because they need the
 // outside world:
 //   - tracker.endpoint is added and points at the fake GitHub.
 //   - polling.interval_ms is 1000 instead of 60000 so the test does not wait
@@ -55,7 +55,7 @@ import (
 //     binary runs. agent.max_turns is 1: the mock agent never edits labels,
 //     so the issue would stay active and run all ten turns before the
 //     handoff, where the shipped agent removes its own trigger.
-//   - the pi: block becomes a mock: block.
+//   - the agent kind's block (claude-code:) becomes a mock: block.
 //
 // Scenarios d and e write machine.yaml into the isolated config directory
 // while the stack runs. The supervisor reads it again when it changes. In e
@@ -64,7 +64,7 @@ import (
 // command; SORTIE_AGENT_KIND replaces agent.kind: mock.
 //
 // Labels, states, handoff, query_filter, dispatch rules and prompts are as
-// shipped. The assignee scope comes from Jigz itself (config default
+// the setup scaffold generates them. The assignee scope comes from Jigz itself (config default
 // @me), as in a real run.
 //
 // The engine comes from the same sources Jigz prefers (JIG_ENGINE_BIN,
@@ -84,7 +84,7 @@ func TestAcceptance(t *testing.T) {
 	)
 	gh := fakegithub.New(owner, token)
 	gh.Logf = t.Logf
-	gh.AddRepo(slug, labelNames(config.DefaultLabels)...)
+	gh.AddRepo(slug, labelNames(scaffoldLabels)...)
 	srv := httptest.NewServer(gh)
 	defer srv.Close()
 
@@ -188,7 +188,7 @@ func TestAcceptance(t *testing.T) {
 		if len(markers) != 1 {
 			t.Errorf("after_run marker files: %v, want exactly one", markers)
 		}
-		wantQ := "repo:" + slug + " type:issue state:open " + config.DefaultLabelFilter("issues") + " assignee:@me"
+		wantQ := "repo:" + slug + " type:issue state:open " + acceptanceIssuesFilter + " assignee:@me"
 		if !hasSearch(gh, wantQ) {
 			t.Errorf("no candidate search with the shipped filter plus assignee scope; want q=%q", wantQ)
 		}
@@ -249,7 +249,7 @@ func TestAcceptance(t *testing.T) {
 	t.Run("c_dashboard_reads_the_run_from_the_database", func(t *testing.T) {
 		t0 := time.Now()
 		var schema int
-		db, err := sql.Open("sqlite", "file:"+filepath.Join(repoDir, ".jigz", "workflows", "jigz-issues.db")+"?mode=ro")
+		db, err := sql.Open("sqlite", "file:"+filepath.Join(repoDir, ".jigz", "data", "jigz-issues.db")+"?mode=ro")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -424,10 +424,14 @@ func TestAcceptance(t *testing.T) {
         - {days: [mon, tue, wed, thu, fri, sat, sun], start: %q, end: %q}
 work:
   issues:
+    query_filter: %q
     agent: a
+    rules:
+    - { name: plan, match: { labels: [agent:plan] }, prompt: prompts/plan.md }
   prs:
     managed: false
-`, bytes.Replace(base, []byte("work:\n  issues:\n    managed: false\n  prs:\n    managed: false\n"), nil, 1), from.Format("15:04"), to.Format("15:04"))
+    query_filter: %q
+`, bytes.Replace(base, []byte(acceptanceUnmanagedWork), nil, 1), from.Format("15:04"), to.Format("15:04"), acceptanceIssuesFilter, acceptancePRsFilter)
 			if err := os.WriteFile(cfgFile+".tmp", []byte(body), 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -756,7 +760,7 @@ func TestAcceptanceUpstreamEngine(t *testing.T) {
 	)
 	gh := fakegithub.New(owner, token)
 	gh.Logf = t.Logf
-	gh.AddRepo(slug, labelNames(config.DefaultLabels)...)
+	gh.AddRepo(slug, labelNames(scaffoldLabels)...)
 	srv := httptest.NewServer(gh)
 	defer srv.Close()
 	planned := gh.Add(fakegithub.Item{Repo: slug, Title: "Plan this", Body: "Write a plan.",
@@ -964,7 +968,7 @@ func TestAcceptanceConnected(t *testing.T) {
 	)
 	gh := fakegithub.New(owner, token)
 	gh.Logf = t.Logf
-	gh.AddRepo(slug, append(labelNames(config.DefaultLabels), runner, "runner:other", "backlog")...)
+	gh.AddRepo(slug, append(labelNames(scaffoldLabels), runner, "runner:other", "backlog")...)
 	srv := httptest.NewServer(gh)
 	defer srv.Close()
 	hub := fakehub.New(enrollToken)
@@ -972,11 +976,7 @@ func TestAcceptanceConnected(t *testing.T) {
 	hubSrv := httptest.NewServer(hub)
 	defer hubSrv.Close()
 
-	shipped, err := embeddedWorkflows.ReadFile("workflows/WORKFLOW.issues.md")
-	if err != nil {
-		t.Fatal(err)
-	}
-	workflow, err := acceptanceWorkflow(string(shipped), srv.URL)
+	workflow, err := acceptanceWorkflow(generatedLoopDoc(t, slug, "issues"), srv.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -996,8 +996,9 @@ func TestAcceptanceConnected(t *testing.T) {
 			}
 			files = append(files, hubFile("prompts/"+e.Name(), string(raw)))
 		}
+		files = append(files, hubFile(defaultPrompt, string(stubPrompt("default.md"))))
 		labels := []hubproto.Label{}
-		for _, l := range config.DefaultLabels {
+		for _, l := range scaffoldLabels {
 			labels = append(labels, hubproto.Label{Name: l.Name, Color: l.Color, Description: l.Description})
 		}
 		return hubproto.ConfigResponse{
@@ -1508,35 +1509,45 @@ func buildLoop(t *testing.T) string {
 	return bin
 }
 
+const (
+	acceptanceIssuesFilter = "label:agent:plan,agent:plan-build,agent:build,agent:docs,in-progress -label:needs-human"
+	acceptancePRsFilter    = "label:agent:review,agent:build,agent:merge,in-progress -label:needs-human"
+)
+
+var acceptanceUnmanagedWork = fmt.Sprintf("work:\n  issues:\n    managed: false\n    query_filter: %q\n  prs:\n    managed: false\n    query_filter: %q\n",
+	acceptanceIssuesFilter, acceptancePRsFilter)
+
 // writeAcceptanceRepo creates the target repo's .jigz directory: the
-// config, the shipped workflows and prompts, and the acceptance variant of
-// the issues workflow.
+// config, the prompts, the generated prs workflow, and the acceptance
+// variant of the generated issues workflow. Both entries are unmanaged so
+// the edited documents are kept.
 func writeAcceptanceRepo(t *testing.T, dir, slug, token, endpoint string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Join(dir, ".jigz"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".jigz", "workflows"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cfg := fmt.Sprintf("repo: %s\ntoken: %s\nwork:\n  issues:\n    managed: false\n  prs:\n    managed: false\n", slug, token)
+	if err := os.MkdirAll(filepath.Join(dir, ".jigz", "data"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := fmt.Sprintf("repo: %s\ntoken: %s\n", slug, token) + acceptanceUnmanagedWork
 	if err := os.WriteFile(filepath.Join(dir, ".jigz", "config.yaml"), []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	syncWorkflows(dir)
-	path := filepath.Join(dir, ".jigz", "workflows", "WORKFLOW.issues.md")
-	raw, err := os.ReadFile(path)
+	syncPrompts(dir)
+	out, err := acceptanceWorkflow(generatedLoopDoc(t, slug, "issues"), endpoint)
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := acceptanceWorkflow(string(raw), endpoint)
-	if err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".jigz", "workflows", "WORKFLOW.issues.md"), []byte(out), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(out), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".jigz", "workflows", "WORKFLOW.prs.md"), []byte(generatedLoopDoc(t, slug, "prs")), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
 
 // acceptanceWorkflow applies the field replacements listed on
-// TestAcceptance to the shipped issues workflow.
+// TestAcceptance to the generated issues workflow.
 func acceptanceWorkflow(shipped, endpoint string) (string, error) {
 	front, body, ok := strings.Cut(strings.TrimPrefix(shipped, "---\n"), "\n---\n")
 	if !ok {
@@ -1577,9 +1588,9 @@ func acceptanceWorkflow(shipped, endpoint string) (string, error) {
 			}
 		}
 	}
-	for _, key := range []string{"tracker", "polling", "hooks", "agent", "pi"} {
+	for _, key := range []string{"tracker", "polling", "hooks", "agent", "claude-code"} {
 		if child(top, key) == nil {
-			return "", fmt.Errorf("shipped workflow has no %s: block; update the acceptance replacements", key)
+			return "", fmt.Errorf("generated workflow has no %s: block; update the acceptance replacements", key)
 		}
 	}
 	set(child(top, "tracker"), "endpoint", node("endpoint: " + endpoint).Content[1])
@@ -1592,7 +1603,7 @@ func acceptanceWorkflow(shipped, endpoint string) (string, error) {
 	set(agent, "kind", node("kind: mock").Content[1])
 	set(agent, "max_turns", node("max_turns: 1").Content[1])
 	del(agent, "command")
-	del(top, "pi")
+	del(top, "claude-code")
 	set(top, "mock", node("turn_outcomes: [completed]\nturn_delay_ms: 500\ninput_tokens_per_turn: 100\noutput_tokens_per_turn: 50"))
 
 	var buf bytes.Buffer

@@ -20,9 +20,10 @@ The hub product has its own roadmap:
 
 ### Setup and config
 
-- [x] `jig setup` (interactive and `--json`): config scaffold, labels,
-  workflow and prompt install; never overwrites an edited file, reports
-  differences instead
+- [x] `jig setup` (interactive and `--json`): config scaffold, workflow
+  generation from the config, labels listed in the config, prompt install;
+  never overwrites an existing config or prompt;
+  `--skip-build` leaves out workflow generation and labels
 - [x] Repo config `.jigz/config.yaml` with validation; per-loop query-filter
   overrides re-read on every run
 - [x] `jig validate [--json]`: config checks plus engine validation per
@@ -237,7 +238,6 @@ pick up opportunistically.
   engine's error output; configurable limit patterns in `pool.json`
 - [ ] Re-probe engine capabilities when the pin changes, not only at
   supervisor start
-- [ ] Shipped workflow blocks for `codex` and `opencode`
 - [ ] GitHub enrichment in the collector (PR timeline, commits, check
   runs) is never triggered; wire it up
 - [ ] Configurable collector copy interval (60 s fixed today)

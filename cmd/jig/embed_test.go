@@ -21,30 +21,25 @@ import (
 func TestSetupSeedsLabelsIntoFreshConfig(t *testing.T) {
 	root := t.TempDir()
 	os.MkdirAll(filepath.Join(root, ".jigz"), 0o755)
-	// Simulate the config body setup writes for a fresh repo, then check
-	// it parses and carries every default label.
-	var body string
-	for _, l := range config.DefaultLabels {
-		body += "- {name: \"" + l.Name + "\", color: \"" + l.Color + "\", description: \"x\"}\n"
-	}
-	os.WriteFile(filepath.Join(root, ".jigz", "config.yaml"),
-		[]byte("repo: o/r\ntoken: tok\nlabels:\n"+body), 0o644)
+	os.WriteFile(filepath.Join(root, ".jigz", "config.yaml"), []byte(configTemplateBody("o/r")), 0o644)
 	cfg, err := config.Load(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Labels) != len(config.DefaultLabels) {
-		t.Fatalf("labels = %d, want %d", len(cfg.Labels), len(config.DefaultLabels))
+	if len(cfg.Labels) != len(scaffoldLabels) {
+		t.Fatalf("labels = %d, want %d", len(cfg.Labels), len(scaffoldLabels))
 	}
-	if cfg.Labels[0].Name != config.DefaultLabels[0].Name {
-		t.Errorf("first label = %q", cfg.Labels[0].Name)
+	for i, l := range scaffoldLabels {
+		if cfg.Labels[i] != l {
+			t.Errorf("label %d = %+v, want %+v", i, cfg.Labels[i], l)
+		}
 	}
 }
 
-// TestSetupSkeletonCarriesShippedWorkflows checks that the fresh config
-// setup writes loads, resolves to the issues and prs loops with the
-// shipped queries and rules, and renders managed documents from them.
-func TestSetupSkeletonCarriesShippedWorkflows(t *testing.T) {
+// TestSetupSkeletonValidates checks that the fresh config setup writes
+// loads, resolves to the issues and prs loops with explicit queries and
+// rules, and renders managed documents from them.
+func TestSetupSkeletonValidates(t *testing.T) {
 	root := t.TempDir()
 	os.MkdirAll(filepath.Join(root, ".jigz"), 0o755)
 	if err := os.WriteFile(filepath.Join(root, ".jigz", "config.yaml"), []byte(configTemplateBody("o/r")), 0o644); err != nil {
@@ -63,6 +58,10 @@ func TestSetupSkeletonCarriesShippedWorkflows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	wantQuery := map[string]string{
+		"issues": "label:agent:plan,agent:plan-build,agent:build,agent:docs,in-progress -label:needs-human",
+		"prs":    "label:agent:review,agent:build,agent:merge,in-progress -label:needs-human",
+	}
 	wantRules := map[string][]string{
 		"issues": {"plan", "plan-build", "build", "docs", "build-chain"},
 		"prs":    {"review", "review-fix", "merge"},
@@ -72,8 +71,8 @@ func TestSetupSkeletonCarriesShippedWorkflows(t *testing.T) {
 		if !ok {
 			t.Fatalf("no work.%s entry", slug)
 		}
-		if res.QueryFilter != shippedQueryFilter(t, slug) {
-			t.Errorf("work.%s query = %q, shipped document has %q", slug, res.QueryFilter, shippedQueryFilter(t, slug))
+		if res.QueryFilter != wantQuery[slug] {
+			t.Errorf("work.%s query = %q, want %q", slug, res.QueryFilter, wantQuery[slug])
 		}
 		loops := gen.Split(res, cfg.Agents)
 		if len(loops) != 1 {
@@ -122,23 +121,6 @@ func TestSetupSkeletonCarriesShippedWorkflows(t *testing.T) {
 	}
 }
 
-// shippedQueryFilter reads the query_filter of the embedded workflow
-// document, so the skeleton stays a mirror of the shipped files.
-func shippedQueryFilter(t *testing.T, slug string) string {
-	t.Helper()
-	raw, err := embeddedWorkflows.ReadFile("workflows/WORKFLOW." + slug + ".md")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, line := range strings.Split(string(raw), "\n") {
-		if s, ok := strings.CutPrefix(strings.TrimSpace(line), "query_filter:"); ok {
-			return strings.Trim(strings.TrimSpace(s), "\"")
-		}
-	}
-	t.Fatalf("no query_filter in shipped WORKFLOW.%s.md", slug)
-	return ""
-}
-
 func unmanagedConfig(slugs ...string) string {
 	body := retireBase + "work:\n"
 	for _, slug := range slugs {
@@ -153,86 +135,27 @@ func unmanagedConfig(slugs ...string) string {
 	return body
 }
 
-func TestSyncWorkflowsKeepsEditsFillsGaps(t *testing.T) {
-	root := writeGenConfig(t, unmanagedConfig("issues", "prs"))
-	if legacy := syncWorkflows(root); len(legacy) != 0 {
-		t.Fatalf("fresh repo reported legacy files %v", legacy)
-	}
-	issues := filepath.Join(root, ".jigz", "workflows", "WORKFLOW.issues.md")
-	if _, err := os.Stat(filepath.Join(root, ".jigz", "workflows", "WORKFLOW.prs.md")); err != nil {
-		t.Fatalf("setup did not install the prs workflow: %v", err)
+func TestSyncPromptsKeepsEditsFillsGaps(t *testing.T) {
+	root := writeGenConfig(t, unmanagedConfig("issues"))
+	syncPrompts(root)
+	if _, err := os.Stat(filepath.Join(root, ".jigz", "workflows", "WORKFLOW.issues.md")); err == nil {
+		t.Fatal("setup installed a workflow document")
 	}
 	if _, err := os.Stat(filepath.Join(root, ".jigz", "workflows", "prompts", "docs.md")); err != nil {
 		t.Fatalf("setup did not install prompts: %v", err)
 	}
-	f, _ := os.OpenFile(issues, os.O_APPEND|os.O_WRONLY, 0o644)
-	f.WriteString("\n# local tweak")
-	f.Close()
 	promptFile := filepath.Join(root, ".jigz", "workflows", "prompts", "docs.md")
 	os.WriteFile(promptFile, []byte("mine\n"), 0o644)
 	os.Remove(filepath.Join(root, ".jigz", "workflows", "prompts", "build.md"))
-	if got := workflowPath(root, "WORKFLOW.issues.md"); got != issues {
-		t.Fatalf("workflowPath = %q, want %q", got, issues)
-	}
-	raw, _ := os.ReadFile(issues)
-	if !strings.HasSuffix(string(raw), "\n# local tweak") {
-		t.Error("sync overwrote local workflow edit")
+	want := filepath.Join(root, ".jigz", "workflows", "WORKFLOW.issues.md")
+	if got := workflowPath(root, "WORKFLOW.issues.md"); got != want {
+		t.Fatalf("workflowPath = %q, want %q", got, want)
 	}
 	if got, _ := os.ReadFile(promptFile); string(got) != "mine\n" {
 		t.Error("sync overwrote local prompt edit")
 	}
 	if _, err := os.Stat(filepath.Join(root, ".jigz", "workflows", "prompts", "build.md")); err != nil {
 		t.Error("sync did not restore missing prompt file")
-	}
-}
-
-func TestSyncWorkflowsSkipsConsolidatedFilesWhileLegacyExist(t *testing.T) {
-	root := writeGenConfig(t, unmanagedConfig("issues", "prs", "plan", "merge"))
-	dir := filepath.Join(root, ".jigz", "workflows")
-	os.MkdirAll(dir, 0o755)
-	const old = "---\n# old plan\n"
-	os.WriteFile(filepath.Join(dir, "WORKFLOW.plan.md"), []byte(old), 0o644)
-	os.WriteFile(filepath.Join(dir, "WORKFLOW.merge.md"), []byte(old), 0o644)
-
-	legacy := syncWorkflows(root)
-	if strings.Join(legacy, ",") != "WORKFLOW.plan.md,WORKFLOW.merge.md" && strings.Join(legacy, ",") != "WORKFLOW.merge.md,WORKFLOW.plan.md" {
-		t.Errorf("legacy = %v", legacy)
-	}
-	for _, name := range consolidatedWorkflows {
-		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
-			t.Errorf("%s written while legacy files exist", name)
-		}
-	}
-	if got, _ := os.ReadFile(filepath.Join(dir, "WORKFLOW.plan.md")); string(got) != old {
-		t.Error("legacy file was changed")
-	}
-	names := loopNames(discoverWorkflows(root))
-	if names != "merge,plan" {
-		t.Errorf("discoverWorkflows = %s, want only the legacy loops", names)
-	}
-
-	os.Remove(filepath.Join(dir, "WORKFLOW.plan.md"))
-	os.Remove(filepath.Join(dir, "WORKFLOW.merge.md"))
-	if legacy := syncWorkflows(root); len(legacy) != 0 {
-		t.Errorf("legacy = %v after deleting the legacy files", legacy)
-	}
-	if names := loopNames(discoverWorkflows(root)); names != "issues,prs" {
-		t.Errorf("discoverWorkflows = %s, want issues,prs", names)
-	}
-}
-
-func TestWarnLegacyMessage(t *testing.T) {
-	r, w, _ := os.Pipe()
-	saved := os.Stderr
-	os.Stderr = w
-	warnLegacy([]string{"WORKFLOW.plan.md"})
-	warnLegacy(nil)
-	w.Close()
-	os.Stderr = saved
-	out, _ := io.ReadAll(r)
-	got := string(out)
-	if strings.Count(got, "warning:") != 1 || !strings.Contains(got, "WORKFLOW.plan.md") || !strings.Contains(got, "skipped until the legacy files are deleted") {
-		t.Errorf("message = %q", got)
 	}
 }
 
@@ -250,7 +173,7 @@ func captureStderr(t *testing.T, fn func()) string {
 
 func TestWarnStalePrompts(t *testing.T) {
 	root := t.TempDir()
-	syncWorkflows(root)
+	syncPrompts(root)
 	if got := captureStderr(t, func() { warnStalePrompts(root) }); got != "" {
 		t.Errorf("shipped prompts warned: %q", got)
 	}
@@ -358,49 +281,6 @@ func TestPromptQuestionTemplatesParse(t *testing.T) {
 	}
 }
 
-func TestWarnStaleWorkflows(t *testing.T) {
-	root := writeGenConfig(t, unmanagedConfig("issues"))
-	syncWorkflows(root)
-	if got := captureStderr(t, func() { warnStaleWorkflows(root) }); got != "" {
-		t.Errorf("shipped workflows warned: %q", got)
-	}
-	// A pre-rename copy names a variable the binary no longer sets.
-	p := filepath.Join(root, ".jigz", "workflows", "WORKFLOW.issues.md")
-	cur, err := os.ReadFile(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stale := strings.ReplaceAll(string(cur), "$JIG_WORKSPACES", "$SORTIE_LOOP_WORKSPACES")
-	if stale == string(cur) {
-		t.Fatal("shipped copy no longer sets a workspace root")
-	}
-	if err := os.WriteFile(p, []byte(stale), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	got := captureStderr(t, func() { warnStaleWorkflows(root) })
-	if strings.Count(got, "note:") != 1 || !strings.Contains(got, "WORKFLOW.issues.md") {
-		t.Errorf("message = %q", got)
-	}
-}
-
-func TestWarnMissingLabels(t *testing.T) {
-	if got := captureStderr(t, func() { warnMissingLabels(config.DefaultLabels) }); got != "" {
-		t.Errorf("full list warned: %q", got)
-	}
-	got := captureStderr(t, func() { warnMissingLabels([]config.Label{{Name: "agent:plan"}}) })
-	if want := len(config.DefaultLabels) - 1; strings.Count(got, "note:") != want {
-		t.Errorf("got %d notes, want %d: %q", strings.Count(got, "note:"), want, got)
-	}
-	for _, name := range []string{"agent:plan-build", "agent:docs"} {
-		if !strings.Contains(got, `"`+name+`"`) {
-			t.Errorf("no note for %s: %q", name, got)
-		}
-	}
-	if strings.Contains(got, `"agent:plan" `) {
-		t.Errorf("noted a label that is in the list: %q", got)
-	}
-}
-
 func loopNames(loops []loopDef) string {
 	var n []string
 	for _, l := range loops {
@@ -428,26 +308,6 @@ func withStdin(t *testing.T, input string, fn func()) {
 	os.Stdin, promptIn = r, nil
 	defer func() { os.Stdin, promptIn = saved, savedReader }()
 	fn()
-}
-
-func TestSyncPMAgentInstallsPrompt(t *testing.T) {
-	root := t.TempDir()
-	syncPMAgent(root, keepEdits)
-	dest := filepath.Join(root, ".jigz", "pm-agent.md")
-	raw, err := os.ReadFile(dest)
-	if err != nil {
-		t.Fatalf("setup did not install the pm prompt: %v", err)
-	}
-	if !strings.Contains(string(raw), "united-into") {
-		t.Error("installed pm prompt lacks the label contract it routes on")
-	}
-	// A hand-edited prompt survives setup without confirmation.
-	const mine = "# mine\n"
-	os.WriteFile(dest, []byte(mine), 0o644)
-	withStdin(t, "", func() { syncPMAgent(root, askBeforeOverwrite) })
-	if got, _ := os.ReadFile(dest); string(got) != mine {
-		t.Error("setup replaced a customized pm prompt without confirmation")
-	}
 }
 
 func TestEnsureGitignoreIgnoresSortieWholesale(t *testing.T) {
@@ -564,7 +424,7 @@ func TestSetupHonoursSortieBin(t *testing.T) {
 		// will fatal. The engine step runs before that, which is all this
 		// is checking, so the failure past it is expected.
 		defer func() { recover() }()
-		runSetup(repo, "owner/name", false)
+		runSetup(repo, "owner/name", false, false)
 	})
 	if strings.Contains(out, "engine not installed") {
 		t.Errorf("setup downloaded an engine despite JIG_ENGINE_BIN:\n%s", out)
@@ -596,7 +456,8 @@ func captureStdout(t *testing.T, fn func()) string {
 
 func TestDiscoverWorkflowsPicksUpNewFile(t *testing.T) {
 	root := writeGenConfig(t, unmanagedConfig("issues", "prs", "triage"))
-	syncWorkflows(root)
+	writeLoopDoc(t, root, "issues", "---\n")
+	writeLoopDoc(t, root, "prs", "---\n")
 	// A hand-added workflow (no rebuild, no code change) is discovered.
 	os.WriteFile(filepath.Join(root, ".jigz", "workflows", "WORKFLOW.triage.md"), []byte("---\n"), 0o644)
 	// Non-workflow files are ignored.
@@ -659,7 +520,8 @@ func TestSelectLoops(t *testing.T) {
 // caught here rather than by a supervisor that names it.
 func TestSelectLoopsAgainstInstalledWorkflows(t *testing.T) {
 	root := writeGenConfig(t, unmanagedConfig("issues", "prs"))
-	syncWorkflows(root)
+	writeLoopDoc(t, root, "issues", "---\n")
+	writeLoopDoc(t, root, "prs", "---\n")
 	all := discoverWorkflows(root)
 	if got, err := selectLoops(all, ""); err != nil || len(got) != len(all) {
 		t.Fatalf("selectLoops(\"\") = %d loops, %v; want %d", len(got), err, len(all))
@@ -889,24 +751,6 @@ func TestEnsureMachineFileCreatesDefaults(t *testing.T) {
 	}
 	if raw, _ := os.ReadFile(path); string(raw) != custom {
 		t.Fatalf("existing file was overwritten: %q", raw)
-	}
-}
-
-func TestSyncWorkflowsInstallsOnlyConfiguredSlugs(t *testing.T) {
-	root := writeGenConfig(t, unmanagedConfig("ops"))
-	syncWorkflows(root)
-	dir := filepath.Join(root, ".jigz", "workflows")
-	for _, name := range []string{"WORKFLOW.issues.md", "WORKFLOW.prs.md"} {
-		if exists(filepath.Join(dir, name)) {
-			t.Errorf("%s installed although work has no such entry", name)
-		}
-	}
-	res := &setupResult{}
-	syncWorkflowsJSON(root, res)
-	for _, name := range []string{"WORKFLOW.issues.md", "WORKFLOW.prs.md"} {
-		if exists(filepath.Join(dir, name)) {
-			t.Errorf("setup --json installed %s although work has no such entry", name)
-		}
 	}
 }
 

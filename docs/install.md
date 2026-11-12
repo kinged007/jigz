@@ -31,7 +31,7 @@ commands (`validate`, `stats`) work in any shell. A fresh install needs no
 separate engine step.
 
 The engine is a GitHub release, chosen by a repository (`owner/name`) and a
-version tag (`vX.Y.Z`), defaulting to `v1.28.1`, the release the shipped
+version tag (`vX.Y.Z`), defaulting to `v1.28.1`, the release the generated
 workflows were written against. `jig --version` prints the tool version
 and the engine release it resolves to, and the dashboard Settings page
 shows that release next to the version the engine binary reports.
@@ -59,7 +59,7 @@ features could not be detected.
 
 | The engine | What happens |
 |---|---|
-| Is older than 1.27.0, the oldest the shipped workflows run on | No loop starts. `validate` fails with the reason, and the dashboard shows an alert. |
+| Is older than 1.27.0, the oldest the generated workflows run on | No loop starts. `validate` fails with the reason, and the dashboard shows an alert. |
 | Has no `github-pr` tracker | The PR workflow loop does not start. `validate` reports it as disabled, not as an error. The workflow file stays installed. |
 | Lacks the agent kind a workflow names (`claude-code` unless you set `agent.kind`) | The loop does not start. `validate` and the dashboard show an error. There is no fallback agent. Pool entries with a runtime the engine lacks are shown as unavailable and are not picked. |
 

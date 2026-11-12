@@ -17,6 +17,7 @@ import (
 type cmdline struct {
 	setup       bool
 	setupJSON   bool
+	skipBuild   bool
 	repo        string
 	dir         string
 	noDashboard bool
@@ -81,6 +82,12 @@ func parseArgs(argv []string) (cmdline, error) {
 			c.showVersion = true
 		case "help", "-h", "--help":
 			return c, errHelp
+		case "--skip-build":
+			if c.setup {
+				c.skipBuild = true
+				continue
+			}
+			return c, fmt.Errorf("unknown flag %q", arg)
 		case "--repo":
 			v, err := value()
 			if err != nil {
@@ -163,10 +170,12 @@ Control (act on the run serving repo-root, found through the registry)
                                   validation on each workflow
 
 Setup
-  setup [--repo=owner/name] [--json]
-                                  write config, labels and workflow files
-                                  in repo-root; the repo id defaults to the
-                                  git remote
+  setup [--repo=owner/name] [--json] [--skip-build]
+                                  write the config and prompts when missing,
+                                  generate the workflow files and create the
+                                  labels listed in the config; the repo id
+                                  defaults to the git remote. --skip-build
+                                  leaves out the workflow files and labels.
   join <hub-url> <token> [--name <name>] [--no-service] [--yes]
                                   enroll this machine with a hub and
                                   install the jigd service; token - reads
@@ -248,7 +257,7 @@ func run() (code int) {
 		return 0
 	}
 	if c.setup {
-		runSetup(c.dir, c.repo, c.setupJSON)
+		runSetup(c.dir, c.repo, c.setupJSON, c.skipBuild)
 		return 0
 	}
 	if c.remote == "start" {
