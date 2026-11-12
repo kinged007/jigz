@@ -42,6 +42,41 @@ tr.lp td:first-child { padding-left: 1.6rem; }
 {{if .Ops.Alerts}}<h2 style="margin-top:0">Alerts <span class="chip s-{{.Ops.AlertChip}}">{{len .Ops.Alerts}}</span></h2>
 <div class="alerts">{{range .Ops.Alerts}}<div class="alert {{.Sev}}">{{template "icon-alert"}}<span class="k">{{.Kind}}</span><span class="m">{{.Msg}}</span>{{if and .Href (not ($.Hide.HidesLink .Href))}}<a href="{{.Href}}">Open</a>{{end}}</div>
 {{end}}</div>{{else}}<p class="sub" style="margin-bottom:.75rem">No alerts</p>{{end}}
+<div class="card">
+<h2>Running now</h2>
+{{if not .Active}}<p class="empty">no agents are running</p>{{else}}
+<div class="tw running"><table>
+<thead><tr>
+  <th title="The repository this agent is working in">repository</th>
+  <th title="Which of the repository's loops started it">loop</th>
+  <th title="The issue being worked on">issue</th>
+  <th title="The engine's state for this run">state</th>
+  <th class="num" title="Agent turns taken so far">turns</th>
+  <th class="num" title="Tokens this run has used, as the engine has measured them so far">tokens</th>
+  <th title="The agent adapter and model the engine dispatched the session with">agent and model</th>
+  <th class="num" title="The engine does not record cost yet">cost</th>
+  <th title="When the loop first picked this issue up on its current pass, counting every retry since">picked up</th>
+  <th class="num" title="How long since that pickup">running for</th>
+</tr></thead>
+<tbody>
+{{range .Active}}
+<tr>
+  <td>{{.Repo}}</td>
+  <td>{{.Loop}}</td>
+  <td>{{if $.Hide.HidesPage "runs"}}<code>{{.Identifier}}</code>{{else}}<a href="{{liveHref .Repo .Loop .Identifier}}"><code>{{.Identifier}}</code></a>{{end}}</td>
+  <td>{{.State}}</td>
+  <td class="num">{{.Turns}}</td>
+  <td class="num">{{commas .Tokens}}</td>
+  <td>{{if .Model}}{{if .Agent}}{{agent .Agent}} &middot; {{end}}{{.Model}}{{else if .Agent}}{{agent .Agent}}{{else}}<span class="empty">default</span>{{end}}</td>
+  <td class="num">&mdash;</td>
+  <td class="sub">{{at .PickedUp}}</td>
+  <td class="num">{{since .PickedUp}}</td>
+</tr>
+{{end}}
+</tbody>
+</table></div>
+{{end}}
+</div>
 <div class="tiles">
   <div class="tile" title="Loops with a running process, of all loops"><b>{{.Fleet.Live}}/{{len .Fleet.Loops}}</b><span>loops active</span></div>
   <div class="tile"><b>{{.Fleet.Running}}</b><span>runs running</span></div>
@@ -116,42 +151,6 @@ tr.lp td:first-child { padding-left: 1.6rem; }
 <p class="sub">A budget line shows this period's spend against the workflow's cap.</p>
 <p class="sub">This dashboard is read-only. Loops are controlled from the command line: <code>jig stop</code>, <code>jig restart</code>, <code>jig reload</code>, <code>jig wake</code>, <code>jig cleanup</code>, <code>jig pause &lt;workflow&gt;</code>, <code>jig resume &lt;workflow&gt;</code> and <code>jig budget override &lt;workflow&gt;</code>.</p>
 {{end}}
-
-<div class="card">
-<h2>Running now</h2>
-{{if not .Active}}<p class="empty">no agents are running</p>{{else}}
-<div class="tw running"><table>
-<thead><tr>
-  <th title="The repository this agent is working in">repository</th>
-  <th title="Which of the repository's loops started it">loop</th>
-  <th title="The issue being worked on">issue</th>
-  <th title="The engine's state for this run">state</th>
-  <th class="num" title="Agent turns taken so far">turns</th>
-  <th class="num" title="Tokens this run has used, as the engine has measured them so far">tokens</th>
-  <th title="The agent adapter and model the engine dispatched the session with">agent and model</th>
-  <th class="num" title="The engine does not record cost yet">cost</th>
-  <th title="When the loop first picked this issue up on its current pass, counting every retry since">picked up</th>
-  <th class="num" title="How long since that pickup">running for</th>
-</tr></thead>
-<tbody>
-{{range .Active}}
-<tr>
-  <td>{{.Repo}}</td>
-  <td>{{.Loop}}</td>
-  <td>{{if $.Hide.HidesPage "runs"}}<code>{{.Identifier}}</code>{{else}}<a href="{{liveHref .Repo .Loop .Identifier}}"><code>{{.Identifier}}</code></a>{{end}}</td>
-  <td>{{.State}}</td>
-  <td class="num">{{.Turns}}</td>
-  <td class="num">{{commas .Tokens}}</td>
-  <td>{{if .Model}}{{if .Agent}}{{agent .Agent}} &middot; {{end}}{{.Model}}{{else if .Agent}}{{agent .Agent}}{{else}}<span class="empty">default</span>{{end}}</td>
-  <td class="num">&mdash;</td>
-  <td class="sub">{{at .PickedUp}}</td>
-  <td class="num">{{since .PickedUp}}</td>
-</tr>
-{{end}}
-</tbody>
-</table></div>
-{{end}}
-</div>
 
 {{if not (.Hide.HidesSection "audit_log")}}<h2>Audit log</h2>
 {{if not .Ops.Audit}}<p class="empty">No audit entries yet.</p>
