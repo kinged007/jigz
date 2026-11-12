@@ -306,3 +306,26 @@ func TestHideIgnoresOtherMachineErrors(t *testing.T) {
 		t.Errorf("GET /usage = %d, want 200", rec.Code)
 	}
 }
+
+func TestRunningNowAboveMetrics(t *testing.T) {
+	var buf bytes.Buffer
+	if err := page.ExecuteTemplate(&buf, "page", pageData{}); err != nil {
+		t.Fatal(err)
+	}
+	body := buf.String()
+	running, tiles := strings.Index(body, "Running now"), strings.Index(body, `class="tiles"`)
+	if running < 0 || tiles < 0 || running > tiles {
+		t.Errorf("Running now at %d, metric tiles at %d; want Running now first", running, tiles)
+	}
+}
+
+func TestProjectPageGitHubLink(t *testing.T) {
+	var buf bytes.Buffer
+	if err := page.ExecuteTemplate(&buf, "project", projectView{Slug: "owner/name"}); err != nil {
+		t.Fatal(err)
+	}
+	want := `<a class="btn" href="https://github.com/owner/name" target="_blank" rel="noopener">Open in GitHub</a>`
+	if !strings.Contains(buf.String(), want) {
+		t.Errorf("project page lacks %s", want)
+	}
+}
