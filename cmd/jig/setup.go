@@ -112,7 +112,7 @@ func runSetup(dir, repo string, asJSON, skipBuild bool) {
 			if cur.color == l.Color && cur.description == l.Description {
 				continue
 			}
-			if !confirmOverwrite(fmt.Sprintf("label %s (colour %s, description %q)", l.Name, cur.color, cur.description), &overwriteAll) {
+			if !confirmOverwrite(fmt.Sprintf("label %s on GitHub (colour %s, description %q)", l.Name, cur.color, cur.description), &overwriteAll) {
 				continue
 			}
 		}

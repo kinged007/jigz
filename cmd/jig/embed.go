@@ -124,7 +124,7 @@ func confirmOverwrite(what string, all *bool) bool {
 	if *all {
 		return true
 	}
-	fmt.Printf("  %s differs from what Jigz ships. Overwrite? [y/N/a] ", what)
+	fmt.Printf("  %s differs from .jigz/config.yaml. Update it? [y/N/a] ", what)
 	if promptIn == nil {
 		promptIn = bufio.NewReader(os.Stdin)
 	}
@@ -139,7 +139,7 @@ func confirmOverwrite(what string, all *bool) bool {
 		*all = true
 		return true
 	}
-	fmt.Printf("  kept %s — delete it and re-run setup to take the shipped version\n", what)
+	fmt.Printf("  kept %s; answer y or a on the next setup run to update it from .jigz/config.yaml\n", what)
 	return false
 }
 
