@@ -299,8 +299,20 @@ func TestBudgetDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := cfg.Budgets()["plan"]
-	if b.Location.String() != "UTC" || b.WarnPercent != 80 || b.PollInterval != time.Minute {
+	if b.Location.String() != "UTC" || b.WarnPercent != 80 || b.PollInterval != time.Minute || b.End != "stop" {
 		t.Errorf("unexpected defaults: %+v", b)
+	}
+}
+
+func TestBudgetEnd(t *testing.T) {
+	for _, end := range []string{"finish", "stop"} {
+		cfg, err := loadWithConfig(t, "work:\n  plan:\n    budget:\n      period: monthly\n      max_tokens: 5\n      end: "+end+"\n", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := cfg.Budgets()["plan"].End; got != end {
+			t.Errorf("end %q, want %q", got, end)
+		}
 	}
 }
 
@@ -320,6 +332,7 @@ func TestBudgetInvalid(t *testing.T) {
 		{"bad period", "period: daily\n      max_tokens: 5", "period"},
 		{"bad timezone", "period: weekly\n      max_tokens: 5\n      timezone: Mars/Base", "timezone"},
 		{"bad on_exceed", "period: weekly\n      max_tokens: 5\n      on_exceed: stop", "on_exceed"},
+		{"bad end", "period: weekly\n      max_tokens: 5\n      end: later", "end"},
 		{"negative cap", "period: weekly\n      max_tokens: -5", "max_tokens"},
 		{"warn percent too high", "period: weekly\n      max_tokens: 5\n      warn_percent: 101", "warn_percent"},
 		{"bad poll interval", "period: weekly\n      max_tokens: 5\n      poll_interval: soon", "poll_interval"},

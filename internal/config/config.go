@@ -68,6 +68,7 @@ type Budget struct {
 	WarnPercent  int
 	PollInterval time.Duration
 	MaxUSD       float64
+	End          string
 }
 
 type budgetFile struct {
@@ -78,6 +79,7 @@ type budgetFile struct {
 	OnExceed     string  `yaml:"on_exceed"`
 	PollInterval string  `yaml:"poll_interval"`
 	MaxUSD       float64 `yaml:"max_usd"`
+	End          string  `yaml:"end"`
 }
 
 const (
@@ -89,7 +91,10 @@ const (
 func (f budgetFile) resolve(key string) (Budget, error) {
 	b := Budget{
 		Period: f.Period, MaxTokens: f.MaxTokens, WarnPercent: f.WarnPercent,
-		PollInterval: defaultBudgetPoll, MaxUSD: f.MaxUSD,
+		PollInterval: defaultBudgetPoll, MaxUSD: f.MaxUSD, End: f.End,
+	}
+	if b.End == "" {
+		b.End = machine.EndStop
 	}
 	if b.WarnPercent == 0 {
 		b.WarnPercent = defaultWarnPercent
@@ -105,6 +110,9 @@ func (f budgetFile) resolve(key string) (Budget, error) {
 	}
 	if f.OnExceed != "" && f.OnExceed != "pause" {
 		return b, fmt.Errorf("%son_exceed: %q is not supported (only pause)", key, f.OnExceed)
+	}
+	if err := validateEnd(f.End, strings.TrimSuffix(key, ".")); err != nil {
+		return b, err
 	}
 	switch f.Period {
 	case "5h", "weekly", "monthly":

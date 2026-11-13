@@ -426,6 +426,7 @@ func configTemplateBody(repo string) string {
 		"    #  max_tokens: 5000000\n" +
 		"    #  warn_percent: 80\n" +
 		"    #  on_exceed: pause\n" +
+		"    #  end: stop         # stop | finish (let runs in flight complete)\n" +
 		"    rules:\n" +
 		"    - { name: plan, match: { labels: [agent:plan] }, prompt: prompts/plan.md }\n" +
 		"    - { name: plan-build, match: { labels: [agent:plan-build] }, prompt: prompts/plan.md, next: build-chain }\n" +
