@@ -121,6 +121,7 @@ work:
       max_tokens: 5000000  # 0 or absent turns the budget off
       warn_percent: 80   # 1-100, default 80
       on_exceed: pause   # only pause is accepted
+      end: stop          # stop (default) | finish
       poll_interval: 1m  # default 1m
     rules:
     - { name: plan, match: { labels: [agent:plan] }, prompt: prompts/plan.md }
@@ -611,6 +612,7 @@ work:
       max_tokens: 20000000    # 0 or absent turns the budget off
       warn_percent: 80        # default 80
       on_exceed: pause        # only pause is accepted
+      end: stop               # stop (default) | finish, see below
       poll_interval: 1m       # default 1m
       # max_usd: 50           # ignored with a startup warning: the engine records no cost
 ```
@@ -625,14 +627,18 @@ a DB cannot be read, the supervisor prints one line and keeps the last
 figures until the next successful poll.
 
 At `warn_percent` the supervisor prints one line to stderr per period and
-sets `warned` in the status document. At `max_tokens` it stops that
-workflow's engine loop and keeps it stopped (`paused_by: budget`). Other
-workflows keep running. The loop starts again at the next period, or on
+sets `warned` in the status document. At `max_tokens` the workflow's
+loop is paused (`paused_by: budget`) and the other workflows keep running.
+`end` has the same values as `schedule.end` and chooses what happens to
+runs in flight: `stop` (default) signals the loop at once, which aborts
+them; `finish` lets them complete and stops the loop when none is left in
+flight. A loop that is draining under `finish` shows as paused. The loop starts again at the next period, or on
 `resume` or `budget override`, or at the next poll when the tokens used are
 below the cap again (for example after `max_tokens` was raised and the
-supervisor restarted). The cap is not a hard limit: runs in flight
-when it is reached finish their tokens first, and use up to `poll_interval`
-more. The pause survives a supervisor restart, and a workflow that is over
+supervisor restarted). The cap is not a hard limit: with `finish` the
+runs in flight use their tokens after the cap is reached, and under either
+value the tokens of a poll interval can pass the cap. A manual pause always
+stops at once. The pause survives a supervisor restart, and a workflow that is over
 its cap is not started. Pause state is stored in `<hash>.budget.json` next
 to the status document. Idle sleep does not start paused workflows at wake.
 The `5h` period uses fixed windows that start at 00:00, 05:00, 10:00, 15:00
