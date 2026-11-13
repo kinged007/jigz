@@ -116,7 +116,7 @@ work:
     max_turns: 10
     polling_interval_ms: 60000
     budget:
-      period: monthly    # weekly (ISO week, Monday start) | monthly (calendar month)
+      period: monthly    # 5h (windows at 00:00, 05:00, 10:00, 15:00, 20:00) | weekly (ISO week, Monday start) | monthly (calendar month)
       timezone: UTC      # IANA name, default UTC; period boundaries use it
       max_tokens: 5000000  # 0 or absent turns the budget off
       warn_percent: 80   # 1-100, default 80
@@ -606,7 +606,7 @@ a name without a workflow file is an error at startup.
 work:
   issues:
     budget:
-      period: weekly          # weekly (ISO week, Monday start) or monthly (calendar month)
+      period: weekly          # 5h, weekly (ISO week, Monday start) or monthly (calendar month)
       timezone: Africa/Johannesburg   # IANA name, default UTC; period boundaries use it
       max_tokens: 20000000    # 0 or absent turns the budget off
       warn_percent: 80        # default 80
@@ -635,6 +635,9 @@ when it is reached finish their tokens first, and use up to `poll_interval`
 more. The pause survives a supervisor restart, and a workflow that is over
 its cap is not started. Pause state is stored in `<hash>.budget.json` next
 to the status document. Idle sleep does not start paused workflows at wake.
+The `5h` period uses fixed windows that start at 00:00, 05:00, 10:00, 15:00
+and 20:00 in the budget timezone. The last window of the day, 20:00 to
+24:00, is 4 hours long, and the budget resets at midnight.
 A manual pause is kept across periods; the override and the warning reset at
 each period.
 

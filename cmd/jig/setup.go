@@ -422,7 +422,7 @@ func configTemplateBody(repo string) string {
 		"    # Spend cap for this loop, per period. The slug needs its\n" +
 		"    # WORKFLOW.<slug>.md; the loop pauses at max_tokens.\n" +
 		"    #budget:\n" +
-		"    #  period: monthly\n" +
+		"    #  period: monthly   # 5h | weekly | monthly\n" +
 		"    #  max_tokens: 5000000\n" +
 		"    #  warn_percent: 80\n" +
 		"    #  on_exceed: pause\n" +

@@ -283,6 +283,16 @@ func TestBudgetValid(t *testing.T) {
 	}
 }
 
+func TestBudgetAccepts5h(t *testing.T) {
+	cfg, err := loadWithConfig(t, "work:\n  plan:\n    budget:\n      period: 5h\n      max_tokens: 5\n", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := cfg.Budgets()["plan"].Period; p != "5h" {
+		t.Errorf("period %q", p)
+	}
+}
+
 func TestBudgetDefaults(t *testing.T) {
 	cfg, err := loadWithConfig(t, "work:\n  plan:\n    budget:\n      period: monthly\n      max_tokens: 5\n", nil)
 	if err != nil {

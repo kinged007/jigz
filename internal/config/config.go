@@ -107,13 +107,13 @@ func (f budgetFile) resolve(key string) (Budget, error) {
 		return b, fmt.Errorf("%son_exceed: %q is not supported (only pause)", key, f.OnExceed)
 	}
 	switch f.Period {
-	case "weekly", "monthly":
+	case "5h", "weekly", "monthly":
 	case "":
 		if f.MaxTokens > 0 {
-			return b, fmt.Errorf("%speriod is required when max_tokens is set (weekly or monthly)", key)
+			return b, fmt.Errorf("%speriod is required when max_tokens is set (5h, weekly or monthly)", key)
 		}
 	default:
-		return b, fmt.Errorf("%speriod: %q is not weekly or monthly", key, f.Period)
+		return b, fmt.Errorf("%speriod: %q is not 5h, weekly or monthly", key, f.Period)
 	}
 	tz := f.Timezone
 	if tz == "" {
