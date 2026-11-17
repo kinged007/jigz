@@ -20,6 +20,13 @@ pipeline each repository's files describe, plus validation), Projects,
 Agents (the settings each workflow file declares), Settings, Backups, and
 each loop's child log.
 
+The Usage page and `GET /api/v1/usage` group runs by `project`, `workflow`,
+`rule` (the engine's routing rule, such as triage or plan), `model` or `day`
+(`group=` parameter). The API filters by `project`, `workflow`, `rule` and
+`model`. The Runs page and `GET /api/v1/runs` take a `rule` filter. Runs
+recorded before Jigz copied the rule name get it from the engine database
+while that database exists; others have no rule.
+
 ### Run data
 
 The dashboard reads each loop's SQLite database read-only: finished runs,

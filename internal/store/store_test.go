@@ -247,3 +247,32 @@ func TestPruneBackupsKeepsTheNewestOfOneFile(t *testing.T) {
 		t.Errorf("all backups = %d, want 7", len(all))
 	}
 }
+
+func TestRuleNameColumnIsAddedToAnExistingDatabase(t *testing.T) {
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	saved := migrations
+	defer func() { migrations = saved }()
+	migrations = saved[:len(saved)-1]
+	if err := migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO runs_cache (project, workflow, run_id, issue_id, display_identifier, status, started_at,
+		completed_at, attempt, turns_completed, agent_adapter, input_tokens, output_tokens, total_tokens,
+		cache_read_tokens, tokens_measured)
+		VALUES ('o/a', 'build', 1, '1', 'o/a#1', 'succeeded', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z',
+		1, 0, 'pi', 0, 0, 0, 0, 0)`); err != nil {
+		t.Fatal(err)
+	}
+	migrations = saved
+	if err := migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	var rule string
+	if err := db.QueryRow(`SELECT rule_name FROM runs_cache WHERE run_id = 1`).Scan(&rule); err != nil || rule != "" {
+		t.Errorf("rule_name = %q, %v, want empty on the existing row", rule, err)
+	}
+}

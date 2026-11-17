@@ -16,15 +16,15 @@ const itemKey = `project || '#' || issue_id`
 // started_at as UTC timestamps of the form 2006-01-02T15:04:05Z, so days
 // are UTC days. Empty fields match everything.
 type UsageFilter struct {
-	Project, Workflow, Model string
-	Since, Until             string
+	Project, Workflow, Rule, Model string
+	Since, Until                   string
 }
 
 func (f UsageFilter) where() (string, []any) {
 	var conds []string
 	var args []any
 	for _, c := range []struct{ cond, v string }{
-		{"project = ?", f.Project}, {"workflow = ?", f.Workflow}, {"model = ?", f.Model},
+		{"project = ?", f.Project}, {"workflow = ?", f.Workflow}, {"rule_name = ?", f.Rule}, {"model = ?", f.Model},
 		{"started_at >= ?", f.Since}, {"started_at < ?", f.Until},
 	} {
 		if c.v != "" {
@@ -68,13 +68,14 @@ type Group struct {
 var groupColumns = map[string]string{
 	"project":  "project, '', project",
 	"workflow": "project, workflow, project || ' ' || workflow",
+	"rule":     "'', '', rule_name",
 	"model":    "'', '', model",
 	"day":      "'', '', substr(started_at, 1, 10)",
 	"all":      "'', '', ''",
 }
 
-// Usage groups the filtered runs by "project", "workflow", "model" or
-// "day", or returns one group for all of them with by "all". Days and
+// Usage groups the filtered runs by "project", "workflow", "rule", "model"
+// or "day", or returns one group for all of them with by "all". Days and
 // models come back in key order, the others by tokens, largest first.
 func (s *Store) Usage(f UsageFilter, by string) ([]Group, error) {
 	cols, ok := groupColumns[by]
@@ -96,7 +97,7 @@ func (s *Store) Usage(f UsageFilter, by string) ([]Group, error) {
 		q += ` GROUP BY 3`
 	}
 	switch by {
-	case "day", "model":
+	case "day", "model", "rule":
 		q += ` ORDER BY 3`
 	case "project", "workflow":
 		q += ` ORDER BY 13 DESC, 3`

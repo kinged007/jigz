@@ -178,3 +178,63 @@ func TestWorkflowKindDecidesIssueOrPRNotTheName(t *testing.T) {
 		t.Errorf("kind after re-add = %q, want pr", r.WorkflowKind)
 	}
 }
+
+func TestUsageGroupsAndFiltersByRule(t *testing.T) {
+	s := open(t)
+	withRule := func(r Run, rule string) Run { r.RuleName = rule; return r }
+	err := s.AddRuns([]Run{
+		withRule(usageRun(1, "a/x", "build", "1", "succeeded", "2026-10-02T10:00:00Z", 10, true), "triage"),
+		withRule(usageRun(2, "a/x", "build", "1", "succeeded", "2026-10-02T11:00:00Z", 30, true), "plan"),
+		withRule(usageRun(3, "a/y", "build", "2", "failed", "2026-10-02T12:00:00Z", 20, true), "triage"),
+		usageRun(4, "a/y", "build", "2", "succeeded", "2026-10-02T13:00:00Z", 5, true),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name   string
+		filter UsageFilter
+		keys   []string
+		totals []int64
+	}{
+		{"all rules by key", UsageFilter{}, []string{"", "plan", "triage"}, []int64{5, 30, 30}},
+		{"one rule", UsageFilter{Rule: "triage"}, []string{"triage"}, []int64{30}},
+		{"rule and project", UsageFilter{Rule: "triage", Project: "a/x"}, []string{"triage"}, []int64{10}},
+	} {
+		got, err := s.Usage(tc.filter, "rule")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var keys []string
+		var totals []int64
+		for _, g := range got {
+			keys, totals = append(keys, g.Key), append(totals, g.Total)
+		}
+		if !reflect.DeepEqual(keys, tc.keys) || !reflect.DeepEqual(totals, tc.totals) {
+			t.Errorf("%s: keys %v totals %v, want %v %v", tc.name, keys, totals, tc.keys, tc.totals)
+		}
+	}
+	if runs, _ := s.Runs(RunFilter{Rule: "plan"}); len(runs) != 1 || runs[0].ID != 2 || runs[0].RuleName != "plan" {
+		t.Errorf("runs filtered by rule = %+v, want run 2", runs)
+	}
+	if o, _ := s.RunOptions(); !reflect.DeepEqual(o.Rules, []string{"plan", "triage"}) {
+		t.Errorf("rule options = %v", o.Rules)
+	}
+}
+
+func TestRuleNameKeepsStoredValueWhenRecollectedEmpty(t *testing.T) {
+	s := open(t)
+	r := usageRun(1, "a/x", "build", "1", "succeeded", "2026-10-02T10:00:00Z", 10, true)
+	r.RuleName = "spec"
+	s.AddRuns([]Run{r})
+	r.RuleName = ""
+	s.AddRuns([]Run{r})
+	if got, _ := s.Run("a/x", "build", 1); got.RuleName != "spec" {
+		t.Errorf("rule = %q, want spec kept", got.RuleName)
+	}
+	r.RuleName = "plan"
+	s.AddRuns([]Run{r})
+	if got, _ := s.Run("a/x", "build", 1); got.RuleName != "plan" {
+		t.Errorf("rule = %q, want plan after upsert", got.RuleName)
+	}
+}

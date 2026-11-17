@@ -47,6 +47,7 @@ type Run struct {
 	WorkflowKind      string `json:"workflow_kind,omitempty"`
 	WorkflowFile      string `json:"workflow_file,omitempty"`
 	SessionID         string `json:"session_id,omitempty"`
+	RuleName          string `json:"rule_name,omitempty"`
 	// PRs is filled by the API when GitHub enrichment is on.
 	PRs []PR `json:"pull_requests,omitempty"`
 }
@@ -54,7 +55,7 @@ type Run struct {
 const runColumns = `id, project, workflow, run_id, issue_id, display_identifier, status, started_at,
 	completed_at, attempt, turns_completed, error, agent_adapter, model, model_source,
 	input_tokens, output_tokens, total_tokens, cache_read_tokens, tokens_measured, workflow_kind,
-	workflow_file, session_id`
+	workflow_file, session_id, rule_name`
 
 // AddRuns inserts runs, replacing any already stored under the same
 // project, workflow and run id.
@@ -68,8 +69,8 @@ func (s *Store) AddRuns(runs []Run) error {
 		_, err := tx.Exec(`INSERT INTO runs_cache (project, workflow, run_id, issue_id, display_identifier,
 			status, started_at, completed_at, attempt, turns_completed, error, agent_adapter, model,
 			model_source, input_tokens, output_tokens, total_tokens, cache_read_tokens, tokens_measured, workflow_kind,
-			workflow_file, session_id)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			workflow_file, session_id, rule_name)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 			ON CONFLICT (project, workflow, run_id) DO UPDATE SET
 			issue_id=excluded.issue_id, display_identifier=excluded.display_identifier,
 			status=excluded.status, started_at=excluded.started_at, completed_at=excluded.completed_at,
@@ -80,11 +81,12 @@ func (s *Store) AddRuns(runs []Run) error {
 			tokens_measured=excluded.tokens_measured,
 			workflow_kind=CASE WHEN excluded.workflow_kind = '' THEN workflow_kind ELSE excluded.workflow_kind END,
 			workflow_file=CASE WHEN excluded.workflow_file = '' THEN workflow_file ELSE excluded.workflow_file END,
-			session_id=CASE WHEN excluded.session_id = '' THEN session_id ELSE excluded.session_id END`,
+			session_id=CASE WHEN excluded.session_id = '' THEN session_id ELSE excluded.session_id END,
+			rule_name=CASE WHEN excluded.rule_name = '' THEN rule_name ELSE excluded.rule_name END`,
 			r.Project, r.Workflow, r.ID, r.IssueID, r.DisplayIdentifier, r.Status, r.StartedAt,
 			r.CompletedAt, r.Attempt, r.TurnsCompleted, r.Error, r.AgentAdapter, r.Model, r.ModelSource,
 			r.InputTokens, r.OutputTokens, r.TotalTokens, r.CacheReadTokens, r.TokensMeasured, r.WorkflowKind,
-			r.WorkflowFile, r.SessionID)
+			r.WorkflowFile, r.SessionID, r.RuleName)
 		if err != nil {
 			return err
 		}
@@ -100,8 +102,9 @@ func (s *Store) SetWorkflowKind(project, workflow, kind string) error {
 	return err
 }
 
-// FillRunFiles sets workflow_file on stored runs that have none, matching
-// runs by id. It fills in runs copied before that column existed.
+// FillRunFiles sets workflow_file and rule_name on stored runs that have
+// none, matching runs by id. It fills in runs copied before those columns
+// existed.
 func (s *Store) FillRunFiles(project, workflow string, runs []Run) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -114,15 +117,20 @@ func (s *Store) FillRunFiles(project, workflow string, runs []Run) error {
 			r.WorkflowFile, project, workflow, r.ID); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(`UPDATE runs_cache SET rule_name = ?
+			WHERE project = ? AND workflow = ? AND run_id = ? AND rule_name = ''`,
+			r.RuleName, project, workflow, r.ID); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
 
 // NeedsRunFiles reports whether a workflow has stored runs without a
-// workflow file.
+// workflow file or rule name.
 func (s *Store) NeedsRunFiles(project, workflow string) (bool, error) {
 	var n int
-	err := s.db.QueryRow(`SELECT EXISTS (SELECT 1 FROM runs_cache WHERE project = ? AND workflow = ? AND workflow_file = '')`,
+	err := s.db.QueryRow(`SELECT EXISTS (SELECT 1 FROM runs_cache WHERE project = ? AND workflow = ? AND (workflow_file = '' OR rule_name = ''))`,
 		project, workflow).Scan(&n)
 	return n == 1, err
 }
@@ -143,7 +151,7 @@ func (s *Store) LastRunID(project, workflow string) (int64, error) {
 
 // RunFilter selects runs. Empty fields match everything.
 type RunFilter struct {
-	Project, Workflow, State, Model, Adapter string
+	Project, Workflow, Rule, State, Model, Adapter string
 	// Since and Until bound started_at, as RFC 3339 timestamps.
 	Since, Until string
 	// Q matches part of the issue identifier.
@@ -174,6 +182,9 @@ func (f RunFilter) where() (string, []any) {
 	}
 	if f.Workflow != "" {
 		add("workflow = ?", f.Workflow)
+	}
+	if f.Rule != "" {
+		add("rule_name = ?", f.Rule)
 	}
 	if f.State != "" {
 		add("status = ?", f.State)
@@ -275,14 +286,14 @@ func (s *Store) IssueRuns(project, workflow, issueID string) ([]Run, error) {
 
 // RunOptions are the distinct values stored runs have, for filter menus.
 type RunOptions struct {
-	Projects, Workflows, Models, Adapters []string
+	Projects, Workflows, Rules, Models, Adapters []string
 }
 
 // RunOptions returns the distinct non-empty values of the filterable columns.
 func (s *Store) RunOptions() (RunOptions, error) {
 	var o RunOptions
 	for col, dst := range map[string]*[]string{
-		"project": &o.Projects, "workflow": &o.Workflows, "model": &o.Models, "agent_adapter": &o.Adapters,
+		"project": &o.Projects, "workflow": &o.Workflows, "rule_name": &o.Rules, "model": &o.Models, "agent_adapter": &o.Adapters,
 	} {
 		rows, err := s.db.Query(`SELECT DISTINCT ` + col + ` FROM runs_cache WHERE ` + col + ` != '' ORDER BY ` + col)
 		if err != nil {
@@ -316,6 +327,6 @@ func scanRun(row interface{ Scan(...any) error }) (Run, error) {
 	err := row.Scan(&r.Cursor, &r.Project, &r.Workflow, &r.ID, &r.IssueID, &r.DisplayIdentifier, &r.Status,
 		&r.StartedAt, &r.CompletedAt, &r.Attempt, &r.TurnsCompleted, &r.Error, &r.AgentAdapter, &r.Model,
 		&r.ModelSource, &r.InputTokens, &r.OutputTokens, &r.TotalTokens, &r.CacheReadTokens,
-		&r.TokensMeasured, &r.WorkflowKind, &r.WorkflowFile, &r.SessionID)
+		&r.TokensMeasured, &r.WorkflowKind, &r.WorkflowFile, &r.SessionID, &r.RuleName)
 	return r, err
 }
