@@ -104,7 +104,7 @@ func (s *Store) SetWorkflowKind(project, workflow, kind string) error {
 
 // FillRunFiles sets workflow_file and rule_name on stored runs that have
 // none, matching runs by id. It fills in runs copied before those columns
-// existed.
+// existed. Runs without a rule name in the engine leave rule_name unchanged.
 func (s *Store) FillRunFiles(project, workflow string, runs []Run) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -117,6 +117,9 @@ func (s *Store) FillRunFiles(project, workflow string, runs []Run) error {
 			r.WorkflowFile, project, workflow, r.ID); err != nil {
 			return err
 		}
+		if r.RuleName == "" {
+			continue
+		}
 		if _, err := tx.Exec(`UPDATE runs_cache SET rule_name = ?
 			WHERE project = ? AND workflow = ? AND run_id = ? AND rule_name = ''`,
 			r.RuleName, project, workflow, r.ID); err != nil {
@@ -127,12 +130,28 @@ func (s *Store) FillRunFiles(project, workflow string, runs []Run) error {
 }
 
 // NeedsRunFiles reports whether a workflow has stored runs without a
-// workflow file or rule name.
+// workflow file.
 func (s *Store) NeedsRunFiles(project, workflow string) (bool, error) {
 	var n int
-	err := s.db.QueryRow(`SELECT EXISTS (SELECT 1 FROM runs_cache WHERE project = ? AND workflow = ? AND (workflow_file = '' OR rule_name = ''))`,
+	err := s.db.QueryRow(`SELECT EXISTS (SELECT 1 FROM runs_cache WHERE project = ? AND workflow = ? AND workflow_file = '')`,
 		project, workflow).Scan(&n)
 	return n == 1, err
+}
+
+// NeedsRuleBackfill reports whether the rule names of a workflow's stored
+// runs have not been filled in from the engine yet. Runs without a rule name
+// in the engine stay empty, so the stored rows alone cannot tell.
+func (s *Store) NeedsRuleBackfill(project, workflow string) (bool, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT NOT EXISTS (SELECT 1 FROM rule_backfilled WHERE project = ? AND workflow = ?)`,
+		project, workflow).Scan(&n)
+	return n == 1, err
+}
+
+// MarkRuleBackfilled records that the rule names of a workflow were filled in.
+func (s *Store) MarkRuleBackfilled(project, workflow string) error {
+	_, err := s.db.Exec(`INSERT OR IGNORE INTO rule_backfilled (project, workflow) VALUES (?, ?)`, project, workflow)
+	return err
 }
 
 // DeleteRuns removes every stored run of a workflow.

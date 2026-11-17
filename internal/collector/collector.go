@@ -262,9 +262,17 @@ func (c *Collector) fillRunFiles(db *sql.DB, l rollup.Loop, last int64) error {
 	if c.filled[key] {
 		return nil
 	}
-	need, err := c.Store.NeedsRunFiles(l.Repo, l.Loop)
-	if err != nil || !need {
+	needFile, err := c.Store.NeedsRunFiles(l.Repo, l.Loop)
+	if err != nil {
 		return err
+	}
+	needRule, err := c.Store.NeedsRuleBackfill(l.Repo, l.Loop)
+	if err != nil {
+		return err
+	}
+	needRule = needRule && hasColumn(db, "run_history", "rule_name")
+	if !needFile && !needRule {
+		return nil
 	}
 	if c.filled == nil {
 		c.filled = map[string]bool{}
@@ -279,6 +287,9 @@ func (c *Collector) fillRunFiles(db *sql.DB, l rollup.Loop, last int64) error {
 			return err
 		}
 		after = runs[len(runs)-1].ID
+	}
+	if needRule {
+		return c.Store.MarkRuleBackfilled(l.Repo, l.Loop)
 	}
 	return nil
 }

@@ -184,7 +184,8 @@ func storedRow(r store.Run) runRow {
 }
 
 // activeRows are the fleet's running agents that match the filter. Their
-// state is the engine's own, so a state filter matches it directly.
+// state is the engine's own, so a state filter matches it directly. They
+// carry no rule, so a rule filter matches none.
 func activeRows(all []activeRun, q runQuery) []runRow {
 	f := q.filter()
 	var out []runRow
@@ -193,6 +194,7 @@ func activeRows(all []activeRun, q runQuery) []runRow {
 		switch {
 		case q.Project != "" && a.Repo != q.Project,
 			q.Workflow != "" && a.Loop != q.Workflow,
+			q.Rule != "",
 			q.State != "" && a.State != q.State,
 			q.Model != "" && a.Model != q.Model,
 			q.Adapter != "" && a.Agent != q.Adapter,

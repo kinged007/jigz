@@ -276,3 +276,32 @@ func TestRuleNameColumnIsAddedToAnExistingDatabase(t *testing.T) {
 		t.Errorf("rule_name = %q, %v, want empty on the existing row", rule, err)
 	}
 }
+
+func TestFillRunFilesSetsRulesOnlyForNamedRulesAndBackfillMarkerSticks(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	runs := []Run{{Project: "o/a", Workflow: "build", ID: 1, Status: "succeeded"}, {Project: "o/a", Workflow: "build", ID: 2, Status: "succeeded"}}
+	if err := st.AddRuns(runs); err != nil {
+		t.Fatal(err)
+	}
+	if need, _ := st.NeedsRuleBackfill("o/a", "build"); !need {
+		t.Fatal("needs rule backfill = false, want true before the first pass")
+	}
+	if err := st.FillRunFiles("o/a", "build", []Run{{ID: 1, RuleName: "plan"}, {ID: 2}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkRuleBackfilled("o/a", "build"); err != nil {
+		t.Fatal(err)
+	}
+	if need, _ := st.NeedsRuleBackfill("o/a", "build"); need {
+		t.Error("needs rule backfill = true after marking, want false though run 2 has no rule")
+	}
+	for id, want := range map[int64]string{1: "plan", 2: ""} {
+		if r, _ := st.Run("o/a", "build", id); r.RuleName != want {
+			t.Errorf("run %d rule = %q, want %q", id, r.RuleName, want)
+		}
+	}
+}
