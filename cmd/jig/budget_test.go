@@ -263,6 +263,36 @@ func TestManualPauseStopsAtOnceWithEndFinish(t *testing.T) {
 	}
 }
 
+func TestManualPauseDuringBudgetFinishDrainStopsAtOnce(t *testing.T) {
+	r := newBudgetRig(t, 1000)
+	b := r.sup.budgets["plan"]
+	b.End = machine.EndFinish
+	r.sup.budgets["plan"] = b
+	r.addRun(t, 1000, 1, r.now)
+	r.step(t, time.Minute)
+	if w := r.workflow(t); w.State != "paused" || w.Budget.PausedBy != "budget" {
+		t.Fatalf("at cap: %+v %+v", w, w.Budget)
+	}
+	if err := requestBudgetAction(r.root, "pause", "plan"); err != nil {
+		t.Fatal(err)
+	}
+	r.step(t, time.Minute)
+	if w := r.workflow(t); w.State != "paused" || w.Budget.PausedBy != "manual" {
+		t.Fatalf("after manual pause: %+v %+v", w, w.Budget)
+	}
+	r.sup.mu.Lock()
+	p := r.sup.procs["plan"]
+	stopping, drain := p.stopping, p.drain
+	r.sup.mu.Unlock()
+	if !stopping || drain {
+		t.Errorf("stopping %v drain %v, want an immediate stop", stopping, drain)
+	}
+	r.settle(t)
+	if w := r.workflow(t); w.LastExitCode == nil {
+		t.Errorf("the child did not exit: %+v", w)
+	}
+}
+
 func TestBudgetThrottledToPollInterval(t *testing.T) {
 	r := newBudgetRig(t, 1000)
 	r.step(t, time.Minute)

@@ -465,9 +465,7 @@ func (s *supervisor) applyBudgetRequest(req budgetRequest) (bool, error) {
 		case !paused:
 			s.pauseLoop(req.Workflow, "manual", false)
 		case by == "budget":
-			s.mu.Lock()
-			s.stateLocked(req.Workflow).PausedBy = "manual"
-			s.mu.Unlock()
+			s.pauseLoop(req.Workflow, "manual", false)
 		default:
 			return false, nil
 		}
