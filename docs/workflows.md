@@ -16,29 +16,28 @@ generated document carries a `# jig:generated` marker with a digest;
 managed document. Set `managed: false` on the entry and jig neither
 generates nor overwrites the document (`validate` reports it as
 unmanaged). A managed entry owns `WORKFLOW.<slug>.md` and
-`WORKFLOW.<slug>-*.md`: setup does not install the shipped
-`WORKFLOW.<slug>.md` for it, and generation removes an owned document
-it did not produce (after a split or regrouping) when it is generated or
-an unedited shipped copy. An edited or hand-written one is kept with a
-note, still runs as a loop, and fails `jig validate` (`loops`). Documents
-of other configured slugs, such as `issues-fast` next to `issues`, are
-never removed. `jig setup` never overwrites any existing workflow or prompt
-file, and while a legacy `WORKFLOW.plan.md`/`build.md`/`review.md`/
-`review-fix.md`/`merge.md` file exists, the consolidated
-`WORKFLOW.issues.md`/`WORKFLOW.prs.md` pair is not written.
+`WORKFLOW.<slug>-*.md`: generation removes an owned document it did not
+produce (after a split or regrouping) when it is generated. A
+hand-written one is kept with a note, still runs as a loop, and fails
+`jig validate` (`loops`). Documents of other configured slugs, such as
+`issues-fast` next to `issues`, are never removed. `jig setup` never
+overwrites an existing prompt.
 
-Only `work:` entries are installed and run. Setup installs a shipped
-`WORKFLOW.<slug>.md` only when `work:` has an entry named `<slug>`, and
-installs none when the config cannot be loaded. A run starts only the
-loops named by `work:` keys. Any other `WORKFLOW.*.md` file in
-`.jigz/workflows/` is left in place and not started. A config with only
-`work.ops` runs one loop, `ops`, with no `issues` or `prs` loop.
+No workflow document ships with the binary: every loop is generated from
+its work entry. A work entry needs a `query_filter` or a `filters:` entry
+for its slug, or config loading fails with `work.<slug> needs query_filter`.
+A managed entry also needs `rules`; an entry that needs no rules sets
+`managed: false` and has a hand-written document.
 
-Custom loops are hand-written: drop in `WORKFLOW.triage.md` and add a
-`work.triage` entry and its labels (full example below); it starts as a
-loop named `triage` on the next run. Missing prompt files are
-stubbed at generation (`# triage.md — Fill in the prompt for this rule.`)
-for the owner to fill in.
+Only `work:` entries run. A run starts only the loops named by `work:`
+keys. Any other `WORKFLOW.*.md` file in `.jigz/workflows/` is left in
+place and not started. A config with only `work.ops` runs one loop, `ops`,
+with no `issues` or `prs` loop.
+
+A custom loop is a `work.<slug>` entry with its labels (full example
+below); it starts as a loop named `triage` on the next run. Missing
+prompt files are stubbed at generation (`# triage.md — Fill in the
+prompt for this rule.`) for the owner to fill in.
 
 ## Custom loop example
 
@@ -102,8 +101,8 @@ unmanaged).
 
 Narrow the query per loop instead with `filters:` (re-read every run,
 no setup re-run): `filters: { triage: "label:agent:triage -label:needs-human" }`.
-A `filters:` entry wins over the shipped default; `work.<slug>.query_filter`
-wins over both; `assignee:@me` is always appended.
+A `filters:` entry applies to a work entry that has no `query_filter`;
+`work.<slug>.query_filter` wins over it; `assignee:@me` is always appended.
 
 ## Frontmatter reference
 

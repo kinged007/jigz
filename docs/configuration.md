@@ -3,7 +3,7 @@
 ```
 .jigz/
   config.yaml      # repo:, token:, work:, agents:, cleanup:, sleep: (all optional — see below)
-  workflows/       # WORKFLOW.<slug>.md for each work: entry (generated, or shipped when one exists); edit freely
+  workflows/       # WORKFLOW.<slug>.md for each work: entry (generated; hand-written when the entry is managed: false)
   .env.loop        # generated each run (resolved tracker, token, clone URL; mode 0600)
   workspaces/      # per-item agent checkouts (one subdir per loop)
   logs/            # engine child output, one <workflow>.log per loop
@@ -29,7 +29,7 @@ the field path of the key (for example
 ```yaml
 repo: ""        # empty = detect from git remote; or pin owner/name
 token: ""       # empty = JIG_TOKEN, then GITHUB_TOKEN / GH_TOKEN env
-# per-loop query-filter overrides, keyed by WORKFLOW.*.md stem
+# query filter of a work entry that has no query_filter, keyed by work slug
 # (read on every run — no setup re-run needed):
 #filters:
 #  triage: "label:agent:triage -label:needs-human"
@@ -39,12 +39,14 @@ labels:
 - {name: "agent:plan", color: "fbca04", description: "Trigger: write an implementation plan for this issue"}
 - {name: "agent:plan-build", color: "fbca04", description: "Trigger: plan this issue, then implement it with no human step"}
 - {name: "agent:docs", color: "fbca04", description: "Trigger: update the docs for merged changes and open a PR"}
-# ... (full default list seeded by setup)
+# ... (the list that setup writes into a new config.yaml)
 ```
 
 `setup` is additive: it creates the labels listed here and updates their
 colour and description, and leaves every other label in the repo alone —
-including labels from an older scheme. Nothing is deleted for you.
+including labels from an older scheme. Nothing is deleted for you. A config
+without a `labels:` key creates no labels; the default list only fills the
+`config.yaml` that setup writes when the file is missing.
 Labels from the previous scheme (`agent:plan-needed`, `agent:quick`,
 `agent:pr-fix`, `agent:needs-review`, `agent:reviewed`,
 `agent:review-complete`, `agent:merged`, `backlog`, `review`, `done`) can
@@ -69,7 +71,7 @@ with the binary, so only pin one in `engine:` to hold a version.
 # .jigz/config.yaml — unknown keys are an error, e.g. unknown key "work.issues.rules[0].effort".
 repo: "owner/name"        # empty = detect from git remote at runtime
 token: ""                # empty = JIG_TOKEN, then GITHUB_TOKEN / GH_TOKEN
-filters:                 # per-loop query overrides, keyed by WORKFLOW.*.md stem
+filters:                 # query filter of a work entry without query_filter, keyed by slug
   triage: "label:agent:triage -label:needs-human"
 labels:                   # setup creates/edits these; a custom loop adds its own here
 - {name: "agent:plan", color: "fbca04", description: "Trigger: write an implementation plan for this issue"}
@@ -205,8 +207,10 @@ work:
 ```
 
 A work entry's `query_filter` is the complete tracker query and wins over
-the `filters:` override and the shipped defaults; `assignee:@me` is
-appended at launch. `max_concurrent_agents`, `max_turns`, `max_sessions` and
+the `filters:` entry of its slug; `assignee:@me` is appended at launch.
+A work entry with neither `query_filter` nor a `filters:` entry is a
+config error (`work.<slug> needs query_filter`), and so is a managed entry
+without `rules`. `max_concurrent_agents`, `max_turns`, `max_sessions` and
 `polling_interval_ms` sit next to `budget`. A rule's `agent` may be a
 name, a list of names, or `{use: ..., model: ..., schedule: ...}` to
 override the fleet agent for that rule; `stage` and `next` are the
@@ -222,7 +226,7 @@ launch and validates and resolves the remaining sections.
 | Key | Type | Default | Notes |
 |---|---|---|---|
 | `managed` | bool | `true` | `false` = the document is neither generated nor overwritten; `validate` reports it as unmanaged |
-| `query_filter` | string | shipped default for the loop | The complete tracker query; wins over `filters:` and the shipped default; `assignee:@me` is appended at launch |
+| `query_filter` | string | the `filters:` entry of the slug | The complete tracker query; wins over `filters:`; `assignee:@me` is appended at launch. Required unless `filters:` names the slug |
 | `tracker` | mapping | top-level `tracker` | Overlay: `kind`, `api_key`, `project`, `active_states`, `in_progress_state`, `handoff_state` |
 | `hooks` | mapping | top-level `hooks` | Overlay: `after_create`, `before_run`, `after_run`, `timeout_ms`. Scripts can read the `JIG_*` variables in [Hook environment](#hook-environment) |
 | `max_concurrent_agents` | int | `1` in the generated document | `0`/absent renders `1` |
@@ -232,7 +236,7 @@ launch and validates and resolves the remaining sections.
 | `budget` | mapping | none | See [Spend controls](#spend-controls); the slug needs its `WORKFLOW.<slug>.md` |
 | `partials` | list of strings | none | Rendered as `dispatch.partials` in every loop document of the entry. See [Partials](#partials) |
 | `agent` | name, list, or mapping | none | An agent, a pool, or an ordered list; per-rule overrides below |
-| `rules` | list | none | See below; `next` must name a later rule of the same entry |
+| `rules` | list | none | Required unless `managed: false`. See below; `next` must name a later rule of the same entry |
 
 Slugs match `^[A-Za-z0-9][A-Za-z0-9_-]*$`. `work.<slug>.budget` with no
 `WORKFLOW.<slug>.md` (or `WORKFLOW.<slug>-*.md` split loop) is a startup
@@ -680,7 +684,7 @@ run). `JIG_ONLY=issues` starts only those loops; see
 | `JIG_TOKEN` | Highest-precedence tracker token; loop only (the `gh` CLI does not read it). See [Token and identity](#token-and-identity). |
 | `JIG_REPO` | Pins the repo id (`owner/name`) instead of detecting it from git `origin`. |
 | `JIG_ONLY` | Comma-separated `WORKFLOW.*.md` stems to start; unset runs all. Unknown names are fatal. See [Selecting loops](usage.md#selecting-loops). |
-| `JIG_WORKSPACES` | Directory that holds the agent checkouts. `jig` sets it for each loop (`.jigz/workspaces` by default) and the shipped workflows use it as `workspace.root: $JIG_WORKSPACES/<loop>`. Set it by hand only when validating a workflow file with the engine directly. |
+| `JIG_WORKSPACES` | Directory that holds the agent checkouts. `jig` sets it for each loop (`.jigz/workspaces` by default) and the generated workflows use it as `workspace.root: $JIG_WORKSPACES/<loop>`. Set it by hand only when validating a workflow file with the engine directly. |
 | `JIG_BIN` | Path of the `jig` binary that the supervisor starts for each loop. Without it, `jig` uses a `jig` binary next to the running one, then `jig` on `PATH`. |
 | `JIG_REGISTRY_DIR` | Directory for the project registry and status files. Unset, they are kept in the shared user cache directory, so several `jig` processes on one machine see each other. |
 | `JIG_TRACKER_TOKEN` | The value `jig setup` seeds as `tracker.api_key: { from_env: JIG_TRACKER_TOKEN }`. Export it in the supervisor's environment or the loops stay offline. |

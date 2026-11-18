@@ -10,7 +10,7 @@ plus a web dashboard. It contains no agent itself.
 tracker on a timer, claims a matching item, clones the repo into a scratch
 workspace, hands the item to an agent, and records the run in a local
 SQLite database. `claude-code` is a standard agent kind that every
-supported engine registers, so the shipped workflows run without extra
+supported engine registers, so the generated workflows run without extra
 setup. The one feature the workflows need that an engine may lack is the
 `github-pr` tracker (which treats pull requests as work items). The `pi`
 agent adapter is optional: an engine only needs it when a workflow or
@@ -64,13 +64,14 @@ the change, runs the project's checks, pushes, and posts a structured
 summary comment (Summary / Changes / Verification / Issues encountered).
 State moves forward through labels — `build` opens a PR and labels it
 `agent:review`, `review` sends findings back as `agent:build` or stops on
-`agent:done`, and a person (or the PM prompt, see below) labels an
-approved PR `agent:merge`.
+`agent:done`, and a person labels an approved PR `agent:merge`.
 ## Labels
 
-Fifteen labels, one role each. The six triggers are applied by a person, a
-chained agent, or the PM prompt; P0–P3 are a person's triage call; the rest
-are set by the agents themselves.
+The `labels:` list that `jig setup` writes into a new `.jigz/config.yaml`
+holds fifteen labels, one role each. Setup creates exactly the labels listed
+in that file; a config without a `labels:` key creates none. The six triggers
+are applied by a person or a chained agent; P0–P3 are a
+person's triage call; the rest are set by the agents themselves.
 
 | Label | Colour | Role |
 |-------|--------|------|
@@ -84,7 +85,7 @@ are set by the agents themselves.
 | `agent:done` | green | State: the agent finished |
 | `needs-human` | red | Escalation: parks the item until a person removes the label |
 | `united-into` | blue | State: folded into another issue's fix; that issue is the one to read |
-| `backlog` | grey | Deferred by a person; no loop and no PM should touch it |
+| `backlog` | grey | Deferred by a person; no loop should touch it |
 | `P0` | red | Priority: dispatch before everything else |
 | `P1` | orange | Priority: high |
 | `P2` | yellow | Priority: normal |
@@ -126,17 +127,16 @@ gh pr edit <n> --remove-label "agent:build,in-progress,agent:done" --add-label "
 
 `agent:done` keeps every loop away from an item, so a trigger meant for
 the next stage is always added in the same command as its removal. No
-agent applies `agent:merge`: an approved PR waits for a person, or for
-the PM prompt in `.jigz/pm-agent.md`, to label it.
+agent applies `agent:merge`: an approved PR waits for a person to label it.
 
 The chained label must land on the item the next loop watches: the `prs`
 loop watches PRs, so label the PR, not the issue it came from. `.jigz/workflows/prompts/review.md` Step 4 and
 `review-fix.md` Step 5 carry these forms.
 ## The loops
 
-Two workflows ship by default (each is one `WORKFLOW.*.md` file, each
-runs as its own loop process). Each file has one dispatch rule per
-trigger label:
+The config that `jig setup` writes defines two work entries, `issues` and
+`prs`. Setup generates one `WORKFLOW.*.md` file for each (each runs as its
+own loop process) with one dispatch rule per trigger label:
 
 | Loop | Rule | Watches | Does |
 |------|------|---------|------|
@@ -159,17 +159,16 @@ the `auto/<issue>` branch only when the run committed something.
 
 ### Migrating from the five-file layout
 
-`setup` and the loop startup never change or remove an existing workflow
-or prompt file. While any of `WORKFLOW.plan.md`, `WORKFLOW.build.md`,
-`WORKFLOW.review.md`, `WORKFLOW.review-fix.md` or `WORKFLOW.merge.md`
-exists in `.jigz/workflows/`, `WORKFLOW.issues.md` and `WORKFLOW.prs.md`
-are not written, because both sets would process the same issues. A
-warning on stderr says so. To migrate:
+`setup` and the loop startup never change or remove an existing prompt
+file. The old `plan`, `build`, `review`, `review-fix` and `merge` loops
+and the `issues` and `prs` loops would process the same issues, so only
+one set may exist. To migrate:
 
-1. Delete the five old files, and their `.sortie-<name>.db` files if you
-   do not need the run history.
-2. Add `issues` and `prs` entries to `work:` and rerun `jig setup` to
-   install the two new files.
+1. Delete the five old files (`WORKFLOW.plan.md`, `WORKFLOW.build.md`,
+   `WORKFLOW.review.md`, `WORKFLOW.review-fix.md`, `WORKFLOW.merge.md`),
+   and their `.sortie-<name>.db` files if you do not need the run history.
+2. Add `issues` and `prs` entries to `work:`, each with a `query_filter`
+   and `rules`, and rerun `jig setup` to generate the two new files.
 3. In `.jigz/config.yaml`, rename old loop names to `issues` or `prs` in
    the `filters:` key, and move each `workflows:<name>.budget` block to
    `work:<name>.budget`. The keys `milestone`, `assignee` and `workflows`
@@ -184,17 +183,14 @@ warning on stderr says so. To migrate:
    either file differs from the shipped copy.
 5. Add the `agent:plan-build` and `agent:docs` entries to the `labels:` list of an
    existing `.jigz/config.yaml` (copy them from the list above), then
-   rerun `setup`. `setup` only creates the labels in that list and prints a
-   note for each shipped label that is missing from it.
+   rerun `setup`. `setup` only creates the labels in that list.
 
 The loop set is the `work:` entries of `.jigz/config.yaml`. A run starts
 a loop for each `work:` key that has a `WORKFLOW.<key>.md` in
-`.jigz/workflows/`, named by the key. Setup installs a shipped workflow
-only for a key of `work:`. A `WORKFLOW.*.md` file without a `work:` entry
-is not started. To add a loop, add a `work.<slug>` entry (e.g. `triage`)
-and its `WORKFLOW.<slug>.md`. Per-loop label queries can be
-narrowed via the `filters:` map in `.jigz/config.yaml` without
-re-running setup.
+`.jigz/workflows/`, named by the key. A `WORKFLOW.*.md` file without a
+`work:` entry is not started. To add a loop, add a `work.<slug>` entry
+(e.g. `triage`) with a `query_filter` and `rules`, then rerun setup to
+generate its `WORKFLOW.<slug>.md`.
 
 `JIG_ONLY=issues` narrows the run to the named loops, for a
 supervisor that drives several repos and wants a different set per
