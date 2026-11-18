@@ -317,6 +317,13 @@ func TestRunningNowAboveMetrics(t *testing.T) {
 	if running < 0 || tiles < 0 || running > tiles {
 		t.Errorf("Running now at %d, metric tiles at %d; want Running now first", running, tiles)
 	}
+	top := strings.Index(body, `id="live-top"`)
+	if top < 0 || running < top {
+		t.Errorf("Running now card is outside live-top; want it inside the live-top fragment")
+	}
+	if empty := strings.Index(body, "no agents are running"); empty < 0 || empty < top || empty > tiles {
+		t.Errorf("empty Running now text missing inside live-top before tiles")
+	}
 }
 
 func TestProjectPageGitHubLink(t *testing.T) {
