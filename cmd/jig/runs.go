@@ -175,7 +175,7 @@ func storedRow(r store.Run) runRow {
 		Identifier: r.DisplayIdentifier, Short: shortIdentifier(r.DisplayIdentifier),
 		IssueURL: issueURL(r.Project, r.DisplayIdentifier, r.IssueID),
 		Href:     "/runs/" + r.Project + "/" + r.Workflow + "/" + strconv.FormatInt(r.ID, 10),
-		Project:  r.Project, Repo: repoNameFromProject(r.Project), Workflow: r.Workflow, Rule: r.Workflow, State: r.Status,
+		Project:  r.Project, Repo: repoNameFromProject(r.Project), Workflow: r.Workflow, Rule: r.RuleName, State: r.Status,
 		Model: r.Model, ModelSource: r.ModelSource, Adapter: r.AgentAdapter,
 		Started: utc(r.StartedAt), Duration: duration(r.StartedAt, r.CompletedAt),
 		Tokens: tokenText(r), Unmeasured: !r.TokensMeasured, Error: r.Error,
@@ -385,7 +385,7 @@ func (a *app) runsCSV(w http.ResponseWriter, r *http.Request) {
 			}
 			out.Write(append(append([]string{
 				strconv.FormatInt(s.ID, 10), csvText(s.DisplayIdentifier), csvText(s.Project), csvText(s.Workflow),
-				csvText(s.Workflow), s.Status, csvText(s.Model), s.ModelSource, csvText(s.AgentAdapter),
+				csvText(s.RuleName), s.Status, csvText(s.Model), s.ModelSource, csvText(s.AgentAdapter),
 				s.StartedAt, s.CompletedAt, duration(s.StartedAt, s.CompletedAt)}, tok...),
 				strconv.FormatBool(s.TokensMeasured), store.ClassifyOutcome(s.Status, s.Error).Class, csvText(s.Error)))
 		}
