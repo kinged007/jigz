@@ -640,8 +640,10 @@ flight. A loop that is draining under `finish` shows as paused. The loop starts 
 `resume` or `budget override`, or at the next poll when the tokens used are
 below the cap again (for example after `max_tokens` was raised and the
 supervisor restarted). The cap is not a hard limit: with `finish` the
-runs in flight use their tokens after the cap is reached, and under either
-value the tokens of a poll interval can pass the cap. A manual pause always
+runs in flight use their tokens after the cap is reached, and the loop can
+still claim new work until the drain goes idle (see the `max_concurrent_agents`
+limitation below), and under either value the tokens of a poll interval can
+pass the cap. A manual pause always
 stops at once. The pause survives a supervisor restart, and a workflow that is over
 its cap is not started. Pause state is stored in `<hash>.budget.json` next
 to the status document. Idle sleep does not start paused workflows at wake.
