@@ -159,13 +159,13 @@ func TestWorkGateDecide(t *testing.T) {
 			end: machine.EndStop, want: gateStopNow,
 		},
 		{
-			name: "an unusable candidate is skipped", cfg: agentsAB + "work:\n  plan:\n    agent: [a, b]\n",
+			name: "an unusable candidate is skipped", cfg: agentsAB + "work:\n  plan:\n    agent: [a, b]\n    query_filter: x\n    rules:\n      - { name: r, match: { labels: [x] }, prompt: p.md }\n",
 			st:  machine.State{Agents: map[string]machine.EntryState{"a": unusableEntry(now, "Invalid API key")}},
 			now: now, loops: []gateLoop{{name: "plan", up: true}}, open: true, agent: "b", want: gateNone,
 		},
 		{
 			name: "all candidates unusable",
-			cfg:  agentsAB + "work:\n  plan:\n    agent: [a, b]\n",
+			cfg:  agentsAB + "work:\n  plan:\n    agent: [a, b]\n    query_filter: x\n    rules:\n      - { name: r, match: { labels: [x] }, prompt: p.md }\n",
 			st: machine.State{Agents: map[string]machine.EntryState{
 				"a": unusableEntry(now, "OpenCode 1.18.29 is not supported; install OpenCode 2.x"),
 				"b": unusableEntry(now, "Invalid API key"),
@@ -176,7 +176,7 @@ func TestWorkGateDecide(t *testing.T) {
 		},
 		{
 			name: "unusable and limited candidates wait for the limit reset",
-			cfg:  agentsAB + "work:\n  plan:\n    agent: [a, b]\n",
+			cfg:  agentsAB + "work:\n  plan:\n    agent: [a, b]\n    query_filter: x\n    rules:\n      - { name: r, match: { labels: [x] }, prompt: p.md }\n",
 			st: machine.State{Agents: map[string]machine.EntryState{
 				"a": unusableEntry(now, "Invalid API key"),
 				"b": {ExhaustedUntil: time.Date(2026, 10, 21, 15, 0, 0, 0, time.UTC), Reason: "usage limit"},
@@ -722,7 +722,7 @@ func TestGateExhaustedPoolStopsAndRestartsAtEarliestReset(t *testing.T) {
 func TestGateUnusablePoolHoldsUntilCleared(t *testing.T) {
 	r := newGateRig(t, "")
 	r.sup.sessions = r.sup.loopSessions
-	r.setConfig(t, "agents:\n  a: {runtime: pi}\n  b: {runtime: pi}\nwork:\n  plan:\n    agent: [a, b]\n")
+	r.setConfig(t, "agents:\n  a: {runtime: pi}\n  b: {runtime: pi}\nwork:\n  plan:\n    agent: [a, b]\n    query_filter: x\n    rules:\n      - { name: r, match: { labels: [x] }, prompt: p.md }\n")
 	r.step(t, time.Minute)
 	if r.sup.empty() {
 		t.Fatal("the loop did not start")
