@@ -255,7 +255,7 @@ func TestBudgetValid(t *testing.T) {
 }
 
 func TestBudgetAccepts5h(t *testing.T) {
-	cfg, err := loadWithConfig(t, "work:\n  plan:\n    budget:\n      period: 5h\n      max_tokens: 5\n", nil)
+	cfg, err := loadWithConfig(t, "work:\n  plan:\n    managed: false\n    query_filter: x\n    budget:\n      period: 5h\n      max_tokens: 5\n", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
