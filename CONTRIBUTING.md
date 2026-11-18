@@ -15,7 +15,7 @@ linux and darwin on amd64 and arm64. Windows is not a target.
 engine find one on `PATH` or in the cache and skip when there is none, so
 CI does not have to install the engine. The workflow-validation test is the
 exception: it runs the pinned engine when one is present, because
-the shipped workflows are only valid against an engine that has the `github-pr`
+the generated workflows are only valid against an engine that has the `github-pr`
 tracker; the `claude-code` adapter is standard on every supported engine.
 
 `release_config_test.go` asserts the contract between `install.sh` and
@@ -36,7 +36,7 @@ with `JIG_ENGINE_REPO` and `JIG_ENGINE_VERSION`.
 Bumping `DefaultTag` in `internal/engine/engine.go` is the whole change,
 but it is not free: the workflows are written against known engine
 behaviour, so a bump needs the engine's `validate` command run against the
-new engine with the shipped workflows. `go test ./...` covers that when an
+new engine with the generated workflows. `go test ./...` covers that when an
 engine is on `PATH`.
 
 ## Reporting

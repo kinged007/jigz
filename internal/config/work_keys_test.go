@@ -6,7 +6,7 @@ import (
 )
 
 func TestWorkMaxSessionsAndPartials(t *testing.T) {
-	const head = "agents:\n  a: { runtime: pi }\nwork:\n  w:\n    agent: a\n"
+	const head = "agents:\n  a: { runtime: pi }\nwork:\n  w:\n    managed: false\n    query_filter: x\n    agent: a\n"
 	cfg, err := loadWithConfig(t, head+"    max_sessions: 4\n    partials: [prompts/partials/*.md, prompts/shared.md]\n", nil)
 	if err != nil {
 		t.Fatal(err)

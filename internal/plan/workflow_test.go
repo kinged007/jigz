@@ -44,7 +44,7 @@ func TestParseShippedWorkflows(t *testing.T) {
 			t.Errorf("%s: excluded %v, want %v", c.name, ex, c.exclude)
 		}
 		if len(w.Rules) != 0 {
-			t.Errorf("%s: shipped workflow has rules %v", c.name, w.Rules)
+			t.Errorf("%s: generated workflow has rules %v", c.name, w.Rules)
 		}
 	}
 }

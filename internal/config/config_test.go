@@ -38,15 +38,11 @@ func TestLoadEnvAndFilterFor(t *testing.T) {
 	if cfg.Repo != "o/r" || cfg.Token != "tok" || cfg.Tracker != "o/r" {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
-	if cfg.FilterFor("issues") != `label:agent:plan,agent:plan-build,agent:build,agent:docs,in-progress -label:needs-human assignee:@me` {
-		t.Errorf("issues filter: %q", cfg.FilterFor("issues"))
+	if got := cfg.FilterFor("issues"); got != "" {
+		t.Errorf("filter without query_filter or filters entry: %q", got)
 	}
-	if cfg.FilterFor("prs") != `label:agent:review,agent:build,agent:merge,in-progress -label:needs-human assignee:@me` {
-		t.Errorf("prs filter: %q", cfg.FilterFor("prs"))
-	}
-	// Unknown loops get the default filter (no label constraint).
-	if cfg.FilterFor("triage") != `-label:needs-human assignee:@me` {
-		t.Errorf("unknown loop filter: %q", cfg.FilterFor("triage"))
+	if cfg.Labels != nil {
+		t.Errorf("labels without a labels key: %+v", cfg.Labels)
 	}
 }
 
@@ -90,8 +86,8 @@ func TestLoadFilterOverrides(t *testing.T) {
 	if cfg.FilterFor("issues") != "label:agent:custom assignee:@me" {
 		t.Errorf("known-loop override: %q", cfg.FilterFor("issues"))
 	}
-	if cfg.FilterFor("prs") != "label:agent:review,agent:build,agent:merge,in-progress -label:needs-human assignee:@me" {
-		t.Errorf("untouched default: %q", cfg.FilterFor("prs"))
+	if got := cfg.FilterFor("prs"); got != "" {
+		t.Errorf("slug without an entry: %q", got)
 	}
 }
 
@@ -99,61 +95,36 @@ func TestLoadFilterOverrides(t *testing.T) {
 // query_filter is the complete tracker query and wins over the filters:
 // override and the defaults; the assignee scope is appended to all.
 func TestFilterForWorkQueryFilter(t *testing.T) {
-	cfg, err := loadWithConfig(t, "filters:\n  issues: label:from-filters\nwork:\n  issues:\n    query_filter: \"label:from-work\"\n", nil)
+	cfg, err := loadWithConfig(t, "filters:\n  issues: label:from-filters\nwork:\n  issues:\n    managed: false\n    query_filter: \"label:from-work\"\n", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := cfg.FilterFor("issues"); got != "label:from-work assignee:@me" {
 		t.Errorf("work query_filter: %q", got)
 	}
-	if got := cfg.FilterFor("prs"); got != "label:agent:review,agent:build,agent:merge,in-progress -label:needs-human assignee:@me" {
-		t.Errorf("default filter: %q", got)
+}
+
+func TestWorkEntryWithoutFilterFails(t *testing.T) {
+	_, err := loadWithConfig(t, "work:\n  issues:\n    rules:\n    - {name: build, match: {labels: [agent:build]}, prompt: prompts/build.md}\n", nil)
+	if err == nil || !strings.Contains(err.Error(), "work.issues needs query_filter") {
+		t.Fatalf("err = %v", err)
+	}
+	cfg, err := loadWithConfig(t, "filters:\n  issues: label:agent:build\nwork:\n  issues:\n    rules:\n    - {name: build, match: {labels: [agent:build]}, prompt: prompts/build.md}\n", nil)
+	if err != nil {
+		t.Fatalf("filters entry: %v", err)
+	}
+	if got := cfg.FilterFor("issues"); got != "label:agent:build assignee:@me" {
+		t.Errorf("filters entry: %q", got)
 	}
 }
 
-// TestDefaultLabels pins the shipped label set: one yellow trigger per loop,
-// one claim, one finished state, one escalation. Colours are part of the
-// contract because the board reads them at a glance.
-func TestDefaultLabels(t *testing.T) {
-	want := []Label{
-		{"agent:plan", "fbca04", "Trigger: write an implementation plan for this issue"},
-		{"agent:plan-build", "fbca04", "Trigger: plan this issue, then implement it with no human step"},
-		{"agent:build", "fbca04", "Trigger: implement this issue, or apply review feedback on this PR"},
-		{"agent:review", "fbca04", "Trigger: review this PR"},
-		{"agent:merge", "fbca04", "Trigger: merge this PR"},
-		{"agent:docs", "fbca04", "Trigger: update the docs for merged changes and open a PR"},
-		{"in-progress", "5319e7", "State: claimed by an agent"},
-		{"agent:done", "0e8a16", "State: agent finished"},
-		{"needs-human", "d73a4a", "Escalation: agent needs a person"},
-		{"united-into", "c5def5", "State: work folded into another issue's fix; that issue is the one to read"},
-		{"backlog", "ededed", "Deferred by a person; do not dispatch"},
-		{"P0", "d73a4a", "Priority: highest, dispatch before everything else"},
-		{"P1", "f9826c", "Priority: high"},
-		{"P2", "fbca04", "Priority: normal"},
-		{"P3", "ededed", "Priority: lowest"},
+func TestManagedWorkEntryWithoutRulesFails(t *testing.T) {
+	_, err := loadWithConfig(t, "work:\n  issues:\n    query_filter: label:agent:build\n", nil)
+	if err == nil || !strings.Contains(err.Error(), "work.issues needs rules") {
+		t.Fatalf("err = %v", err)
 	}
-	if len(DefaultLabels) != len(want) {
-		t.Fatalf("DefaultLabels = %d labels, want %d", len(DefaultLabels), len(want))
-	}
-	for i, w := range want {
-		if DefaultLabels[i] != w {
-			t.Errorf("label %d = %+v, want %+v", i, DefaultLabels[i], w)
-		}
-	}
-}
-
-// TestDefaultLabelPrefix enforces the naming rule: agent-owned labels carry
-// the agent: prefix, the item-level and person-owned labels do not.
-func TestDefaultLabelPrefix(t *testing.T) {
-	itemLevel := map[string]bool{
-		"in-progress": true, "needs-human": true, "united-into": true,
-		"backlog": true, "P0": true, "P1": true, "P2": true, "P3": true,
-	}
-	for _, l := range DefaultLabels {
-		unprefixed := itemLevel[l.Name]
-		if unprefixed == strings.HasPrefix(l.Name, "agent:") {
-			t.Errorf("label %q: wrong prefix (want prefixed=%v)", l.Name, !unprefixed)
-		}
+	if _, err := loadWithConfig(t, "work:\n  issues:\n    managed: false\n    query_filter: label:agent:build\n", nil); err != nil {
+		t.Fatalf("unmanaged entry: %v", err)
 	}
 }
 
@@ -266,7 +237,7 @@ func TestSleepInvalid(t *testing.T) {
 	}
 }
 
-const budgetYAML = "work:\n  plan:\n    budget:\n      period: weekly\n      timezone: Africa/Johannesburg\n      max_tokens: 20000000\n      warn_percent: 70\n      on_exceed: pause\n      poll_interval: 30s\n      max_usd: 50\n"
+const budgetYAML = "work:\n  plan:\n    managed: false\n    query_filter: x\n    budget:\n      period: weekly\n      timezone: Africa/Johannesburg\n      max_tokens: 20000000\n      warn_percent: 70\n      on_exceed: pause\n      poll_interval: 30s\n      max_usd: 50\n"
 
 func TestBudgetValid(t *testing.T) {
 	cfg, err := loadWithConfig(t, budgetYAML, map[string]string{"WORKFLOW.plan.md": "---\n---\n"})
@@ -284,7 +255,7 @@ func TestBudgetValid(t *testing.T) {
 }
 
 func TestBudgetDefaults(t *testing.T) {
-	cfg, err := loadWithConfig(t, "work:\n  plan:\n    budget:\n      period: monthly\n      max_tokens: 5\n", nil)
+	cfg, err := loadWithConfig(t, "work:\n  plan:\n    managed: false\n    query_filter: x\n    budget:\n      period: monthly\n      max_tokens: 5\n", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +266,7 @@ func TestBudgetDefaults(t *testing.T) {
 }
 
 func TestBudgetDisabledWithoutMaxTokens(t *testing.T) {
-	cfg, err := loadWithConfig(t, "work:\n  plan:\n    budget:\n      period: weekly\n", nil)
+	cfg, err := loadWithConfig(t, "work:\n  plan:\n    managed: false\n    query_filter: x\n    budget:\n      period: weekly\n", nil)
 	if err != nil || cfg.Budgets()["plan"].MaxTokens != 0 {
 		t.Errorf("cfg %+v err %v, want a disabled budget", cfg, err)
 	}
@@ -315,7 +286,7 @@ func TestBudgetInvalid(t *testing.T) {
 		{"bad poll interval", "period: weekly\n      max_tokens: 5\n      poll_interval: soon", "poll_interval"},
 		{"negative usd", "period: weekly\n      max_tokens: 5\n      max_usd: -1", "max_usd"},
 	} {
-		_, err := loadWithConfig(t, "work:\n  plan:\n    budget:\n      "+c.body+"\n", nil)
+		_, err := loadWithConfig(t, "work:\n  plan:\n    managed: false\n    query_filter: x\n    budget:\n      "+c.body+"\n", nil)
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: error %v, want it to mention %q", c.name, err, c.want)
 		}
@@ -323,7 +294,7 @@ func TestBudgetInvalid(t *testing.T) {
 }
 
 func TestBudgetUnknownLoop(t *testing.T) {
-	cfg, err := loadWithConfig(t, "work:\n  nope:\n    budget:\n      period: weekly\n      max_tokens: 5\n", map[string]string{"WORKFLOW.plan.md": "---\n---\n"})
+	cfg, err := loadWithConfig(t, "work:\n  nope:\n    managed: false\n    query_filter: x\n    budget:\n      period: weekly\n      max_tokens: 5\n", map[string]string{"WORKFLOW.plan.md": "---\n---\n"})
 	if err != nil {
 		t.Fatal(err)
 	}

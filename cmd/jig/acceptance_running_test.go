@@ -16,7 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kinged007/jigz/internal/config"
 	"github.com/kinged007/jigz/internal/fakegithub"
 )
 
@@ -34,7 +33,7 @@ func TestAcceptanceRunningSession(t *testing.T) {
 	)
 	gh := fakegithub.New("octo", token)
 	gh.Logf = t.Logf
-	gh.AddRepo(slug, labelNames(config.DefaultLabels)...)
+	gh.AddRepo(slug, labelNames(scaffoldLabels)...)
 	srv := httptest.NewServer(gh)
 	defer srv.Close()
 	planned := gh.Add(fakegithub.Item{Repo: slug, Title: "Plan this", Body: "Write a plan.",
@@ -99,7 +98,7 @@ func TestAcceptanceRunningSession(t *testing.T) {
 		t.Errorf("session %+v, want %s#%d, attempt 1", s, slug, planned)
 	}
 
-	db, err := sql.Open("sqlite", "file:"+filepath.Join(repoDir, ".jigz", "workflows", "jigz-issues.db")+"?mode=ro")
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(repoDir, ".jigz", "data", "jigz-issues.db")+"?mode=ro")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -103,7 +103,7 @@ type Issue struct {
 
 // IsRuntimeBlockWarning reports whether an engine warning only says that
 // the workflow carries the adapter block of a runtime other than the active
-// one. The shipped workflows hold one block per runtime and the engine reads
+// one. The generated workflows hold one block per runtime and the engine reads
 // only the block named by agent.kind.
 func IsRuntimeBlockWarning(check, message string) bool {
 	if check != "unknown_key" {

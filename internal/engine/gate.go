@@ -8,12 +8,12 @@ import (
 )
 
 const (
-	// MinVersion is the oldest engine the shipped workflows run on:
+	// MinVersion is the oldest engine the generated workflows run on:
 	// dispatch.rules stage and next need 1.27.0.
 	MinVersion = "1.27.0"
 	// PRTracker is the tracker kind of the PR workflow.
 	PRTracker = "github-pr"
-	// DefaultAgent is the agent kind of the shipped workflows.
+	// DefaultAgent is the agent kind of the generated workflows.
 	DefaultAgent = "claude-code"
 )
 
@@ -62,7 +62,7 @@ func (g Gate) LoopsOff() string {
 	if !ok1 || cur >= min {
 		return ""
 	}
-	return fmt.Sprintf("Loops are off: %s is older than %s, the oldest the shipped workflows run on.", g.Label, MinVersion)
+	return fmt.Sprintf("Loops are off: %s is older than %s, the oldest the generated workflows run on.", g.Label, MinVersion)
 }
 
 // TrackerOff is why a workflow with the tracker kind cannot run, "" when it
