@@ -2,7 +2,7 @@
 
 Start here. Newcomer path: concepts, then install, then usage.
 
-- [concepts.md](concepts.md) — what `jig` does, the names, how loops claim issues, the labels, the two shipped loops. Read this first.
+- [concepts.md](concepts.md) — what `jig` does, the names, how loops claim issues, the labels, the `issues` and `prs` loops that `jig setup` scaffolds. Read this first.
 - [install.md](install.md) — install, the engine binary, the GitHub token.
 - [usage.md](usage.md) — run, `start`, `status`, loop selection, dashboard flags, control commands. Reproduce a run from here.
 - [configuration.md](configuration.md) — `.jigz/config.yaml` and the machine file: every key, defaults, validation, and examples.

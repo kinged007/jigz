@@ -4,13 +4,15 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/kinged007/jigz/internal/config"
 )
 
 func TestParseQueryShippedFilters(t *testing.T) {
-	for _, loop := range []string{"issues", "prs"} {
-		q := "repo:o/r type:issue state:open " + config.DefaultLabelFilter(loop) + ` milestone:"v 2" assignee:@me`
+	for _, filter := range []string{
+		"label:agent:plan,agent:plan-build,agent:build,agent:docs,in-progress -label:needs-human",
+		"label:agent:review,agent:build,agent:merge,in-progress -label:needs-human",
+	} {
+		loop := strings.Fields(filter)[0]
+		q := "repo:o/r type:issue state:open " + filter + ` milestone:"v 2" assignee:@me`
 		parsed, err := ParseQuery(q)
 		if err != nil {
 			t.Fatalf("%s: %v", loop, err)
@@ -21,7 +23,7 @@ func TestParseQueryShippedFilters(t *testing.T) {
 				labels = tm.values
 			}
 		}
-		want := strings.Split(strings.TrimPrefix(strings.Fields(config.DefaultLabelFilter(loop))[0], "label:"), ",")
+		want := strings.Split(strings.TrimPrefix(loop, "label:"), ",")
 		if !reflect.DeepEqual(labels, want) {
 			t.Errorf("%s: label values %q, want %q", loop, labels, want)
 		}
