@@ -25,7 +25,8 @@ The Usage page and `GET /api/v1/usage` group runs by `project`, `workflow`,
 (`group=` parameter). The API filters by `project`, `workflow`, `rule` and
 `model`. The Runs page and `GET /api/v1/runs` take a `rule` filter. Runs
 recorded before Jigz copied the rule name get it from the engine database
-while that database exists; others have no rule.
+while that database exists; others have no rule. The `no rule` group links
+to the Runs page without a `rule` filter, since an empty rule matches everything.
 
 ### Run data
 

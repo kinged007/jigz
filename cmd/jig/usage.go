@@ -126,6 +126,8 @@ func runsHref(group string, g store.Group, from, to string) string {
 		v.Set("project", g.Project)
 		v.Set("workflow", g.Workflow)
 	case "rule":
+		// An empty key is the "no rule" group; leaving the parameter
+		// off keeps the Runs page unfiltered.
 		if g.Key != "" {
 			v.Set("rule", g.Key)
 		}
