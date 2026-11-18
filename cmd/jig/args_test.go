@@ -146,3 +146,16 @@ func TestNoServerIsAnUnknownFlag(t *testing.T) {
 		t.Error("usage mentions --no-server")
 	}
 }
+
+func TestParseArgsSkipBuild(t *testing.T) {
+	c, err := parseArgs([]string{"setup", "--skip-build", "/tmp/repo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.setup || !c.skipBuild || c.dir != "/tmp/repo" {
+		t.Errorf("parsed %+v", c)
+	}
+	if _, err := parseArgs([]string{"--skip-build"}); err == nil {
+		t.Error("--skip-build without setup was accepted")
+	}
+}

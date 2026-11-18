@@ -23,6 +23,23 @@ func writeGenConfig(t *testing.T, body string) string {
 	return root
 }
 
+// generatedLoopDoc renders the document of one work entry of the setup
+// scaffold for slug.
+func generatedLoopDoc(t *testing.T, slug, loop string) string {
+	t.Helper()
+	docs, _, err := generateDocs(writeGenConfig(t, configTemplateBody(slug)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range docs {
+		if d.Loop == loop {
+			return string(d.Text)
+		}
+	}
+	t.Fatalf("scaffold generates no %s loop", loop)
+	return ""
+}
+
 func genBase() string {
 	return `repo: owner/repo
 tracker:
