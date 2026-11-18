@@ -15,7 +15,7 @@ tracker.
 
 - One command per repo: `jig setup`, then `jig` runs every loop in the foreground (or `jig start` in the background) plus a read-only web dashboard.
 - Label-driven backlog: add `agent:build` to an issue and the agent plans, codes, opens a PR, and chains through review to merge.
-- Two shipped workflows: `issues` (plan, build, docs) and `prs` (review, review-fix, merge); drop in a `WORKFLOW.<name>.md` file to add a loop.
+- Two loops in the config that setup writes: `issues` (plan, build, docs) and `prs` (review, review-fix, merge); add a `work:` entry to add a loop.
 - Spend and schedule guardrails: per-loop token budgets, working hours, idle sleep, and workspace cleanup.
 - Fleet support: agent accounts and pools with usage-limit failover, and one shared dashboard across repos (`--unite`).
 
@@ -27,7 +27,8 @@ curl -sSL https://raw.githubusercontent.com/kinged007/jigz/main/install.sh | sh
 export GITHUB_TOKEN="ghp_..."   # or GH_TOKEN; needs Contents, Issues, Pull requests read/write
 
 cd your-repo
-jig setup     # writes .jigz/, creates labels, installs the engine
+jig setup     # writes .jigz/, generates the workflows, creates the labels in config.yaml, installs the engine
+              # (jig setup --skip-build leaves out the workflows and labels)
 jig           # run every loop in the foreground (Ctrl-C stops all)
 ```
 
@@ -72,7 +73,7 @@ Details: [docs/concepts.md](docs/concepts.md).
 - **One crashed loop stops the run.** A loop process exiting ends
   `jig`, as a signal does. The remaining loops are stopped
   cleanly and the registry entry is dropped, but nothing restarts them.
-- **Workflow files are not version-stamped.** A workflow file you have
+- **Prompt files are not version-stamped.** A prompt file you have
   not edited is not updated when the binary is upgraded. Delete it and
   re-run `setup` to take the shipped version.
 - **Windows is unsupported.** The engine releases a `.zip`; the
@@ -83,7 +84,7 @@ Details: [docs/concepts.md](docs/concepts.md).
 - Restart a loop that exits instead of ending the run. Currently one
   crashed loop stops every other loop; see
   [Known limitations](#known-limitations).
-- Stamp workflow files with the binary version that wrote them, so an
+- Stamp prompt files with the binary version that wrote them, so an
   upgrade can offer a new version of a file the user has not edited.
 
 The full ordered plan lives in [ROADMAP.md](ROADMAP.md).

@@ -18,7 +18,7 @@ type Query struct {
 	terms []term
 }
 
-// supportedKeys are the qualifiers the engine and the shipped workflows
+// supportedKeys are the qualifiers the engine and the generated workflows
 // send. Anything else is rejected rather than ignored, so a new qualifier
 // in a workflow cannot pass the harness unevaluated.
 var supportedKeys = map[string]bool{

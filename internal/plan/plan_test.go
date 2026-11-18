@@ -28,7 +28,7 @@ func workflows(t *testing.T, dir string, names ...string) {
 		t.Fatal(err)
 	}
 	for _, n := range names {
-		// Shaped like a shipped workflow: a polling: block, an agent:
+		// Shaped like a generated workflow: a polling: block, an agent:
 		// block, and an adapter block carrying the model.
 		body := "---\npolling:\n  interval_ms: 60000\n\nagent:\n  kind: claude-code\n  max_turns: 5\n  max_concurrent_agents: 1\n\nclaude-code:\n  model: \"\"\n---\nbody\n"
 		if err := os.WriteFile(filepath.Join(w, "WORKFLOW."+n+".md"), []byte(body), 0o644); err != nil {

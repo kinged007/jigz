@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kinged007/jigz/internal/config"
 	"github.com/kinged007/jigz/internal/fakegithub"
 )
 
@@ -37,7 +36,7 @@ func TestRecordEngineLog(t *testing.T) {
 		token = "acceptance-token"
 	)
 	gh := fakegithub.New(owner, token)
-	gh.AddRepo(slug, labelNames(config.DefaultLabels)...)
+	gh.AddRepo(slug, labelNames(scaffoldLabels)...)
 	srv := httptest.NewServer(gh)
 	defer srv.Close()
 
