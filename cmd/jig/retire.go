@@ -9,42 +9,6 @@ import (
 	"github.com/kinged007/jigz/internal/gen"
 )
 
-// managedSlugs returns the slugs of the managed work entries, or nil
-// when the config cannot be loaded.
-func managedSlugs(root string) map[string]bool {
-	cfg, err := config.Load(root)
-	if err != nil {
-		return nil
-	}
-	out := map[string]bool{}
-	for slug, res := range cfg.Resolve() {
-		if res.Managed {
-			out[slug] = true
-		}
-	}
-	return out
-}
-
-// workSlugs returns the keys of the config's work map, or nil when the
-// config cannot be loaded.
-func workSlugs(root string) map[string]bool {
-	cfg, err := config.Load(root)
-	if err != nil {
-		return nil
-	}
-	out := map[string]bool{}
-	for slug := range cfg.Work {
-		out[slug] = true
-	}
-	return out
-}
-
-// shippedSlug is the work entry slug a shipped WORKFLOW.<slug>.md file
-// belongs to; generation owns that file when a managed entry has the slug.
-func shippedSlug(file string) string {
-	return strings.TrimSuffix(strings.TrimPrefix(file, "WORKFLOW."), ".md")
-}
-
 // staleLoopDocs lists the loop names on disk that a managed work entry
 // owns (<slug> or <slug>-*) although no configured entry produces them.
 // A name owned by several slugs belongs to the longest one, so slugs
@@ -75,10 +39,9 @@ func staleLoopDocs(root string, cfg *config.Config) []string {
 	return stale
 }
 
-// retireStaleLoops removes the stale loop documents that Jigz wrote:
-// generated ones and unedited copies of the shipped file. Any other
-// stale document is kept with a warning, because it still runs as a
-// loop. It returns the removed loop names and the warnings.
+// retireStaleLoops removes the stale loop documents that Jigz generated.
+// Any other stale document is kept with a warning, because it still runs
+// as a loop. It returns the removed loop names and the warnings.
 func retireStaleLoops(root string) ([]string, []string, error) {
 	cfg, err := config.Load(root)
 	if err != nil {
@@ -91,8 +54,7 @@ func retireStaleLoops(root string) ([]string, []string, error) {
 		if err != nil {
 			return removed, warnings, err
 		}
-		shipped, serr := embeddedWorkflows.ReadFile("workflows/WORKFLOW." + name + ".md")
-		if gen.Managed(cur) || (serr == nil && string(cur) == string(shipped)) {
+		if gen.Managed(cur) {
 			if err := os.Remove(path); err != nil {
 				return removed, warnings, err
 			}

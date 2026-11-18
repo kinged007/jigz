@@ -30,13 +30,11 @@ type Config struct {
 	SortieBin string // resolved sortie binary path
 	EnvFile   string // path to generated env file passed via --env-file
 	Tracker   string // tracker project, always == Repo
-	// Filters overrides the default per-loop query filters by loop name
-	// (the WORKFLOW.*.md stem). Unknown loops get defaultFilter; known
-	// loops fall back to their shipped default when unset. A work
-	// entry's query_filter wins over these.
+	// Filters are the per-loop query filters by work slug, used when the
+	// work entry has no query_filter of its own.
 	Filters map[string]string `yaml:"filters"`
 	// Labels are the GitHub labels setup ensures exist (create-or-edit;
-	// labels absent here are left alone). Empty = DefaultLabels.
+	// labels absent here are left alone). No labels: key = none.
 	Labels     []Label `yaml:"labels"`
 	Workspaces string  // .jigz/workspaces under Dir
 	Cleanup    Cleanup
@@ -312,33 +310,6 @@ type Label struct {
 	Description string `yaml:"description"`
 }
 
-// DefaultLabels are the labels for the shipped loops, seeded into a new
-// config.yaml by setup. A custom loop adds its entries here, then setup
-// creates them on GitHub (tracker support is GitHub-only).
-//
-// Three roles, one colour each: a yellow trigger starts a loop, in-progress
-// is the claim an agent holds while it works, agent:done is the state an
-// agent leaves behind when it finishes, and needs-human escalates to a
-// person. Every name is prefixed agent: except those that describe the
-// item or the person's decision rather than the agent.
-var DefaultLabels = []Label{
-	{"agent:plan", "fbca04", "Trigger: write an implementation plan for this issue"},
-	{"agent:plan-build", "fbca04", "Trigger: plan this issue, then implement it with no human step"},
-	{"agent:build", "fbca04", "Trigger: implement this issue, or apply review feedback on this PR"},
-	{"agent:review", "fbca04", "Trigger: review this PR"},
-	{"agent:merge", "fbca04", "Trigger: merge this PR"},
-	{"agent:docs", "fbca04", "Trigger: update the docs for merged changes and open a PR"},
-	{"in-progress", "5319e7", "State: claimed by an agent"},
-	{"agent:done", "0e8a16", "State: agent finished"},
-	{"needs-human", "d73a4a", "Escalation: agent needs a person"},
-	{"united-into", "c5def5", "State: work folded into another issue's fix; that issue is the one to read"},
-	{"backlog", "ededed", "Deferred by a person; do not dispatch"},
-	{"P0", "d73a4a", "Priority: highest, dispatch before everything else"},
-	{"P1", "f9826c", "Priority: high"},
-	{"P2", "fbca04", "Priority: normal"},
-	{"P3", "ededed", "Priority: lowest"},
-}
-
 // configFile is the document of .jigz/config.yaml.
 type configFile struct {
 	Repo    string             `yaml:"repo"`
@@ -455,9 +426,6 @@ func Load(dir string) (*Config, error) {
 	if c.Filters == nil {
 		c.Filters = map[string]string{}
 	}
-	if c.Labels == nil {
-		c.Labels = DefaultLabels
-	}
 	if c.Agents == nil {
 		c.Agents = map[string]Agent{}
 	}
@@ -548,49 +516,17 @@ func MigrateRepoDir(dir string) {
 	_ = os.Rename(old, cur)
 }
 
-// defaultFilters are the label constraints for the shipped loops,
-// mirroring each workflow's query_filter so the SORTIE_TRACKER_QUERY_FILTER
-// env override (which replaces it) preserves the positive label clauses.
-// The github-pr loops need them: the adapter sends a non-empty filter to
-// GitHub search and lists from /pulls, without label clauses, when it is
-// empty. A new
-// WORKFLOW.*.md loop with no filters: entry gets defaultFilter (same
-// scope, no label constraint), so it starts but matches nothing until
-// the workflow's active_states or a filters: override narrows it.
-//
-// Every filter matches its triggers plus in-progress, so an item whose
-// agent died mid-run is picked up again by the same loop. The issue and PR
-// loops each list items of one kind, so they do not claim each other's
-// items; the order of a workflow's dispatch rules settles an item that
-// carries several triggers.
-var defaultFilters = map[string]string{
-	"issues": "label:agent:plan,agent:plan-build,agent:build,agent:docs,in-progress -label:needs-human",
-	"prs":    "label:agent:review,agent:build,agent:merge,in-progress -label:needs-human",
-}
-
-// DefaultLabelFilter returns the shipped query filter for a loop with no
-// query_filter or filters override. The workflow files carry the same
-// string, and the env override injected at launch replaces it; both must
-// agree or the file would say one thing and the running loop another.
-func DefaultLabelFilter(name string) string { return defaultFilters[name] }
-
-const defaultFilter = "-label:needs-human"
-
 // FilterFor returns the query filter for a loop: the work entry's
-// query_filter when set (it is the complete tracker query), else the
-// filters: override, else the shipped default for known loops, else
-// defaultFilter. Jigz appends the assignee scope at launch, so every
-// filter carries assignee:@me.
+// query_filter (the complete tracker query) when set, else the filters:
+// entry of the slug, else "". Jigz appends the assignee scope at launch,
+// so a filter carries assignee:@me.
 func (c *Config) FilterFor(name string) string {
 	base := c.Work[name].QueryFilter
 	if base == "" {
 		base = c.Filters[name]
 	}
 	if base == "" {
-		base = defaultFilters[name]
-		if base == "" {
-			base = defaultFilter
-		}
+		return ""
 	}
 	return base + " assignee:@me"
 }
