@@ -101,18 +101,11 @@ func runAgentTarget(cfg *config.Config, state machine.State, statePath string, f
 	if wd, err := os.Getwd(); err == nil {
 		env = append(env, "JIG_WORKSPACE="+wd)
 	}
-	for _, k := range sortedKeys(a.Env) {
-		v := a.Env[k]
-		if v.FromEnv != "" {
-			if s := os.Getenv(v.FromEnv); s != "" {
-				env = append(env, k+"="+s)
-			} else {
-				return fail(exitNoAgent, "agent %s needs %s, which is not set", name, v.FromEnv)
-			}
-			continue
-		}
-		env = append(env, k+"="+v.Str)
+	mapped, missing := agentEnv(a)
+	if missing != "" {
+		return fail(exitNoAgent, "agent %s needs %s, which is not set", name, missing)
 	}
+	env = append(env, mapped...)
 	// Usage-limit text uses the machine file's limits block when it
 	// loads; a fleet agent carries no custom patterns of its own.
 	mine := &machine.Config{}
@@ -142,6 +135,22 @@ func runAgentTarget(cfg *config.Config, state machine.State, statePath string, f
 	}
 	return spawnAgentChild(stdin, stdout, stderr, fail, command, childArgs,
 		append(os.Environ(), env...), detect, modelDetect, unusableDetect, versionProblem, name, name, a.Model, statePath, time.Now())
+}
+
+// agentEnv resolves the agent's env mapping from this process's
+// environment. It returns the first from_env reference that is unset.
+func agentEnv(a config.Agent) (env []string, missing string) {
+	for _, k := range sortedKeys(a.Env) {
+		v := a.Env[k]
+		if v.FromEnv == "" {
+			env = append(env, k+"="+v.Str)
+		} else if s := os.Getenv(v.FromEnv); s != "" {
+			env = append(env, k+"="+s)
+		} else if missing == "" {
+			missing = v.FromEnv
+		}
+	}
+	return env, missing
 }
 
 // agentExecRoot finds the repository the loop runs in: agent-exec runs

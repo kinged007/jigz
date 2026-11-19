@@ -61,7 +61,7 @@ func TestAgentVersionChecks(t *testing.T) {
 		t.Helper()
 		var ran []string
 		old := agentVersionOutput
-		agentVersionOutput = func(command string) (string, error) {
+		agentVersionOutput = func(command string, _ []string) (string, error) {
 			ran = append(ran, command)
 			return out, err
 		}
@@ -103,13 +103,28 @@ func TestAgentVersionChecks(t *testing.T) {
 	})
 }
 
+func TestAgentVersionChecksUseTheAgentEnv(t *testing.T) {
+	script := writeAgentScript(t, "echo \"$JIG_TEST_PROBE_TOKEN\"\n")
+	t.Setenv("JIG_TEST_PROBE_SRC", "from-process")
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".jigz", "config.yaml"), "repo: o/r\nagents:\n  pi: {runtime: pi, command: "+script+", env: {JIG_TEST_PROBE_TOKEN: {from_env: JIG_TEST_PROBE_SRC}}}\n")
+	cfg, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checks := agentVersionChecks(cfg)
+	if len(checks) != 1 || checks[0].OK || !strings.Contains(checks[0].Error, "from-process") {
+		t.Fatalf("the probe did not see the agent env: %+v", checks)
+	}
+}
+
 func TestAgentVersionOutputRunsTheCommand(t *testing.T) {
 	script := writeAgentScript(t, "echo \"$@\"\n")
-	out, err := agentVersionOutput(script + " sub")
+	out, err := agentVersionOutput(script+" sub", nil)
 	if err != nil || out != "sub --version\n" {
 		t.Fatalf("out %q err %v", out, err)
 	}
-	if _, err := agentVersionOutput("jig-no-such-agent-cli"); err == nil {
+	if _, err := agentVersionOutput("jig-no-such-agent-cli", nil); err == nil {
 		t.Fatal("a missing command did not fail")
 	}
 }

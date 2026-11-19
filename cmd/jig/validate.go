@@ -75,9 +75,10 @@ func collectValidateChecks(root string) ([]validateCheck, []string, []string) {
 // agentVersionTimeout bounds one `<command> --version` call.
 const agentVersionTimeout = 10 * time.Second
 
-// agentVersionOutput runs the agent command with --version and returns its
-// stdout. Tests replace it.
-var agentVersionOutput = func(command string) (string, error) {
+// agentVersionOutput runs the agent command with --version and the agent's
+// env mapping added to the process environment, and returns its stdout.
+// Tests replace it.
+var agentVersionOutput = func(command string, env []string) (string, error) {
 	words := strings.Fields(command)
 	if len(words) == 0 {
 		return "", errors.New("the command is empty")
@@ -88,7 +89,9 @@ var agentVersionOutput = func(command string) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), agentVersionTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, path, append(words[1:], "--version")...).Output()
+	cmd := exec.CommandContext(ctx, path, append(words[1:], "--version")...)
+	cmd.Env = append(os.Environ(), env...)
+	out, err := cmd.Output()
 	return string(out), err
 }
 
@@ -107,7 +110,8 @@ func agentVersionChecks(cfg *config.Config) []validateCheck {
 			command = machine.DefaultCommand(a.Runtime)
 		}
 		c := validateCheck{Name: "agent-version:" + name, OK: true}
-		out, err := agentVersionOutput(command)
+		env, _ := agentEnv(a)
+		out, err := agentVersionOutput(command, env)
 		switch {
 		case err != nil && out == "":
 			c.OK, c.Error = false, fmt.Sprintf("agent %s: could not run %q --version: %v", name, command, err)
