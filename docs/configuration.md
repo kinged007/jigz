@@ -789,7 +789,7 @@ credential reference makes the agent unavailable and `agent-exec` exits
 reports a usage limit, the agent is marked exhausted until the reset time in
 the message, or one hour later when the message carries none. The reset is
 read from an epoch after `|`, a duration (`resets in 3h`, `try again in 2
-hours 15 minutes`), a date and clock (`resets Nov 14 at 5pm (UTC)`), a
+hours 15 minutes`; milliseconds round up to one second), a date and clock (`resets Nov 14 at 5pm (UTC)`), a
 weekday and clock (`resets Friday 5pm`) or a clock alone (`resets 1:10am
 (UTC)`). A time that has passed rolls forward to next year, next week or
 tomorrow. The state is stored in
@@ -884,8 +884,9 @@ the engine makes every CLI call through `agent-exec`, which sees the output
 itself. The run history classes these errors as `failed_agent`; a text that
 carries a usage-limit phrase stays `failed_limit`.
 
-`jig validate` runs `<command> --version` for each agent of runtime
-`opencode` or `pi` and fails when the engine would refuse the release or the
+`jig validate` runs `<command> --version` with the agent's `env` mapping for
+each agent of runtime `opencode` or `pi` (once per distinct command and
+environment) and fails when the engine would refuse the release or the
 command cannot be run (see [Validation](workflows.md#validation)).
 
 A usage limit is usually detected by `agent-exec` during the engine's credential
