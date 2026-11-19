@@ -255,16 +255,24 @@ func (c *Collector) copyRuns(db *sql.DB, l rollup.Loop, schema rollup.Schema) er
 	}
 }
 
-// fillRunFiles sets the workflow file on runs stored before Jigz kept
+// fillRunFiles sets the workflow file and rule name on runs stored before Jigz kept
 // it, once per loop while Jigz runs.
 func (c *Collector) fillRunFiles(db *sql.DB, l rollup.Loop, last int64) error {
 	key := l.Repo + "/" + l.Loop
 	if c.filled[key] {
 		return nil
 	}
-	need, err := c.Store.NeedsRunFiles(l.Repo, l.Loop)
-	if err != nil || !need {
+	needFile, err := c.Store.NeedsRunFiles(l.Repo, l.Loop)
+	if err != nil {
 		return err
+	}
+	needRule, err := c.Store.NeedsRuleBackfill(l.Repo, l.Loop)
+	if err != nil {
+		return err
+	}
+	needRule = needRule && hasColumn(db, "run_history", "rule_name")
+	if !needFile && !needRule {
+		return nil
 	}
 	if c.filled == nil {
 		c.filled = map[string]bool{}
@@ -279,6 +287,9 @@ func (c *Collector) fillRunFiles(db *sql.DB, l rollup.Loop, last int64) error {
 			return err
 		}
 		after = runs[len(runs)-1].ID
+	}
+	if needRule {
+		return c.Store.MarkRuleBackfilled(l.Repo, l.Loop)
 	}
 	return nil
 }
@@ -298,7 +309,7 @@ func readRuns(db *sql.DB, after int64) ([]store.Run, error) {
 	rows, err := db.Query(`SELECT id, issue_id, COALESCE(NULLIF(display_identifier, ''), identifier), status,
 		started_at, completed_at, attempt, turns_completed, COALESCE(error, ''), agent_adapter,
 		input_tokens, output_tokens, total_tokens, cache_read_tokens, tokens_measured, `+
-		col("workflow_file")+`
+		col("workflow_file")+", "+col("rule_name")+`
 		FROM run_history WHERE id > ? ORDER BY id LIMIT ?`, after, batch)
 	if err != nil {
 		return nil, err
@@ -309,7 +320,7 @@ func readRuns(db *sql.DB, after int64) ([]store.Run, error) {
 		var r store.Run
 		if err := rows.Scan(&r.ID, &r.IssueID, &r.DisplayIdentifier, &r.Status, &r.StartedAt, &r.CompletedAt,
 			&r.Attempt, &r.TurnsCompleted, &r.Error, &r.AgentAdapter, &r.InputTokens, &r.OutputTokens,
-			&r.TotalTokens, &r.CacheReadTokens, &r.TokensMeasured, &r.WorkflowFile); err != nil {
+			&r.TotalTokens, &r.CacheReadTokens, &r.TokensMeasured, &r.WorkflowFile, &r.RuleName); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

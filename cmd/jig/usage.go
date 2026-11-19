@@ -12,7 +12,7 @@ import (
 	"github.com/kinged007/jigz/internal/store"
 )
 
-var usageGroups = []string{"project", "workflow", "model", "day"}
+var usageGroups = []string{"project", "workflow", "rule", "model", "day"}
 
 var usagePeriods = []string{"day", "week", "month", "custom"}
 
@@ -125,6 +125,12 @@ func runsHref(group string, g store.Group, from, to string) string {
 	case "workflow":
 		v.Set("project", g.Project)
 		v.Set("workflow", g.Workflow)
+	case "rule":
+		// An empty key is the "no rule" group; leaving the parameter
+		// off keeps the Runs page unfiltered.
+		if g.Key != "" {
+			v.Set("rule", g.Key)
+		}
 	case "model":
 		if g.Key != "" {
 			v.Set("model", g.Key)
@@ -175,6 +181,8 @@ func (a *app) fillUsage(d *usageData, f store.UsageFilter) error {
 	for _, g := range groups {
 		label := g.Key
 		switch {
+		case g.Key == "" && d.Group == "rule":
+			label = "no rule"
 		case g.Key == "" && d.Group == "model":
 			label = "unknown model"
 		case d.Group == "workflow":
@@ -249,7 +257,7 @@ func (a *app) apiUsage(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusBadRequest, "group must be "+strings.Join(usageGroups, ", "))
 		return
 	}
-	f := store.UsageFilter{Project: q.Get("project"), Workflow: q.Get("workflow"), Model: q.Get("model")}
+	f := store.UsageFilter{Project: q.Get("project"), Workflow: q.Get("workflow"), Rule: q.Get("rule"), Model: q.Get("model")}
 	f.Since = time.Now().UTC().AddDate(0, 0, -7).Format(tsLayout)
 	for name, dst := range map[string]*string{"since": &f.Since, "until": &f.Until} {
 		v := q.Get(name)
