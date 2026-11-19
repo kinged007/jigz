@@ -188,6 +188,12 @@ var migrations = []string{
 	ALTER TABLE question_items ADD COLUMN author_association TEXT NOT NULL DEFAULT '';
 	ALTER TABLE question_items ADD COLUMN created_at TEXT NOT NULL DEFAULT '';
 	ALTER TABLE questions ADD COLUMN asked_comment_id INTEGER NOT NULL DEFAULT 0;`,
+	`ALTER TABLE runs_cache ADD COLUMN rule_name TEXT NOT NULL DEFAULT '';`,
+	`CREATE TABLE rule_backfilled (
+		project  TEXT NOT NULL,
+		workflow TEXT NOT NULL,
+		PRIMARY KEY (project, workflow)
+	);`,
 }
 
 // Open opens dir/history.db, creating the directory and the database, and

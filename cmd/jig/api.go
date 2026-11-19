@@ -129,7 +129,7 @@ func (a *app) apiRuns(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	f := store.RunFilter{
-		Project: q.Get("project"), Workflow: q.Get("workflow"), State: q.Get("state"),
+		Project: q.Get("project"), Workflow: q.Get("workflow"), Rule: q.Get("rule"), State: q.Get("state"),
 		Since: q.Get("since"), Until: q.Get("until"), Q: q.Get("q"),
 	}
 	for name, v := range map[string]string{"since": f.Since, "until": f.Until} {
