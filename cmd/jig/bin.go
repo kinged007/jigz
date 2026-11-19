@@ -21,12 +21,19 @@ func resolveSortieBin() (string, error) {
 
 // writeEnvFile writes the resolved settings to .jigz/.env.loop so the
 // workflows can load them via --env-file without touching the user's env.
-func writeEnvFile(dir string, cfg *config.Config) (string, error) {
-	path := filepath.Join(dir, ".jigz", ".env.loop")
+// token is the tracker credential. A loop with its own tracker.api_key
+// passes its name and gets .jigz/.env.loop.<name>, so the shared file
+// keeps the credential of the defaults.
+func writeEnvFile(dir, loop string, cfg *config.Config, token string) (string, error) {
+	file := ".env.loop"
+	if loop != "" {
+		file += "." + loop
+	}
+	path := filepath.Join(dir, ".jigz", file)
 	body := "SORTIE_TRACKER_PROJECT=" + cfg.Tracker + "\n" +
 		"JIG_TRACKER_PROJECT=" + cfg.Tracker + "\n" +
 		"JIG_WORKSPACES=" + cfg.Workspaces + "\n" +
-		"SORTIE_TRACKER_API_KEY=" + cfg.Token + "\n"
+		"SORTIE_TRACKER_API_KEY=" + token + "\n"
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
 	}

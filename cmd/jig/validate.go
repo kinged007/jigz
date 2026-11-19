@@ -58,7 +58,9 @@ func collectValidateChecks(root string) ([]validateCheck, []string, []string) {
 		checks = append(checks, validateCheck{Name: "budgets", OK: true})
 	}
 	checks = append(checks, agentVersionChecks(cfg)...)
-	if err := cfg.CheckToken(); err != nil {
+	if err := cfg.CheckTrackerKeys(); err != nil {
+		checks = append(checks, validateCheck{Name: "tracker", OK: false, Error: err.Error()})
+	} else if err := cfg.CheckToken(); err != nil {
 		warnings = append(warnings, err.Error())
 	}
 	for name, b := range cfg.Budgets() {
@@ -250,7 +252,8 @@ func workflowValidateChecks(root string, cfg *config.Config) ([]validateCheck, [
 func runSortieValidate(bin, dir string, loop loopDef, cfg *config.Config) (string, error) {
 	env := os.Environ()
 	if cfg != nil {
-		env = append(env, cfg.Env()...)
+		token, _ := cfg.TrackerToken(cfg.TrackerDefaults)
+		env = append(env, cfg.Env(token)...)
 	} else {
 		// No config: supply dummy env so workflow syntax is validated
 		// without spurious tracker.api_key errors. Use a writable temp

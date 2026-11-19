@@ -70,7 +70,10 @@ func TestPreviousVersionMigratesToHubCursor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := old.AddRuns([]Run{hubRun("o/a", "issues", 1)}); err != nil {
+	if _, err := old.db.Exec(`INSERT INTO runs_cache (project, workflow, run_id, issue_id, display_identifier, status,
+		started_at, completed_at, attempt, turns_completed, agent_adapter, input_tokens, output_tokens, total_tokens,
+		cache_read_tokens, tokens_measured)
+		VALUES ('o/a', 'issues', 1, 'i', 'o/a#1', 'succeeded', '2026-10-24T10:00:00Z', '2026-10-24T10:05:00Z', 1, 0, 'mock', 0, 0, 0, 0, 0)`); err != nil {
 		t.Fatal(err)
 	}
 	if err := old.Close(); err != nil {
