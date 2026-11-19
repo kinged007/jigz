@@ -5,6 +5,7 @@
 .qfilters .fixed { display: flex; flex-direction: column; gap: .15rem; font-size: .92em; color: var(--mut); }
 .qfilters .fixed b { color: var(--fg); font-weight: 600; padding: .15rem 0; }
 .qanswer { display: block; margin: .5rem 0; }
+.qtext { white-space: pre-line; }
 .qanswer textarea { display: block; width: 100%; max-width: none; min-height: 7rem; margin-top: .25rem; box-sizing: border-box; }
 .nextscan { font-size: .85em; }
 .copied { font-size: .9em; color: var(--ok); }
@@ -50,9 +51,9 @@
     {{if gt $q.AskedCount 1}}<span class="muted">asked {{$q.AskedCount}} times</span>{{end}}
     {{with $q.AskedCommentURL}}<a href="{{.}}" target="_blank" rel="noopener noreferrer">{{if $q.FromBody}}description{{else}}question comment{{end}}</a>{{end}}
   </p>
-  <p>{{$q.Question.Question}}</p>
+  <p class="qtext">{{$q.Question.Question}}</p>
   {{if $q.AnsweredAt}}
-  {{with $q.Suggested}}<p><b>Suggested answer:</b> {{.}}</p>{{end}}
+  {{with $q.Suggested}}<p class="qtext"><b>Suggested answer:</b> {{.}}</p>{{end}}
   <p><b>Answer by {{$q.AnsweredBy}}:</b> {{$q.Answer}}{{with $q.AnswerCommentURL}} <a href="{{.}}" target="_blank" rel="noopener noreferrer">comment</a>{{end}}</p>
   {{end}}
   {{range $q.IgnoredAnswers}}<p class="muted">ignored: {{.Author}}{{with .CommentURL}} <a href="{{.}}" target="_blank" rel="noopener noreferrer">comment</a>{{end}}</p>{{end}}

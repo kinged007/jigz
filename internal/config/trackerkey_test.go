@@ -113,7 +113,7 @@ func TestWorkEntryAPIKeyAppliesToItsOwnLoop(t *testing.T) {
 	clearChain(t)
 	t.Setenv("GITHUB_TOKEN", "gh-token")
 	t.Setenv("TK_PRS", "prs-token")
-	cfg, err := loadWithConfig(t, "agents:\n  a: {runtime: pi}\nwork:\n  issues:\n    agent: a\n  prs:\n    agent: a\n    tracker:\n      api_key: {from_env: TK_PRS}\n", nil)
+	cfg, err := loadWithConfig(t, "agents:\n  a: {runtime: pi}\nwork:\n  issues:\n    agent: a\n    managed: false\n    query_filter: \"label:agent:build\"\n  prs:\n    agent: a\n    managed: false\n    query_filter: \"label:agent:review\"\n    tracker:\n      api_key: {from_env: TK_PRS}\n", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

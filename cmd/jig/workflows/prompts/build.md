@@ -226,16 +226,22 @@ gh issue edit {{ .issue.identifier }} --repo $JIG_TRACKER_PROJECT \
 
 ## Questions
 
-Ask a question when a decision needs a person's answer and you cannot reasonably choose. Put one block per question in the comment you post, as plain text in this form:
+Ask a question when a decision needs a person's answer and you cannot reasonably choose. Put exactly one question block in the comment you post, as plain text in this form:
 
 <!-- agent-question id="q-<short-id>" audience="product|project" blocking="true|false" resume="agent:build" -->
-**Question:** ...
-**Suggested answer:** ...
+**Question:**
+1. ...
+2. ...
+**Suggested answer:**
+1. ...
+2. ...
 <!-- /agent-question -->
+
+Put all your questions in that one block, numbered 1 to N. A single question uses the same block. Number the suggested answers to match: suggested answer 1 answers question 1. Do not leave a blank line inside the block. Never post a second block in the comment, and if you ask again, post a new comment with one block. The block has one `id`, `audience` and `blocking` value, which apply to all its questions.
 
 Do not wrap the block in a code fence: the parser ignores markers inside a fence.
 
-Before you end your turn, re-read the posted comment and confirm every block is intact: the opening marker with id, audience, blocking and resume, the Question and Suggested answer lines, and the closing marker, all outside any code fence. A malformed block parks the item until a person repairs it — the answer path never resumes it.
+Before you end your turn, re-read the posted comment and confirm the block is intact: the opening marker with id, audience, blocking and resume, the Question and Suggested answer lines, and the closing marker, all outside any code fence. A malformed block parks the item until a person repairs it — the answer path never resumes it.
 
 - `id` is `q-` plus a short unique id of letters, digits, `_` or `-`.
 - `audience` is `product` (scope, priority, user-facing behaviour) or `project` (technical approach, implementation, order of work).

@@ -68,7 +68,7 @@ func TestGateDecide(t *testing.T) {
 }
 
 const (
-	workPlan       = "work:\n  plan:\n    agent: [a]\n"
+	workPlan       = "work:\n  plan:\n    agent: [a]\n    query_filter: x\n    rules:\n      - { name: r, match: { labels: [x] }, prompt: p.md }\n"
 	agentsAB       = "agents:\n  a:\n    runtime: pi\n  b:\n    runtime: pi\n"
 	agentPlainA    = "agents:\n  a:\n    runtime: pi\n"
 	agentHoursA    = "agents:\n  a:\n    runtime: pi\n    schedule:\n      timezone: UTC\n      windows:\n        - {days: [mon, tue, wed, thu, fri, sat, sun], start: \"09:00\", end: \"11:00\"}\n"
@@ -95,11 +95,11 @@ func TestWorkGateDecide(t *testing.T) {
 		want   gateAction
 	}{
 		{
-			name: "an available candidate is picked in order", cfg: agentsAB + "work:\n  plan:\n    agent: [b, a]\n",
+			name: "an available candidate is picked in order", cfg: agentsAB + "work:\n  plan:\n    agent: [b, a]\n    query_filter: x\n    rules:\n      - { name: r, match: { labels: [x] }, prompt: p.md }\n",
 			now: now, loops: []gateLoop{{name: "plan", up: true}}, open: true, agent: "b", want: gateNone,
 		},
 		{
-			name: "an exhausted candidate is skipped", cfg: agentsAB + "work:\n  plan:\n    agent: [a, b]\n",
+			name: "an exhausted candidate is skipped", cfg: agentsAB + "work:\n  plan:\n    agent: [a, b]\n    query_filter: x\n    rules:\n      - { name: r, match: { labels: [x] }, prompt: p.md }\n",
 			st:  machine.State{Agents: map[string]machine.EntryState{"a": {ExhaustedUntil: now.Add(time.Hour)}}},
 			now: now, loops: []gateLoop{{name: "plan", up: true}}, open: true, agent: "b", want: gateNone,
 		},
@@ -138,39 +138,39 @@ func TestWorkGateDecide(t *testing.T) {
 		},
 		{
 			name: "all candidates outside their hours",
-			cfg:  "agents:\n  a:\n    runtime: pi\n    schedule:\n      timezone: UTC\n      windows:\n        - {days: [mon, tue, wed, thu, fri, sat, sun], start: \"09:00\", end: \"11:00\"}\n  b:\n    runtime: pi\n    schedule:\n      timezone: UTC\n      windows:\n        - {days: [mon, tue, wed, thu, fri, sat, sun], start: \"08:00\", end: \"10:00\"}\nwork:\n  plan:\n    agent: [a, b]\n",
+			cfg:  "agents:\n  a:\n    runtime: pi\n    schedule:\n      timezone: UTC\n      windows:\n        - {days: [mon, tue, wed, thu, fri, sat, sun], start: \"09:00\", end: \"11:00\"}\n  b:\n    runtime: pi\n    schedule:\n      timezone: UTC\n      windows:\n        - {days: [mon, tue, wed, thu, fri, sat, sun], start: \"08:00\", end: \"10:00\"}\nwork:\n  plan:\n    agent: [a, b]\n    query_filter: x\n    rules:\n      - { name: r, match: { labels: [x] }, prompt: p.md }\n",
 			now:  now, loops: []gateLoop{{name: "plan", up: true}},
 			agent: "a", reason: "agent a is outside its working hours", eta: time.Date(2026, 10, 22, 8, 0, 0, 0, time.UTC),
 			end: machine.EndFinish, want: gateStopIdle,
 		},
 		{
 			name: "all candidates exhausted",
-			cfg:  "agents:\n  a:\n    runtime: pi\n  b:\n    runtime: pi\nwork:\n  plan:\n    agent: [a, b]\n",
+			cfg:  "agents:\n  a:\n    runtime: pi\n  b:\n    runtime: pi\nwork:\n  plan:\n    agent: [a, b]\n    query_filter: x\n    rules:\n      - { name: r, match: { labels: [x] }, prompt: p.md }\n",
 			st: machine.State{Agents: map[string]machine.EntryState{
 				"a": {ExhaustedUntil: time.Date(2026, 10, 21, 14, 0, 0, 0, time.UTC)},
 				"b": {ExhaustedUntil: time.Date(2026, 10, 21, 15, 0, 0, 0, time.UTC)},
 			}},
 			now: now, loops: []gateLoop{{name: "plan", up: true}},
 			agent: "a", reason: reasonExhausted, eta: time.Date(2026, 10, 21, 14, 0, 0, 0, time.UTC),
-			end: machine.EndFinish, want: gateStopIdle,
+			end: machine.EndStop, want: gateStopNow,
 		},
 		{
 			name: "all from_env references unresolved",
-			cfg:  "agents:\n  a:\n    runtime: pi\n    env:\n      PLAN_TOKEN: {from_env: JIGZ_TEST_PLAN_TOKEN}\n  b:\n    runtime: pi\n    env:\n      PLAN_TOKEN: {from_env: JIGZ_TEST_PLAN_TOKEN}\nwork:\n  plan:\n    agent: [a, b]\n",
+			cfg:  "agents:\n  a:\n    runtime: pi\n    env:\n      PLAN_TOKEN: {from_env: JIGZ_TEST_PLAN_TOKEN}\n  b:\n    runtime: pi\n    env:\n      PLAN_TOKEN: {from_env: JIGZ_TEST_PLAN_TOKEN}\nwork:\n  plan:\n    agent: [a, b]\n    query_filter: x\n    rules:\n      - { name: r, match: { labels: [x] }, prompt: p.md }\n",
 			env:  map[string]string{"JIGZ_TEST_PLAN_TOKEN": ""},
 			now:  now, loops: []gateLoop{{name: "plan", up: true}}, agent: "a",
 			reason: reasonUnresolved, end: machine.EndFinish, want: gateStopIdle,
 		},
 		{
 			name: "all runtimes unregistered on the engine",
-			cfg:  "agents:\n  a:\n    runtime: claude-code\n  b:\n    runtime: claude-code\nwork:\n  plan:\n    agent: [a, b]\n",
+			cfg:  "agents:\n  a:\n    runtime: claude-code\n  b:\n    runtime: claude-code\nwork:\n  plan:\n    agent: [a, b]\n    query_filter: x\n    rules:\n      - { name: r, match: { labels: [x] }, prompt: p.md }\n",
 			gate: testGate("1.28.1", "github", "pi"),
 			now:  now, loops: []gateLoop{{name: "plan", up: true}}, agent: "a",
 			reason: reasonUnregistered, end: machine.EndFinish, want: gateStopIdle,
 		},
 		{
 			name: "the estimated start is the earliest of the three inputs",
-			cfg:  "agents:\n  a:\n    runtime: pi\n    schedule:\n      timezone: UTC\n      windows:\n        - {days: [mon, tue, wed, thu, fri, sat, sun], start: \"13:00\", end: \"18:00\"}\n  b:\n    runtime: pi\n" + "operating_hours:\n  timezone: UTC\n  windows:\n    - {days: [mon, tue, wed, thu, fri, sat, sun], start: \"15:00\", end: \"20:00\"}\nwork:\n  plan:\n    agent: [a, b]\n",
+			cfg:  "agents:\n  a:\n    runtime: pi\n    schedule:\n      timezone: UTC\n      windows:\n        - {days: [mon, tue, wed, thu, fri, sat, sun], start: \"13:00\", end: \"18:00\"}\n  b:\n    runtime: pi\n" + "operating_hours:\n  timezone: UTC\n  windows:\n    - {days: [mon, tue, wed, thu, fri, sat, sun], start: \"15:00\", end: \"20:00\"}\nwork:\n  plan:\n    agent: [a, b]\n    query_filter: x\n    rules:\n      - { name: r, match: { labels: [x] }, prompt: p.md }\n",
 			st: machine.State{Agents: map[string]machine.EntryState{
 				"b": {ExhaustedUntil: time.Date(2026, 10, 21, 14, 0, 0, 0, time.UTC)},
 			}},
@@ -506,8 +506,8 @@ func TestGateUnaccountedSessionsKeepTheLoopBusy(t *testing.T) {
 // The work entry's agent hours closing during a session: the loop goes
 // offline with a reason and an estimate, then starts again.
 func TestGateWorkEntryAgentHoursCloseAndReopen(t *testing.T) {
-	openCfg := "agents:\n  a:\n    runtime: pi\n    schedule:\n      timezone: UTC\n      windows:\n        - {days: [mon, tue, wed, thu, fri, sat, sun], start: \"00:00\", end: \"23:59\"}\nwork:\n  plan:\n    agent: a\n"
-	closedCfg := "agents:\n  a:\n    runtime: pi\n    schedule:\n      timezone: UTC\n      windows:\n        - {days: [mon, tue, wed, thu, fri, sat, sun], start: \"20:00\", end: \"21:00\"}\nwork:\n  plan:\n    agent: a\n"
+	openCfg := "agents:\n  a:\n    runtime: pi\n    schedule:\n      timezone: UTC\n      windows:\n        - {days: [mon, tue, wed, thu, fri, sat, sun], start: \"00:00\", end: \"23:59\"}\nwork:\n  plan:\n    agent: a\n    query_filter: x\n    rules:\n      - { name: r, match: { labels: [x] }, prompt: p.md }\n"
+	closedCfg := "agents:\n  a:\n    runtime: pi\n    schedule:\n      timezone: UTC\n      windows:\n        - {days: [mon, tue, wed, thu, fri, sat, sun], start: \"20:00\", end: \"21:00\"}\nwork:\n  plan:\n    agent: a\n    query_filter: x\n    rules:\n      - { name: r, match: { labels: [x] }, prompt: p.md }\n"
 	r := newGateRig(t, "")
 	r.sup.sessions = r.sup.loopSessions
 	r.setConfig(t, openCfg)
@@ -644,5 +644,44 @@ func TestAnAccountClosingBetweenDecisionAndStartHoldsTheLoop(t *testing.T) {
 	r.step(t, 0)
 	if r.sup.empty() {
 		t.Fatal("the account opening did not start the held loop")
+	}
+}
+
+// When every pool member is exhausted, the loop stops at once, even with
+// a session running, and starts again at the earliest reset.
+func TestGateExhaustedPoolStopsAndRestartsAtEarliestReset(t *testing.T) {
+	r := newGateRig(t, "")
+	r.sup.sessions = r.sup.loopSessions
+	r.setConfig(t, "agents:\n  a: {runtime: pi}\n  b: {runtime: pi}\nwork:\n  plan:\n    agent: [a, b]\n    query_filter: x\n    rules:\n      - { name: r, match: { labels: [x] }, prompt: p.md }\n")
+	r.step(t, time.Minute)
+	if r.sup.empty() {
+		t.Fatal("the loop did not start")
+	}
+	r.feed(t, dispatched7, tickBusy)
+	late, early := r.now.Add(3*time.Hour), r.now.Add(time.Hour)
+	statePath := machine.StatePath(r.root)
+	for name, until := range map[string]time.Time{"a": late, "b": early} {
+		if err := machine.MarkExhausted(statePath, name, until, "limit"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.sup.refreshState(r.now, true)
+	r.step(t, 0)
+	r.settle(t)
+	if !r.sup.empty() {
+		t.Fatal("an exhausted pool left the loop running")
+	}
+	w := r.workflow(t)
+	if w.State != "offline" || w.OfflineReason != reasonExhausted || w.ETA == nil || !w.ETA.Equal(early) {
+		t.Errorf("status %+v, want offline until %v", w, early)
+	}
+	r.now = early.Add(time.Second)
+	r.sup.refreshState(r.now, true)
+	r.step(t, 0)
+	if r.sup.empty() {
+		t.Fatal("the earliest reset did not start the loop")
+	}
+	if w := r.workflow(t); w.State != "running" || w.Agent != "b" {
+		t.Errorf("status after reset %+v, want running on b", w)
 	}
 }

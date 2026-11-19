@@ -16,9 +16,9 @@ import (
 )
 
 // stateReadEvery is how often state.json is read again. The agent-exec
-// processes of the loops write it, and a limit hit only needs to reach
-// the gate within a retry interval.
-const stateReadEvery = 10 * time.Second
+// processes of the loops write it, and a limit hit has to reach the gate
+// before the engine's first retry, about 10 seconds after a failure.
+const stateReadEvery = 2 * time.Second
 
 // Offline reasons of the work-entry gate. The machine gate keeps its own
 const (
@@ -145,7 +145,9 @@ func (in gateInputs) workView(res config.Resolved, now time.Time) loopView {
 	v := loopView{Agent: names[0], End: machine.EndFinish}
 	// The reason that closed the gate chooses the end behaviour: the
 	// first candidate whose only block is closed hours gives its
-	// schedule.end; every other closure ends with finish.
+	// schedule.end; exhaustion of every candidate stops the loop at once,
+	// because each retry would only use up a session; every other
+	// closure ends with finish.
 	for _, name := range names {
 		b := in.blockOf(name, over, now)
 		if b.hours && !b.exhausted && !b.refs && !b.runtime {
@@ -165,6 +167,7 @@ func (in gateInputs) workView(res config.Resolved, now time.Time) loopView {
 		switch {
 		case all.exhausted:
 			v.Reason = reasonExhausted
+			v.End = machine.EndStop
 		case all.refs:
 			v.Reason = reasonUnresolved
 		case all.runtime:
