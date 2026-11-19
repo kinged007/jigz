@@ -1,18 +1,18 @@
-# Release config for sortie-loop. The asset layout must match what
-# install.sh expects: sortie-loop_<version>_<os>_<arch>.tar.gz alongside
+# Release config for Jigz. The asset layout must match what
+# install.sh expects: jig_<version>_<os>_<arch>.tar.gz alongside
 # checksums.txt, served from the tag.
 version: 2
 
-project_name: sortie-loop
+project_name: jig
 
 before:
   hooks:
     - go mod tidy
 
 builds:
-  - id: sortie-loop
-    main: ./cmd/sortie-loop
-    binary: sortie-loop
+  - id: jig
+    main: ./cmd/jig
+    binary: jig
     env:
       - CGO_ENABLED=0
     goos:
@@ -54,7 +54,7 @@ changelog:
 release:
   github:
     owner: kinged007
-    name: sortie-loop
+    name: jigz
   name_template: "{{ .ProjectName }} {{ .Version }}"
 
 snapshot:

@@ -1,0 +1,777 @@
+package main
+
+import (
+	"bytes"
+	"io"
+	"io/fs"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
+	"testing"
+	"text/template"
+
+	"github.com/kinged007/jigz/internal/config"
+	"github.com/kinged007/jigz/internal/gen"
+	"github.com/kinged007/jigz/internal/machine"
+)
+
+func TestSetupSeedsLabelsIntoFreshConfig(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, ".jigz"), 0o755)
+	os.WriteFile(filepath.Join(root, ".jigz", "config.yaml"), []byte(configTemplateBody("o/r")), 0o644)
+	cfg, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Labels) != len(scaffoldLabels) {
+		t.Fatalf("labels = %d, want %d", len(cfg.Labels), len(scaffoldLabels))
+	}
+	for i, l := range scaffoldLabels {
+		if cfg.Labels[i] != l {
+			t.Errorf("label %d = %+v, want %+v", i, cfg.Labels[i], l)
+		}
+	}
+}
+
+// TestSetupSkeletonValidates checks that the fresh config setup writes
+// loads, resolves to the issues and prs loops with explicit queries and
+// rules, and renders managed documents from them.
+func TestSetupSkeletonValidates(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, ".jigz"), 0o755)
+	if err := os.WriteFile(filepath.Join(root, ".jigz", "config.yaml"), []byte(configTemplateBody("o/r")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("JIG_TRACKER_TOKEN", "test-token")
+	cfg, err := config.Load(root)
+	if err != nil {
+		t.Fatalf("fresh config does not load: %v", err)
+	}
+	resolved := cfg.Resolve()
+	if len(resolved) != 2 {
+		t.Fatalf("work entries = %d, want issues + prs", len(resolved))
+	}
+	p, _, err := gen.ProfileFor("kinged007/sortie", "v1.28.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantQuery := map[string]string{
+		"issues": "label:agent:plan,agent:plan-build,agent:build,agent:docs,in-progress -label:needs-human",
+		"prs":    "label:agent:review,agent:build,agent:merge,in-progress -label:needs-human",
+	}
+	wantRules := map[string][]string{
+		"issues": {"plan", "plan-build", "build", "docs", "build-chain"},
+		"prs":    {"review", "review-fix", "merge"},
+	}
+	for slug, names := range wantRules {
+		res, ok := resolved[slug]
+		if !ok {
+			t.Fatalf("no work.%s entry", slug)
+		}
+		if res.QueryFilter != wantQuery[slug] {
+			t.Errorf("work.%s query = %q, want %q", slug, res.QueryFilter, wantQuery[slug])
+		}
+		loops := gen.Split(res, cfg.Agents)
+		if len(loops) != 1 {
+			t.Fatalf("work.%s splits into %d loops, want 1", slug, len(loops))
+		}
+		if len(loops[0].Rules) != len(names) {
+			t.Fatalf("work.%s rules = %d, want %d", slug, len(loops[0].Rules), len(names))
+		}
+		for i, n := range names {
+			if loops[0].Rules[i].Name != n {
+				t.Errorf("work.%s rule %d = %q, want %q", slug, i, loops[0].Rules[i].Name, n)
+			}
+		}
+		text, err := gen.Render(p, loops[0], cfg.Agents, filepath.Join(root, "jig"), defaultPrompt)
+		if err != nil {
+			t.Fatalf("render work.%s: %v", slug, err)
+		}
+		if !gen.Managed(text) {
+			t.Errorf("work.%s document carries no generated marker", slug)
+		}
+	}
+	// The same root must promote both documents to disk, the way setup
+	// does after writing the fresh config.
+	docs, _, err := generateDocs(root)
+	if err != nil {
+		t.Fatalf("generateDocs: %v", err)
+	}
+	if _, err := ensurePrompts(root, docs); err != nil {
+		t.Fatalf("ensurePrompts: %v", err)
+	}
+	sum, err := promoteDocs(root, docs)
+	if err != nil {
+		t.Fatalf("promoteDocs: %v", err)
+	}
+	if len(sum.Generated) != 2 {
+		t.Fatalf("generated = %v, want issues + prs", sum.Generated)
+	}
+	for _, slug := range []string{"issues", "prs"} {
+		raw, err := os.ReadFile(filepath.Join(root, ".jigz", "workflows", "WORKFLOW."+slug+".md"))
+		if err != nil {
+			t.Fatalf("no generated WORKFLOW.%s.md: %v", slug, err)
+		}
+		if !gen.Managed(raw) {
+			t.Errorf("WORKFLOW.%s.md on disk carries no generated marker", slug)
+		}
+	}
+}
+
+func unmanagedConfig(slugs ...string) string {
+	body := retireBase + "work:\n"
+	for _, slug := range slugs {
+		body += "  " + slug + `:
+    managed: false
+    query_filter: "label:agent:build,in-progress -label:needs-human"
+    agent: builder
+    rules:
+      - { name: build, match: { labels: [agent:build] }, prompt: prompts/build.md }
+`
+	}
+	return body
+}
+
+func TestSyncPromptsKeepsEditsFillsGaps(t *testing.T) {
+	root := writeGenConfig(t, unmanagedConfig("issues"))
+	syncPrompts(root)
+	if _, err := os.Stat(filepath.Join(root, ".jigz", "workflows", "WORKFLOW.issues.md")); err == nil {
+		t.Fatal("setup installed a workflow document")
+	}
+	if _, err := os.Stat(filepath.Join(root, ".jigz", "workflows", "prompts", "docs.md")); err != nil {
+		t.Fatalf("setup did not install prompts: %v", err)
+	}
+	promptFile := filepath.Join(root, ".jigz", "workflows", "prompts", "docs.md")
+	os.WriteFile(promptFile, []byte("mine\n"), 0o644)
+	os.Remove(filepath.Join(root, ".jigz", "workflows", "prompts", "build.md"))
+	want := filepath.Join(root, ".jigz", "workflows", "WORKFLOW.issues.md")
+	if got := workflowPath(root, "WORKFLOW.issues.md"); got != want {
+		t.Fatalf("workflowPath = %q, want %q", got, want)
+	}
+	if got, _ := os.ReadFile(promptFile); string(got) != "mine\n" {
+		t.Error("sync overwrote local prompt edit")
+	}
+	if _, err := os.Stat(filepath.Join(root, ".jigz", "workflows", "prompts", "build.md")); err != nil {
+		t.Error("sync did not restore missing prompt file")
+	}
+}
+
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, _ := os.Pipe()
+	saved := os.Stderr
+	os.Stderr = w
+	fn()
+	w.Close()
+	os.Stderr = saved
+	out, _ := io.ReadAll(r)
+	return string(out)
+}
+
+func TestWarnStalePrompts(t *testing.T) {
+	root := t.TempDir()
+	syncPrompts(root)
+	if got := captureStderr(t, func() { warnStalePrompts(root) }); got != "" {
+		t.Errorf("shipped prompts warned: %q", got)
+	}
+	os.WriteFile(filepath.Join(root, ".jigz", "workflows", "prompts", "build.md"), []byte("old\n"), 0o644)
+	got := captureStderr(t, func() { warnStalePrompts(root) })
+	if strings.Count(got, "note:") != 1 || !strings.Contains(got, "prompts/build.md") {
+		t.Errorf("message = %q", got)
+	}
+}
+
+// questionPrompts maps each prompt that may ask a question to the labels its
+// question blocks may name as resume.
+var questionPrompts = map[string][]string{
+	"plan.md":       {"agent:plan", "agent:plan-build"},
+	"review.md":     {"agent:review"},
+	"build.md":      {"agent:build"},
+	"review-fix.md": {"agent:build"},
+	"docs.md":       {"agent:docs"},
+	"merge.md":      {"agent:merge"},
+}
+
+// questionExample is the example block every questions section shows, with
+// its resume attribute replaced by R.
+const questionExample = "\n\n<!-- agent-question id=\"q-<short-id>\" audience=\"product|project\" blocking=\"true|false\" resume=\"R\" -->\n" +
+	"**Question:**\n1. ...\n2. ...\n**Suggested answer:**\n1. ...\n2. ...\n<!-- /agent-question -->\n\n"
+
+var resumeAttr = regexp.MustCompile(`resume="([A-Za-z0-9:_-]+)"`)
+
+// questionsSection is the text between the "## Questions" heading and the next
+// "## " heading.
+func questionsSection(body string) (string, bool) {
+	i := strings.Index(body, "## Questions")
+	if i < 0 {
+		return "", false
+	}
+	rest := body[i+len("## Questions"):]
+	if j := strings.Index(rest, "\n## "); j >= 0 {
+		rest = rest[:j]
+	}
+	return rest, true
+}
+
+func TestPromptQuestionSection(t *testing.T) {
+	for name, want := range questionPrompts {
+		raw, err := embeddedWorkflows.ReadFile("workflows/prompts/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		section, ok := questionsSection(string(raw))
+		if !ok {
+			t.Errorf("%s: no ## Questions heading", name)
+			continue
+		}
+		for _, s := range []string{"<!-- agent-question", `resume="agent:`, "--add-label needs-human", "--comments",
+			"Do not wrap the block in a code fence", "author_association"} {
+			if !strings.Contains(section, s) {
+				t.Errorf("%s: questions section lacks %q", name, s)
+			}
+		}
+		status := "blocked"
+		if strings.HasPrefix(name, "review") {
+			status = "needs-human-review"
+		}
+		if !strings.Contains(section, `echo "`+status+`" > .sortie/status`) {
+			t.Errorf("%s: questions section does not write status %q", name, status)
+		}
+		if !strings.Contains(section, "gh issue view") && !strings.Contains(section, "gh pr view") {
+			t.Errorf("%s: questions section has no --comments read command", name)
+		}
+		if strings.Contains(section, "keep your trigger") {
+			t.Errorf("%s: questions section tells the agent to keep its trigger", name)
+		}
+		for _, label := range want {
+			if !strings.Contains(section, label) {
+				t.Errorf("%s: questions section does not name %q", name, label)
+			}
+		}
+		if strings.Contains(section, "```") {
+			t.Errorf("%s: questions section has a code fence", name)
+		}
+		if got := resumeAttr.ReplaceAllString(section, `resume="R"`); !strings.Contains(got, questionExample) {
+			t.Errorf("%s: questions section lacks the shared example block %q", name, questionExample)
+		}
+		for _, m := range resumeAttr.FindAllStringSubmatch(section, -1) {
+			if !slices.Contains(want, m[1]) {
+				t.Errorf("%s: resume %q not one of %v", name, m[1], want)
+			}
+		}
+	}
+}
+
+func TestPromptQuestionTemplatesParse(t *testing.T) {
+	entries, err := fs.ReadDir(embeddedWorkflows, "workflows/prompts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		raw, err := embeddedWorkflows.ReadFile("workflows/prompts/" + e.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := template.New(e.Name()).Parse(string(raw)); err != nil {
+			t.Errorf("%s: %v", e.Name(), err)
+		}
+	}
+}
+
+func loopNames(loops []loopDef) string {
+	var n []string
+	for _, l := range loops {
+		n = append(n, l.name)
+	}
+	return strings.Join(n, ",")
+}
+
+// withStdin runs fn with os.Stdin replaced by a pipe carrying input, so
+// confirmOverwrite is exercised on its real code path. Passing "" leaves
+// the write end closed, which is what a non-interactive run sees.
+func withStdin(t *testing.T, input string, fn func()) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if input != "" {
+		if _, err := w.WriteString(input); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.Close()
+	saved, savedReader := os.Stdin, promptIn
+	os.Stdin, promptIn = r, nil
+	defer func() { os.Stdin, promptIn = saved, savedReader }()
+	fn()
+}
+
+func TestEnsureGitignoreIgnoresSortieWholesale(t *testing.T) {
+	root := t.TempDir()
+	// Fresh repo: .gitignore is created with the wholesale entry only.
+	ensureGitignore(root)
+	raw, _ := os.ReadFile(filepath.Join(root, ".gitignore"))
+	if !strings.Contains(string(raw), ".jigz/\n") {
+		t.Fatalf(".gitignore = %q, want wholesale .jigz/ entry", raw)
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		for _, e := range oldGitignoreEntries {
+			if strings.TrimSpace(line) == e {
+				t.Errorf(".gitignore still has granular entry %q", e)
+			}
+		}
+	}
+	// Old granular scheme is migrated to wholesale on re-run.
+	os.WriteFile(filepath.Join(root, ".gitignore"),
+		[]byte("node_modules\n"+strings.Join(oldGitignoreEntries, "\n")+"\n"), 0o644)
+	ensureGitignore(root)
+	raw, _ = os.ReadFile(filepath.Join(root, ".gitignore"))
+	if !strings.Contains(string(raw), "node_modules\n") {
+		t.Errorf("existing entries lost: %q", raw)
+	}
+	if !strings.Contains(string(raw), ".jigz/\n") {
+		t.Errorf("no wholesale entry after migration: %q", raw)
+	}
+	// Selective tracking (negations) is left alone; a missing db ignore
+	// is added, exactly once.
+	os.WriteFile(filepath.Join(root, ".gitignore"),
+		[]byte(".jigz/*\n!.jigz/config.yaml\n"), 0o644)
+	ensureGitignore(root)
+	raw, _ = os.ReadFile(filepath.Join(root, ".gitignore"))
+	if strings.Contains(string(raw), ".jigz/\n") {
+		t.Errorf("selective gitignore overwritten: %q", raw)
+	}
+	const wantSelective = ".jigz/*\n!.jigz/config.yaml\njigz-*.db\n"
+	if string(raw) != wantSelective {
+		t.Errorf("selective gitignore = %q, want original lines plus one jigz-*.db", raw)
+	}
+	ensureGitignore(root)
+	if raw, _ = os.ReadFile(filepath.Join(root, ".gitignore")); string(raw) != wantSelective {
+		t.Errorf("second run changed the selective gitignore: %q", raw)
+	}
+}
+
+func TestEnsureGitignoreJSONAppendsDBIgnore(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ".gitignore")
+	if err := os.WriteFile(path, []byte(".jigz/*\n!.jigz/config.yaml\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const want = ".jigz/*\n!.jigz/config.yaml\njigz-*.db\n"
+	res := &setupResult{}
+	ensureGitignoreJSON(root, res)
+	raw, _ := os.ReadFile(path)
+	if string(raw) != want {
+		t.Errorf("selective gitignore = %q, want original lines plus one jigz-*.db", raw)
+	}
+	if len(res.Created) != 1 || res.Created[0].Kind != "gitignore" {
+		t.Errorf("created = %+v, want one gitignore entry", res.Created)
+	}
+	res = &setupResult{}
+	ensureGitignoreJSON(root, res)
+	raw, _ = os.ReadFile(path)
+	if string(raw) != want {
+		t.Errorf("second run changed the selective gitignore: %q", raw)
+	}
+	if len(res.Skipped) != 1 || res.Skipped[0].Reason != "selective-tracked" {
+		t.Errorf("skipped = %+v, want one selective-tracked entry", res.Skipped)
+	}
+	if len(res.Warnings) != 0 {
+		t.Errorf("warnings = %v, want none", res.Warnings)
+	}
+}
+
+// JIG_ENGINE_BIN wins over every other source. setup resolves the engine the
+// same way the run path does, so a user who set it keeps their own binary
+// instead of having a second engine downloaded and linked beside it.
+func TestResolveSortieBinPrefersEnv(t *testing.T) {
+	mine := filepath.Join(t.TempDir(), "sortie")
+	if err := os.WriteFile(mine, []byte("mine"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("JIG_ENGINE_BIN", mine)
+
+	got, err := resolveSortieBin()
+	if err != nil {
+		t.Fatalf("resolveSortieBin: %v", err)
+	}
+	if got != mine {
+		t.Errorf("got %q, want %q", got, mine)
+	}
+}
+
+// setup must resolve the engine the same way the run path does. It called
+// ensureEngine directly, so a user who set JIG_ENGINE_BIN had a second engine
+// downloaded and linked onto PATH beside the one they chose.
+func TestSetupHonoursSortieBin(t *testing.T) {
+	mine := filepath.Join(t.TempDir(), "sortie")
+	if err := os.WriteFile(mine, []byte("mine"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("JIG_ENGINE_BIN", mine)
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := captureStdout(t, func() {
+		// setup continues into label sync, which needs gh and a token and
+		// will fatal. The engine step runs before that, which is all this
+		// is checking, so the failure past it is expected.
+		defer func() { recover() }()
+		runSetup(repo, "owner/name", false, false)
+	})
+	if strings.Contains(out, "engine not installed") {
+		t.Errorf("setup downloaded an engine despite JIG_ENGINE_BIN:\n%s", out)
+	}
+}
+
+// captureStdout runs fn with os.Stdout redirected to a pipe and returns
+// what it printed.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdout
+	os.Stdout = w
+	done := make(chan string, 1)
+	go func() {
+		b, _ := io.ReadAll(r)
+		done <- string(b)
+	}()
+	fn()
+	os.Stdout = old
+	w.Close()
+	s := <-done
+	r.Close()
+	return s
+}
+
+func TestDiscoverWorkflowsPicksUpNewFile(t *testing.T) {
+	root := writeGenConfig(t, unmanagedConfig("issues", "prs", "triage"))
+	writeLoopDoc(t, root, "issues", "---\n")
+	writeLoopDoc(t, root, "prs", "---\n")
+	// A hand-added workflow (no rebuild, no code change) is discovered.
+	os.WriteFile(filepath.Join(root, ".jigz", "workflows", "WORKFLOW.triage.md"), []byte("---\n"), 0o644)
+	// Non-workflow files are ignored.
+	os.WriteFile(filepath.Join(root, ".jigz", "workflows", "notes.md"), []byte("x"), 0o644)
+	got := discoverWorkflows(root)
+	var names []string
+	for _, l := range got {
+		names = append(names, l.name)
+	}
+	want := []string{"issues", "prs", "triage"}
+	if strings.Join(names, ",") != strings.Join(want, ",") {
+		t.Errorf("discoverWorkflows = %v, want %v", names, want)
+	}
+	if got[len(got)-1].file != "WORKFLOW.triage.md" {
+		t.Errorf("triage file = %q", got[len(got)-1].file)
+	}
+}
+
+func TestSelectLoops(t *testing.T) {
+	all := []loopDef{{"build", "WORKFLOW.build.md"}, {"merge", "WORKFLOW.merge.md"}, {"plan", "WORKFLOW.plan.md"}}
+	names := func(ls []loopDef) string {
+		var n []string
+		for _, l := range ls {
+			n = append(n, l.name)
+		}
+		return strings.Join(n, ",")
+	}
+	// Unset/blank keeps every loop, in discovery order: a plain run is
+	// unaffected by the selector.
+	for _, only := range []string{"", "   "} {
+		got, err := selectLoops(all, only)
+		if err != nil || names(got) != "build,merge,plan" {
+			t.Errorf("selectLoops(%q) = %v, %v; want all", only, names(got), err)
+		}
+	}
+	// A subset keeps discovery order, not the order requested, and
+	// carries the file through so the caller runs the right one.
+	got, err := selectLoops(all, " merge , build ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if names(got) != "build,merge" || got[1].file != "WORKFLOW.merge.md" {
+		t.Errorf("selectLoops = %v %q, want build,merge with merge's file", names(got), got[1].file)
+	}
+	// An unknown name is fatal even alongside known ones: starting the
+	// rest would leave the asked-for loop's work unwatched.
+	for _, only := range []string{"build,triage", "triage", "plan,build,review", ",", " , "} {
+		if _, err := selectLoops(all, only); err == nil {
+			t.Errorf("selectLoops(%q) = nil error, want an error", only)
+		}
+	}
+	// Discovery order is preserved, not the requested order.
+	if got, err := selectLoops(all, "plan,build"); err != nil || names(got) != "build,plan" {
+		t.Errorf("selectLoops = %v, %v; want build,plan in discovery order", names(got), err)
+	}
+}
+
+// TestSelectLoopsAgainstInstalledWorkflows pins the selector to the
+// workflows setup actually installs, so a renamed or dropped loop is
+// caught here rather than by a supervisor that names it.
+func TestSelectLoopsAgainstInstalledWorkflows(t *testing.T) {
+	root := writeGenConfig(t, unmanagedConfig("issues", "prs"))
+	writeLoopDoc(t, root, "issues", "---\n")
+	writeLoopDoc(t, root, "prs", "---\n")
+	all := discoverWorkflows(root)
+	if got, err := selectLoops(all, ""); err != nil || len(got) != len(all) {
+		t.Fatalf("selectLoops(\"\") = %d loops, %v; want %d", len(got), err, len(all))
+	}
+	var want []string
+	for _, l := range all {
+		want = append(want, l.name)
+	}
+	got, err := selectLoops(all, strings.Join(want, ","))
+	if err != nil {
+		t.Fatalf("selectLoops(all names) = %v; every installed loop must be selectable", err)
+	}
+	if len(got) != len(all) {
+		t.Errorf("selectLoops(all names) = %d loops, want %d", len(got), len(all))
+	}
+}
+
+// An engine in the same directory as the link destination must not be
+// rewritten as a symlink to itself, which would leave a binary that can
+// never run.
+func TestEnsureSortieLinkDoesNotDestroyTheEngineBesideIt(t *testing.T) {
+	dir := t.TempDir()
+	engine := filepath.Join(dir, "sortie")
+	body := []byte("#!/bin/sh\necho engine\n")
+	if err := os.WriteFile(engine, body, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A real engine binary at the exact path ensureSortieLink would link.
+	if err := os.WriteFile(filepath.Join(dir, "sortie"), body, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("JIG_ENGINE_BIN", engine)
+	t.Setenv("PATH", dir)
+
+	ensureSortieLinkIn(dir)
+	got, err := os.ReadFile(filepath.Join(dir, "sortie"))
+	if err != nil {
+		t.Fatalf("engine is unreadable: %v", err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Errorf("engine at %s was replaced: %q", dir, got)
+	}
+	info, err := os.Lstat(filepath.Join(dir, "sortie"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Error("engine became a symlink to itself")
+	}
+}
+
+// A genuine second location still gets the convenience link, and an
+// existing correct link is left alone rather than recreated.
+func TestEnsureSortieLinkLinksADistinctEngine(t *testing.T) {
+	dir := t.TempDir()
+	loops := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(loops, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	engine := filepath.Join(dir, "elsewhere", "sortie")
+	if err := os.MkdirAll(filepath.Dir(engine), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(engine, []byte("engine"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("JIG_ENGINE_BIN", engine)
+
+	ensureSortieLinkIn(loops)
+	link := filepath.Join(loops, "sortie")
+	cur, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("no link created at %s: %v", link, err)
+	}
+	if cur != engine {
+		t.Errorf("link = %q, want %q", cur, engine)
+	}
+	// Idempotent: a second call must not fail or change the link.
+	ensureSortieLinkIn(loops)
+	again, err := os.Readlink(link)
+	if err != nil || again != engine {
+		t.Errorf("second call changed the link: %q %v", again, err)
+	}
+}
+
+func TestSamePath(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a")
+	if err := os.WriteFile(a, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(a, link); err != nil {
+		t.Fatal(err)
+	}
+	if !samePath(a, link) {
+		t.Error("a and a symlink to it are the same file")
+	}
+	if !samePath(a, a) {
+		t.Error("a path is the same as itself")
+	}
+	if samePath(a, filepath.Join(dir, "missing")) {
+		t.Error("a missing path is the same as a")
+	}
+}
+
+// The shared registry is keyed by repo identity, and a supervisor
+// filters and groups it by owner/name. A state directory is not a git
+// checkout, so the git remote lookup fails and the old fallback kept
+// only filepath.Base: the registry said "myxon-beta" where every caller
+// keys on "kinged007/myxon-beta", and the match silently found nothing.
+// The repo: written into .jigz/config.yaml is authoritative.
+func TestRepoNameUsesTheConfiguredSlugForANonCheckout(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "repos", "kinged007", "myxon-beta")
+	if err := os.MkdirAll(filepath.Join(root, ".jigz"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "repo: kinged007/myxon-beta\ntoken: \"\"\n"
+	if err := os.WriteFile(filepath.Join(root, ".jigz", "config.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// No git remote here, which is the whole point.
+	if got := guessRepo(root); got != "" {
+		t.Fatalf("guessRepo = %q, want empty for a non-checkout", got)
+	}
+	if got := repoName(root); got != "kinged007/myxon-beta" {
+		t.Errorf("repoName = %q, want the configured slug", got)
+	}
+}
+
+// A real checkout still resolves through the git remote.
+func TestRepoNameStillUsesTheGitRemote(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".jigz"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range [][]string{
+		{"init", "-q", "-b", "main"},
+		{"remote", "add", "origin", "https://github.com/kinged007/from-remote.git"},
+	} {
+		cmd := exec.Command("git", append([]string{"-C", root}, c...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Skipf("git %v: %v %s", c, err, out)
+		}
+	}
+	if got := repoName(root); got != "kinged007/from-remote" {
+		t.Errorf("repoName = %q, want the slug from the git remote", got)
+	}
+}
+
+// With nothing to go on, the basename is still the best answer.
+func TestRepoNameFallsBackToTheBasename(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "just-a-dir")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := repoName(root); got != "just-a-dir" {
+		t.Errorf("repoName = %q, want the basename", got)
+	}
+}
+
+func shippedWorkflowFiles(t *testing.T) map[string]string {
+	t.Helper()
+	files := map[string]string{}
+	err := fs.WalkDir(embeddedWorkflows, "workflows", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		raw, err := embeddedWorkflows.ReadFile(p)
+		files[p] = string(raw)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files
+}
+
+func TestShippedWorkflowsHaveNoHomePath(t *testing.T) {
+	for p, body := range shippedWorkflowFiles(t) {
+		if strings.Contains(body, "/home/") {
+			t.Errorf("%s contains an absolute home path", p)
+		}
+	}
+}
+
+func TestShippedWorkflowsHardCodeNoBaseBranch(t *testing.T) {
+	re := regexp.MustCompile(`--base[ =]+(main|master)\b|origin/(main|master)\b`)
+	for p, body := range shippedWorkflowFiles(t) {
+		if m := re.FindString(body); m != "" {
+			t.Errorf("%s hard-codes a base branch: %q", p, m)
+		}
+	}
+}
+
+func TestEnsureMachineFileCreatesDefaults(t *testing.T) {
+	d := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(d, "config"))
+	path, created, err := ensureMachineFile()
+	if err != nil || !created {
+		t.Fatalf("ensure = %q %v %v, want created", path, created, err)
+	}
+	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("mode = %v, %v", fi.Mode(), err)
+	}
+	cfg, err := machine.Load(path)
+	if err != nil {
+		t.Fatalf("template does not load: %v", err)
+	}
+	if len(cfg.Pool) != 0 || len(cfg.Dashboard.Hide.Pages) != 0 || len(cfg.Dashboard.Hide.Sections) != 0 {
+		t.Fatalf("template is not defaults: %+v", cfg)
+	}
+	for _, line := range strings.Split(machineTemplateBody(), "\n") {
+		if strings.HasPrefix(line, "engine:") {
+			t.Fatalf("template pins a live engine block; the default moves with the binary")
+		}
+	}
+	if _, created, err := ensureMachineFile(); err != nil || created {
+		t.Fatalf("second ensure = %v %v, want exists", created, err)
+	}
+	custom := "connected:\n  idle_timeout: 20m\n"
+	if err := os.WriteFile(path, []byte(custom), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, created, err := ensureMachineFile(); err != nil || created {
+		t.Fatalf("existing file must be left alone: %v %v", created, err)
+	}
+	if raw, _ := os.ReadFile(path); string(raw) != custom {
+		t.Fatalf("existing file was overwritten: %q", raw)
+	}
+}
+
+func TestStrayWorkflowFilesAreNotStarted(t *testing.T) {
+	root := writeGenConfig(t, unmanagedConfig("ops"))
+	writeLoopDoc(t, root, "ops", "---\n# ops\n")
+	stray := writeLoopDoc(t, root, "issues", "---\n# stray\n")
+	if got := loopNames(discoverWorkflows(root)); got != "ops" {
+		t.Errorf("discoverWorkflows = %s, want ops only", got)
+	}
+	if !exists(stray) {
+		t.Error("stray workflow file was deleted")
+	}
+}
+
+func TestConfiguredOnlyKeepsSplitEntryLoops(t *testing.T) {
+	root := writeGenConfig(t, retireBase+retireSplitWork)
+	for _, name := range []string{"issues-builder", "issues-light", "prs"} {
+		writeLoopDoc(t, root, name, "---\n# doc\n")
+	}
+	if got := loopNames(discoverWorkflows(root)); got != "issues-builder,issues-light" {
+		t.Errorf("discoverWorkflows = %s, want issues-builder,issues-light", got)
+	}
+}

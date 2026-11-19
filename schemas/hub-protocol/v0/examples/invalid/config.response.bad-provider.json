@@ -1,0 +1,1 @@
+{"member": {"login": "octo"}, "projects": [{"provider": "gitlab", "repo": "acme/widgets", "workflows": ["issues"], "filter_additions": ""}], "files": [], "labels": []}

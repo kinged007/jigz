@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kinged007/jigz/schemas/hub-protocol/v0/error.schema.json",
+  "title": "HTTP error response body",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["code", "message"],
+  "properties": {
+    "code": {"enum": ["invalid", "unsupported_version", "unauthorized", "forbidden", "not_found", "unavailable", "internal"]},
+    "message": {"type": "string", "description": "For logs; never parsed."},
+    "supported": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["min", "max"],
+      "properties": {
+        "min": {"type": "integer", "minimum": 0, "description": "Lowest supported protocol major version."},
+        "max": {"type": "integer", "minimum": 0, "description": "Highest supported protocol major version."}
+      }
+    }
+  },
+  "if": {"properties": {"code": {"const": "unsupported_version"}}},
+  "then": {"required": ["supported"]},
+  "else": {"not": {"required": ["supported"]}}
+}

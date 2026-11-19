@@ -1,0 +1,226 @@
+package main
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/kinged007/jigz/internal/config"
+	"github.com/kinged007/jigz/internal/engine"
+	"github.com/kinged007/jigz/internal/gen"
+	"github.com/kinged007/jigz/internal/plan"
+)
+
+// validateCheck is one validation result.
+type validateCheck struct {
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Error  string `json:"error,omitempty"`
+	Output string `json:"output,omitempty"`
+}
+
+// collectValidateChecks runs repo-config checks and the engine's validation on
+// each workflow. It returns the checks, the workflow file list, and warnings.
+func collectValidateChecks(root string) ([]validateCheck, []string, []string) {
+	var checks []validateCheck
+	var warnings []string
+
+	cfg, err := config.Load(root)
+	if err != nil {
+		checks = append(checks, validateCheck{Name: "config", OK: false, Error: err.Error()})
+		// Without a loaded config, the remaining repo checks cannot run;
+		// still try workflow validation.
+		wfChecks, files := workflowValidateChecks(root, nil)
+		checks = append(checks, wfChecks...)
+		return checks, files, warnings
+	}
+	checks = append(checks, validateCheck{Name: "config", OK: true})
+
+	checks = append(checks, engineProfileCheck(cfg))
+	checks = append(checks, generationChecks(root)...)
+	checks = append(checks, loopsCheck(root, cfg), promptsCheck(root, cfg))
+
+	if err := cfg.CheckCleanup(); err != nil {
+		checks = append(checks, validateCheck{Name: "cleanup", OK: false, Error: err.Error()})
+	} else {
+		checks = append(checks, validateCheck{Name: "cleanup", OK: true})
+	}
+	if err := cfg.CheckBudgets(); err != nil {
+		checks = append(checks, validateCheck{Name: "budgets", OK: false, Error: err.Error()})
+	} else {
+		checks = append(checks, validateCheck{Name: "budgets", OK: true})
+	}
+	if err := cfg.CheckToken(); err != nil {
+		warnings = append(warnings, err.Error())
+	}
+	for name, b := range cfg.Budgets() {
+		if b.MaxUSD > 0 {
+			warnings = append(warnings, fmt.Sprintf("work.%s.budget.max_usd is ignored: the engine records no cost per run", name))
+		}
+	}
+
+	wfChecks, files := workflowValidateChecks(root, cfg)
+	checks = append(checks, wfChecks...)
+	return checks, files, warnings
+}
+
+// engineProfileCheck resolves every work entry against the engine
+// profile table: an unsupported engine or a version older than the
+// minimum fails, a version newer than the newest entry warns that the
+// release has no contract tests.
+func engineProfileCheck(cfg *config.Config) validateCheck {
+	resolved := cfg.Resolve()
+	if len(resolved) == 0 {
+		return validateCheck{Name: "engine", OK: true}
+	}
+	seen := map[string]bool{}
+	for _, slug := range sortedKeys(resolved) {
+		res := resolved[slug]
+		key := res.Engine.Repo + "@" + res.Engine.Version
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		p, _, err := gen.ProfileFor(res.Engine.Repo, res.Engine.Version)
+		if err != nil {
+			return validateCheck{Name: "engine", OK: false, Error: fmt.Sprintf("work.%s: %v", slug, err)}
+		}
+		if res.Engine.Version != "" && res.Engine.Version != p.Version {
+			return validateCheck{Name: "engine", OK: true, Output: fmt.Sprintf("work.%s: engine %s has no contract tests; using the %s profile", slug, key, p.Version)}
+		}
+	}
+	return validateCheck{Name: "engine", OK: true}
+}
+
+// generationChecks compares a dry generation with the files on disk:
+// a hand edit in a managed document is drift and fails.
+func generationChecks(root string) []validateCheck {
+	reports, err := driftReports(root)
+	if err != nil {
+		return []validateCheck{{Name: "generation", OK: false, Error: err.Error()}}
+	}
+	names := make([]string, 0, len(reports))
+	for n := range reports {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	var checks []validateCheck
+	for _, n := range names {
+		switch r := reports[n]; {
+		case r == "":
+			checks = append(checks, validateCheck{Name: "generation:" + n, OK: true})
+		case r == "unmanaged":
+			checks = append(checks, validateCheck{Name: "generation:" + n, OK: true, Output: "unmanaged: Jigz neither generates nor overwrites this document"})
+		case strings.HasPrefix(r, "offline:"):
+			checks = append(checks, validateCheck{Name: "generation:" + n, OK: true, Output: r + ": the loop stays offline and Jigz leaves its document alone"})
+		default:
+			checks = append(checks, validateCheck{Name: "generation:" + n, OK: false, Error: r})
+		}
+	}
+	return checks
+}
+
+func listWorkflows(root string) []loopDef {
+	dir := filepath.Join(root, ".jigz", "workflows")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var loops []loopDef
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasPrefix(name, "WORKFLOW.") || !strings.HasSuffix(name, ".md") {
+			continue
+		}
+		stem := strings.TrimSuffix(strings.TrimPrefix(name, "WORKFLOW."), ".md")
+		loops = append(loops, loopDef{stem, name})
+	}
+	return loops
+}
+
+func workflowValidateChecks(root string, cfg *config.Config) ([]validateCheck, []string) {
+	loops := listWorkflows(root)
+	var files []string
+	for _, l := range loops {
+		files = append(files, l.file)
+	}
+	if len(loops) == 0 {
+		return []validateCheck{{Name: "workflows", OK: false, Error: fmt.Sprintf("no WORKFLOW.*.md files in %s", filepath.Join(root, ".jigz", "workflows"))}}, files
+	}
+
+	bin, err := resolveSortieBin()
+	if err != nil {
+		var checks []validateCheck
+		for _, l := range loops {
+			checks = append(checks, validateCheck{Name: "workflow:" + l.file, OK: false, Error: err.Error()})
+		}
+		return checks, files
+	}
+
+	var checks []validateCheck
+	dir := filepath.Join(root, ".jigz", "workflows")
+	for _, l := range loops {
+		out, err := runSortieValidate(bin, dir, l, cfg)
+		name := "workflow:" + l.file
+		if err != nil {
+			checks = append(checks, validateCheck{Name: name, OK: false, Error: err.Error(), Output: out})
+		} else {
+			c := validateCheck{Name: name, OK: true}
+			if out != "" {
+				c.Output = out
+			}
+			checks = append(checks, c)
+		}
+	}
+	return checks, files
+}
+
+func runSortieValidate(bin, dir string, loop loopDef, cfg *config.Config) (string, error) {
+	env := os.Environ()
+	if cfg != nil {
+		env = append(env, cfg.Env()...)
+	} else {
+		// No config: supply dummy env so workflow syntax is validated
+		// without spurious tracker.api_key errors. Use a writable temp
+		// workspace so workspace.root_writable passes.
+		fallbackWS := filepath.Join(os.TempDir(), "jigz-validate", "workspaces")
+		_ = os.MkdirAll(fallbackWS, 0o755)
+		env = append(env,
+			"SORTIE_TRACKER_PROJECT=owner/name",
+			"SORTIE_TRACKER_API_KEY=test",
+			"JIG_WORKSPACES="+fallbackWS,
+		)
+	}
+	if text, err := os.ReadFile(filepath.Join(dir, loop.file)); err == nil {
+		lg := plan.GateLoop(engine.Detect(bin), string(text), env)
+		switch {
+		case lg.Problem:
+			return "", errors.New(lg.Off)
+		case lg.Off != "":
+			return "disabled: " + lg.Off, nil
+		}
+	}
+	cmd := exec.Command(bin, "validate", loop.file)
+	cmd.Dir = dir
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	return dropRuntimeBlockWarnings(string(out)), err
+}
+
+func dropRuntimeBlockWarnings(out string) string {
+	lines := strings.Split(out, "\n")
+	keep := lines[:0]
+	for _, line := range lines {
+		if rest, ok := strings.CutPrefix(line, "warning: "); ok {
+			if check, msg, ok := strings.Cut(rest, ": "); ok && plan.IsRuntimeBlockWarning(check, msg) {
+				continue
+			}
+		}
+		keep = append(keep, line)
+	}
+	return strings.Join(keep, "\n")
+}

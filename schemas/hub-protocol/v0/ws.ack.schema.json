@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kinged007/jigz/schemas/hub-protocol/v0/ws.ack.schema.json",
+  "title": "WebSocket command acknowledgement (daemon to hub)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "type", "ok"],
+  "properties": {
+    "id": {"type": "string", "minLength": 1, "maxLength": 200, "description": "The id of the command it answers."},
+    "type": {"const": "ack"},
+    "ok": {"type": "boolean"},
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {"enum": ["unsupported", "invalid", "failed"]},
+        "message": {"type": "string"}
+      }
+    }
+  },
+  "if": {"properties": {"ok": {"const": true}}},
+  "then": {"not": {"required": ["error"]}},
+  "else": {"required": ["error"]}
+}

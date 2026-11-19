@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kinged007/jigz/schemas/hub-protocol/v0/status.request.schema.json",
+  "title": "POST status request (heartbeat)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["time", "paused", "loops", "capacity", "hours", "accounts"],
+  "properties": {
+    "time": {"type": "string", "format": "date-time"},
+    "paused": {"type": "boolean"},
+    "loops": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["project", "workflow", "state", "running", "retrying", "files"],
+        "properties": {
+          "project": {"type": "string", "pattern": "^(?!\\.{1,2}/)(?!.*/\\.{1,2}$)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+          "workflow": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"},
+          "state": {"enum": ["running", "sleeping", "stopped"]},
+          "detail": {"enum": ["paused", "held", "disabled", "exited", "stopping"]},
+          "reason": {"type": "string", "minLength": 1},
+          "running": {"type": "integer", "minimum": 0},
+          "retrying": {"type": "integer", "minimum": 0},
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path", "sha256"],
+              "properties": {
+                "path": {"type": "string", "pattern": "^(?!.*\\.db(-wal|-shm)?$)(WORKFLOW\\.[A-Za-z0-9][A-Za-z0-9_-]*\\.md|prompts(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)+)$"},
+                "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+              }
+            }
+          },
+          "budget": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["period", "max_tokens", "used_tokens"],
+            "properties": {
+              "period": {"type": "string", "minLength": 1},
+              "max_tokens": {"type": "integer", "minimum": 1},
+              "used_tokens": {"type": "integer", "minimum": 0}
+            }
+          }
+        }
+      }
+    },
+    "capacity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_sessions", "running_sessions"],
+      "properties": {
+        "max_sessions": {"type": "integer", "minimum": 0, "description": "Sum of max_concurrent_agents over the enabled loops."},
+        "running_sessions": {"type": "integer", "minimum": 0}
+      }
+    },
+    "hours": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["open"],
+      "properties": {
+        "open": {"type": "boolean", "description": "Inside working hours now; true when no hours are set."},
+        "next_change": {"type": "string", "format": "date-time"}
+      }
+    },
+    "accounts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "runtime", "available"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "runtime": {"type": "string", "minLength": 1},
+          "available": {"type": "boolean"},
+          "exhausted_until": {"type": "string", "format": "date-time"}
+        },
+        "if": {"properties": {"available": {"const": true}}},
+        "then": {"not": {"required": ["exhausted_until"]}},
+        "else": {"required": ["exhausted_until"]}
+      }
+    },
+    "last_error": {"type": "string", "minLength": 1, "description": "Latest validation, child or hub error, redacted."}
+  }
+}

@@ -1,0 +1,1 @@
+{"time": "2026-10-24T10:00:00Z", "paused": false, "loops": [{"project": "acme/widgets", "workflow": "issues", "state": "paused", "running": 0, "retrying": 0, "files": []}], "capacity": {"max_sessions": 1, "running_sessions": 0}, "hours": {"open": true}, "accounts": []}

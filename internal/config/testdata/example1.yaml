@@ -1,0 +1,23 @@
+repo: owner/repo
+engine: { repo: kinged007/sortie, version: v1.28.1 }
+operating_hours: {}               # omitted or empty = 24/7
+tracker: { kind: github, api_key: { from_env: JIG_TRACKER_TOKEN }, project: owner/repo }
+
+agents:
+  reviewer:
+    { runtime: claude-code, model: claude-sonnet-5-5,
+      schedule: { timezone: Europe/Madrid, windows: [ { days: [mon, tue, wed, thu, fri], start: "09:00", end: "18:00" } ] } }
+  builder: { runtime: claude-code, model: claude-haiku-5-5 }
+
+work:
+  issues:
+    query_filter: "label:agent:build,in-progress -label:needs-human"
+    agent: builder
+    rules:
+      - { name: build, match: { labels: [agent:build] }, prompt: prompts/build.md }
+  prs:
+    tracker: { kind: github-pr }
+    query_filter: "label:agent:review -label:needs-human"
+    agent: reviewer
+    rules:
+      - { name: review, match: { labels: [agent:review] }, prompt: prompts/review.md }

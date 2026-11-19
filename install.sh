@@ -1,9 +1,9 @@
 #!/bin/sh
-# Install sortie-loop from a release binary, verified against the
+# Install Jigz from a release binary, verified against the
 # release's checksums.txt.
 #
 # One-liner:
-#   curl -sSL https://raw.githubusercontent.com/kinged007/sortie-loop/main/install.sh | sh
+#   curl -sSL https://raw.githubusercontent.com/kinged007/jigz/main/install.sh | sh
 #
 # Usage:
 #   ./install.sh                    install to ~/.local/bin
@@ -13,21 +13,21 @@
 #
 # Requirements: curl, tar, and sha256sum or shasum. No Go toolchain.
 #
-# The engine (the sortie binary) is not installed here. `sortie-loop setup`
-# downloads it, verifies it against its own release, and links it onto PATH.
+# The engine is not installed here. `jig setup` downloads it, verifies it
+# against its own release, and links it onto PATH.
 set -eu
 
-REPO="kinged007/sortie-loop"
+REPO="kinged007/jigz"
 PREFIX="${HOME}/.local"
 VERSION=""
 FROM_SOURCE=0
 
 usage() { cat <<'EOF'
-Install sortie-loop from a release binary, verified against the
+Install Jigz from a release binary, verified against the
 release's checksums.txt.
 
 One-liner:
-  curl -sSL https://raw.githubusercontent.com/kinged007/sortie-loop/main/install.sh | sh
+  curl -sSL https://raw.githubusercontent.com/kinged007/jigz/main/install.sh | sh
 
 Usage:
   ./install.sh                    install to ~/.local/bin
@@ -37,8 +37,8 @@ Usage:
 
 Requirements: curl, tar, and sha256sum or shasum. No Go toolchain.
 
-The engine (the sortie binary) is not installed here. `sortie-loop setup`
-downloads it, verifies it against its own release, and links it onto PATH.
+The engine is not installed here. `jig setup` downloads it, verifies it
+against its own release, and links it onto PATH.
 EOF
 }
 
@@ -89,12 +89,12 @@ build_from_source() {
   command -v go >/dev/null || {
     echo "error: go not found, needed to build from source" >&2; exit 1; }
   if [ -z "$SRC" ] || [ ! -f "$SRC/go.mod" ]; then
-    echo "error: --from-source needs a sortie-loop checkout (run install.sh from it)" >&2
+    echo "error: --from-source needs a Jigz checkout (run install.sh from it)" >&2
     exit 1
   fi
-  echo ":: building sortie-loop from $SRC ..."
+  echo ":: building Jigz from $SRC ..."
   mkdir -p "$BIN_DIR"
-  (cd "$SRC" && go build -trimpath -o "$BIN_DIR/sortie-loop" ./cmd/sortie-loop)
+  (cd "$SRC" && go build -trimpath -o "$BIN_DIR/jig" ./cmd/jig)
 }
 
 case "$(uname -s)/$(uname -m)" in
@@ -103,7 +103,7 @@ case "$(uname -s)/$(uname -m)" in
   Darwin/x86_64) OS_ARCH="darwin_amd64" ;;
   Darwin/arm64)  OS_ARCH="darwin_arm64" ;;
   *) echo "error: no release binary for $(uname -s)/$(uname -m)" >&2
-     echo "       use --from-source from a checkout, or set SORTIE_BIN at runtime." >&2
+     echo "       use --from-source from a checkout, or set JIG_ENGINE_BIN at runtime." >&2
      exit 1 ;;
 esac
 
@@ -128,7 +128,6 @@ else
   fi
 
   VER="${VERSION#v}"
-  ASSET="sortie-loop_${VER}_${OS_ARCH}.tar.gz"
   if [ "$VERSION" = "$VER" ]; then
     BASE="https://github.com/${REPO}/releases/download/${VERSION}"
   else
@@ -138,9 +137,19 @@ else
   TMP="$(mktemp -d)"
   trap 'rm -rf "$TMP"' EXIT
 
-  echo ":: fetching ${ASSET} ..."
-  if ! curl -sSfL "${BASE}/${ASSET}" -o "${TMP}/${ASSET}"; then
-    echo "error: no release asset ${ASSET} at ${BASE}" >&2
+  # Releases up to v0.4.0 shipped archives as sortie-loop_<ver>_<os>_<arch>;
+  # the rename to jig_ landed after. Try the current name first, then the
+  # legacy one, so the one-liner works against both.
+  ASSET=""
+  for CAND in "jig_${VER}_${OS_ARCH}.tar.gz" "sortie-loop_${VER}_${OS_ARCH}.tar.gz"; do
+    echo ":: fetching ${CAND} ..."
+    if curl -sSfL "${BASE}/${CAND}" -o "${TMP}/${CAND}" 2>/dev/null; then
+      ASSET="$CAND"
+      break
+    fi
+  done
+  if [ -z "$ASSET" ]; then
+    echo "error: no release asset jig_${VER}_${OS_ARCH}.tar.gz (or legacy sortie-loop_ name) at ${BASE}" >&2
     echo "       use --from-source from a checkout, or --version TAG." >&2
     exit 1
   fi
@@ -164,15 +173,21 @@ else
   fi
   echo ":: checksum ok"
 
-  # The archive holds one file, sortie-loop. Extract to a staging name and
-  # move it into place so a shell starting mid-install never sees a
-  # half-written binary.
+  # The archive holds the binary (jig in current releases, sortie-loop
+  # before the rename). Extract to a staging name and move it into place
+  # so a shell starting mid-install never sees a half-written binary.
   tar -xzf "${TMP}/${ASSET}" -C "$TMP"
-  [ -f "${TMP}/sortie-loop" ] || { echo "error: archive holds no sortie-loop" >&2; exit 1; }
+  if [ -f "${TMP}/jig" ]; then
+    STAGED="${TMP}/jig"
+  elif [ -f "${TMP}/sortie-loop" ]; then
+    STAGED="${TMP}/sortie-loop"
+  else
+    echo "error: archive holds no jig binary" >&2; exit 1
+  fi
   mkdir -p "$BIN_DIR"
-  chmod +x "${TMP}/sortie-loop"
-  mv -f "${TMP}/sortie-loop" "${BIN_DIR}/sortie-loop"
-  echo ":: installed ${BIN_DIR}/sortie-loop (${VERSION})"
+  chmod +x "$STAGED"
+  mv -f "$STAGED" "${BIN_DIR}/jig"
+  echo ":: installed ${BIN_DIR}/jig (${VERSION})"
 fi
 
 case ":$PATH:" in
@@ -182,7 +197,7 @@ esac
 
 cat <<'EOF'
 :: next steps (run inside the target repo):
-     sortie-loop setup    # writes .sortie/config.yaml, creates labels,
-                         # installs the engine and links `sortie` onto PATH
-     sortie-loop          # run every WORKFLOW.*.md loop (Ctrl-C stops all)
+     jig setup    # writes .jigz/config.yaml, creates labels,
+                  # installs the engine and links it onto PATH
+     jig          # run every WORKFLOW.*.md loop (Ctrl-C stops all)
 EOF

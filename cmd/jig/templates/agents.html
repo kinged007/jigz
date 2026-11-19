@@ -1,0 +1,36 @@
+{{define "agents"}}{{template "shell-top" .}}
+<div class="pagehead">
+  <div>
+    <h1>Agents</h1>
+    <p class="sub">The agent settings each workflow file declares. A dash means the file sets nothing and the engine's own default applies.</p>
+  </div>
+
+</div>
+
+<div class="tw"><table class="agents">
+<thead><tr><th>Project / workflow</th>{{range .Columns}}<th>{{.Label}}</th>{{end}}</tr></thead><tbody>
+{{range .Rows}}{{if .Group}}<tr class="group"><td colspan="{{$.Span}}">{{.Label}}</td></tr>
+{{else}}<tr><td>{{.Label}}{{if .Note}} <span class="muted">{{.Note}}</span>{{end}}</td>{{range .Cells}}<td>{{if .Value}}<code>{{.Value}}</code>{{else}}<span class="muted">&mdash;</span>{{end}}</td>{{end}}</tr>
+{{end}}{{end}}
+</tbody></table></div>
+
+<div class="sechead"><h2>Fleet</h2></div>
+{{range .Fleets}}
+<div class="sechead"><h3>{{.Repo}}</h3></div>
+{{if .Error}}<p class="errtext">{{.Error}}</p>{{else}}
+<p class="muted">Operating hours: {{.Operating}}</p>
+{{if .Agents}}<div class="tw"><table class="agents">
+<thead><tr><th>Agent</th><th>Runtime</th><th>Model</th><th>Hours</th><th>State</th><th>Loops</th></tr></thead><tbody>
+{{range .Agents}}<tr><td>{{.Name}}</td><td>{{.Runtime}}</td><td>{{if .Model}}<code>{{.Model}}</code>{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+<td>{{.Hours}}</td>
+<td>{{.State}}{{if .Reason}}<div class="muted">{{.Reason}}</div>{{end}}</td>
+<td>{{range .Loops}}<code>{{.}}</code> {{else}}<span class="muted">&mdash;</span>{{end}}</td></tr>
+{{end}}</tbody></table></div>{{end}}
+{{if .Pools}}<div class="tw"><table class="agents">
+<thead><tr><th>Pool</th><th>Agents</th></tr></thead><tbody>
+{{range .Pools}}<tr><td>{{.Name}}</td><td>{{range .Agents}}<code>{{.}}</code> {{end}}</td></tr>
+{{end}}</tbody></table></div>{{end}}
+{{end}}
+{{else}}<p class="muted">No repository configuration found. Run <code>jig setup</code> in a repository to configure its fleet.</p>{{end}}
+{{template "statuspoll"}}
+{{template "shell-bottom" .}}{{end}}

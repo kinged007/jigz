@@ -1,0 +1,14 @@
+agents:
+  planner: { runtime: claude-code, model: claude-sonnet-5-5, schedule: { timezone: UTC, windows: [ { days: [mon, tue, wed, thu, fri], start: "08:00", end: "17:00" } ] } }
+  builder-a: { runtime: claude-code, model: claude-sonnet-5-5, env: { ANTHROPIC_OAUTH_TOKEN: { from_env: CLAUDE_SUB_1 } } }
+  builder-b: { runtime: pi, model: sonnet, env: { ANTHROPIC_API_KEY: { from_env: ANTHROPIC_API_KEY } } }
+
+work:
+  delivery:
+    query_filter: "label:agent:plan,agent:plan-build,agent:build,in-progress -label:needs-human"
+    hooks: { timeout_ms: 300000 }   # overrides the default hooks
+    rules:
+      - { name: plan,       match: { labels: [agent:plan] },       prompt: prompts/plan.md,  agent: planner }
+      - { name: build,      match: { labels: [agent:build] },      prompt: prompts/build.md, agent: [builder-a, builder-b] }
+      - { name: plan-build, match: { labels: [agent:plan-build] }, prompt: prompts/plan.md,  agent: planner, next: build-chain }
+      - { name: build-chain, stage: stage-build,                   prompt: prompts/build.md, agent: [builder-a, builder-b] }

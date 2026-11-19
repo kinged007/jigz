@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -23,15 +24,13 @@ func TestNormalizeRepo(t *testing.T) {
 	}
 }
 
-func TestLoadEnvAndMilestone(t *testing.T) {
+func TestLoadEnvAndFilterFor(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, ".sortie"), 0o755)
-	os.WriteFile(filepath.Join(dir, ".sortie", "config.yaml"),
+	os.MkdirAll(filepath.Join(dir, ".jigz"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".jigz", "config.yaml"),
 		[]byte("repo: file/o\ntoken: filetok\n"), 0o644)
-	t.Setenv("SORTIE_LOOP_REPO", "o/r")
-	t.Setenv("SORTIE_LOOP_TOKEN", "tok")
-	t.Setenv("SORTIE_LOOP_MILESTONE", "v2")
-	t.Setenv("SORTIE_LOOP_ASSIGNEE", "")
+	t.Setenv("JIG_REPO", "o/r")
+	t.Setenv("JIG_TOKEN", "tok")
 	cfg, err := Load(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -39,59 +38,21 @@ func TestLoadEnvAndMilestone(t *testing.T) {
 	if cfg.Repo != "o/r" || cfg.Token != "tok" || cfg.Tracker != "o/r" {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
-	if cfg.FilterFor("issues") != `label:agent:plan,agent:plan-build,agent:build,agent:docs,in-progress -label:needs-human milestone:"v2"` {
-		t.Errorf("issues filter: %q", cfg.FilterFor("issues"))
+	if got := cfg.FilterFor("issues"); got != "" {
+		t.Errorf("filter without query_filter or filters entry: %q", got)
 	}
-	if cfg.FilterFor("prs") != `label:agent:review,agent:build,agent:merge,in-progress -label:needs-human milestone:"v2"` {
-		t.Errorf("prs filter: %q", cfg.FilterFor("prs"))
-	}
-	// Unknown loops get the default filter (no label constraint).
-	if cfg.FilterFor("triage") != `-label:needs-human milestone:"v2"` {
-		t.Errorf("unknown loop filter: %q", cfg.FilterFor("triage"))
-	}
-}
-
-func TestLoadAssigneeDefaultAndOptOut(t *testing.T) {
-	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, ".sortie"), 0o755)
-	os.WriteFile(filepath.Join(dir, ".sortie", "config.yaml"),
-		[]byte("repo: file/o\ntoken: filetok\n"), 0o644)
-	t.Setenv("SORTIE_LOOP_REPO", "o/r")
-	t.Setenv("SORTIE_LOOP_TOKEN", "tok")
-	t.Setenv("SORTIE_LOOP_MILESTONE", "v2")
-	os.Unsetenv("SORTIE_LOOP_ASSIGNEE")
-	cfg, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.FilterFor("issues") != `label:agent:plan,agent:plan-build,agent:build,agent:docs,in-progress -label:needs-human milestone:"v2" assignee:@me` {
-		t.Errorf("issues filter: %q", cfg.FilterFor("issues"))
-	}
-	if cfg.FilterFor("prs") != `label:agent:review,agent:build,agent:merge,in-progress -label:needs-human milestone:"v2" assignee:@me` {
-		t.Errorf("prs filter: %q", cfg.FilterFor("prs"))
-	}
-	t.Setenv("SORTIE_LOOP_ASSIGNEE", "")
-	cfg, err = Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.FilterFor("issues") != `label:agent:plan,agent:plan-build,agent:build,agent:docs,in-progress -label:needs-human milestone:"v2"` {
-		t.Errorf("opt-out issues filter: %q", cfg.FilterFor("issues"))
-	}
-	if cfg.FilterFor("prs") != `label:agent:review,agent:build,agent:merge,in-progress -label:needs-human milestone:"v2"` {
-		t.Errorf("opt-out prs filter: %q", cfg.FilterFor("prs"))
+	if cfg.Labels != nil {
+		t.Errorf("labels without a labels key: %+v", cfg.Labels)
 	}
 }
 
 func TestLoadConfigFile(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, ".sortie"), 0o755)
-	os.WriteFile(filepath.Join(dir, ".sortie", "config.yaml"),
+	os.MkdirAll(filepath.Join(dir, ".jigz"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".jigz", "config.yaml"),
 		[]byte("repo: file/o\ntoken: filetok\n"), 0o644)
-	t.Setenv("SORTIE_LOOP_REPO", "")
-	t.Setenv("SORTIE_LOOP_TOKEN", "")
-	t.Setenv("SORTIE_LOOP_MILESTONE", "")
-	t.Setenv("GH_MILESTONE", "")
+	t.Setenv("JIG_REPO", "")
+	t.Setenv("JIG_TOKEN", "")
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("GH_TOKEN", "")
 	cfg, err := Load(dir)
@@ -101,87 +62,75 @@ func TestLoadConfigFile(t *testing.T) {
 	if cfg.Repo != "file/o" || cfg.Token != "filetok" {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
-	if cfg.CloneURL != "https://github.com/file/o.git" {
-		t.Errorf("clone url: %q", cfg.CloneURL)
+	if cfg.Tracker != "file/o" {
+		t.Errorf("tracker: %q", cfg.Tracker)
 	}
 }
 
 func TestLoadFilterOverrides(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, ".sortie"), 0o755)
-	os.WriteFile(filepath.Join(dir, ".sortie", "config.yaml"),
+	os.MkdirAll(filepath.Join(dir, ".jigz"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".jigz", "config.yaml"),
 		[]byte("repo: file/o\ntoken: filetok\nfilters:\n  triage: label:agent:triage\n  issues: label:agent:custom\n"), 0o644)
-	t.Setenv("SORTIE_LOOP_REPO", "")
-	t.Setenv("SORTIE_LOOP_TOKEN", "")
-	t.Setenv("SORTIE_LOOP_MILESTONE", "")
-	t.Setenv("GH_MILESTONE", "")
+	t.Setenv("JIG_REPO", "")
+	t.Setenv("JIG_TOKEN", "")
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("GH_TOKEN", "")
-	t.Setenv("SORTIE_LOOP_ASSIGNEE", "")
 	cfg, err := Load(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.FilterFor("triage") != "label:agent:triage" {
+	if cfg.FilterFor("triage") != "label:agent:triage assignee:@me" {
 		t.Errorf("override filter: %q", cfg.FilterFor("triage"))
 	}
-	if cfg.FilterFor("issues") != "label:agent:custom" {
+	if cfg.FilterFor("issues") != "label:agent:custom assignee:@me" {
 		t.Errorf("known-loop override: %q", cfg.FilterFor("issues"))
 	}
-	if cfg.FilterFor("prs") != "label:agent:review,agent:build,agent:merge,in-progress -label:needs-human" {
-		t.Errorf("untouched default: %q", cfg.FilterFor("prs"))
+	if got := cfg.FilterFor("prs"); got != "" {
+		t.Errorf("slug without an entry: %q", got)
 	}
 }
 
-// TestDefaultLabels pins the shipped label set: one yellow trigger per loop,
-// one claim, one finished state, one escalation. Colours are part of the
-// contract because the board reads them at a glance.
-func TestDefaultLabels(t *testing.T) {
-	want := []Label{
-		{"agent:plan", "fbca04", "Trigger: write an implementation plan for this issue"},
-		{"agent:plan-build", "fbca04", "Trigger: plan this issue, then implement it with no human step"},
-		{"agent:build", "fbca04", "Trigger: implement this issue, or apply review feedback on this PR"},
-		{"agent:review", "fbca04", "Trigger: review this PR"},
-		{"agent:merge", "fbca04", "Trigger: merge this PR"},
-		{"agent:docs", "fbca04", "Trigger: update the docs for merged changes and open a PR"},
-		{"in-progress", "5319e7", "State: claimed by an agent"},
-		{"agent:done", "0e8a16", "State: agent finished"},
-		{"needs-human", "d73a4a", "Escalation: agent needs a person"},
-		{"united-into", "c5def5", "State: work folded into another issue's fix; that issue is the one to read"},
-		{"backlog", "ededed", "Deferred by a person; do not dispatch"},
-		{"P0", "d73a4a", "Priority: highest, dispatch before everything else"},
-		{"P1", "f9826c", "Priority: high"},
-		{"P2", "fbca04", "Priority: normal"},
-		{"P3", "ededed", "Priority: lowest"},
+// TestFilterForWorkQueryFilter pins the precedence: a work entry's
+// query_filter is the complete tracker query and wins over the filters:
+// override and the defaults; the assignee scope is appended to all.
+func TestFilterForWorkQueryFilter(t *testing.T) {
+	cfg, err := loadWithConfig(t, "filters:\n  issues: label:from-filters\nwork:\n  issues:\n    managed: false\n    query_filter: \"label:from-work\"\n", nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(DefaultLabels) != len(want) {
-		t.Fatalf("DefaultLabels = %d labels, want %d", len(DefaultLabels), len(want))
-	}
-	for i, w := range want {
-		if DefaultLabels[i] != w {
-			t.Errorf("label %d = %+v, want %+v", i, DefaultLabels[i], w)
-		}
+	if got := cfg.FilterFor("issues"); got != "label:from-work assignee:@me" {
+		t.Errorf("work query_filter: %q", got)
 	}
 }
 
-// TestDefaultLabelPrefix enforces the naming rule: agent-owned labels carry
-// the agent: prefix, the item-level and person-owned labels do not.
-func TestDefaultLabelPrefix(t *testing.T) {
-	itemLevel := map[string]bool{
-		"in-progress": true, "needs-human": true, "united-into": true,
-		"backlog": true, "P0": true, "P1": true, "P2": true, "P3": true,
+func TestWorkEntryWithoutFilterFails(t *testing.T) {
+	_, err := loadWithConfig(t, "work:\n  issues:\n    rules:\n    - {name: build, match: {labels: [agent:build]}, prompt: prompts/build.md}\n", nil)
+	if err == nil || !strings.Contains(err.Error(), "work.issues needs query_filter") {
+		t.Fatalf("err = %v", err)
 	}
-	for _, l := range DefaultLabels {
-		unprefixed := itemLevel[l.Name]
-		if unprefixed == strings.HasPrefix(l.Name, "agent:") {
-			t.Errorf("label %q: wrong prefix (want prefixed=%v)", l.Name, !unprefixed)
-		}
+	cfg, err := loadWithConfig(t, "filters:\n  issues: label:agent:build\nwork:\n  issues:\n    rules:\n    - {name: build, match: {labels: [agent:build]}, prompt: prompts/build.md}\n", nil)
+	if err != nil {
+		t.Fatalf("filters entry: %v", err)
+	}
+	if got := cfg.FilterFor("issues"); got != "label:agent:build assignee:@me" {
+		t.Errorf("filters entry: %q", got)
+	}
+}
+
+func TestManagedWorkEntryWithoutRulesFails(t *testing.T) {
+	_, err := loadWithConfig(t, "work:\n  issues:\n    query_filter: label:agent:build\n", nil)
+	if err == nil || !strings.Contains(err.Error(), "work.issues needs rules") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := loadWithConfig(t, "work:\n  issues:\n    managed: false\n    query_filter: label:agent:build\n", nil); err != nil {
+		t.Fatalf("unmanaged entry: %v", err)
 	}
 }
 
 func TestLoadMissingConfigFails(t *testing.T) {
-	dir := t.TempDir() // no .sortie/config.yaml, git remote irrelevant
-	t.Setenv("SORTIE_LOOP_REPO", "o/r")
+	dir := t.TempDir() // no .jigz/config.yaml, git remote irrelevant
+	t.Setenv("JIG_REPO", "o/r")
 	if _, err := Load(dir); err == nil {
 		t.Error("expected error with no config file")
 	}
@@ -189,7 +138,7 @@ func TestLoadMissingConfigFails(t *testing.T) {
 
 func TestLoadNoRepoFails(t *testing.T) {
 	dir := t.TempDir() // no git remote, no config
-	t.Setenv("SORTIE_LOOP_REPO", "")
+	t.Setenv("JIG_REPO", "")
 	if _, err := Load(dir); err == nil {
 		t.Error("expected error with no repo detectable")
 	}
@@ -198,10 +147,10 @@ func TestLoadNoRepoFails(t *testing.T) {
 func loadWithConfig(t *testing.T, yaml string, workflows map[string]string) (*Config, error) {
 	t.Helper()
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, ".sortie", "workflows"), 0o755)
-	os.WriteFile(filepath.Join(dir, ".sortie", "config.yaml"), []byte("repo: o/r\n"+yaml), 0o644)
+	os.MkdirAll(filepath.Join(dir, ".jigz", "workflows"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".jigz", "config.yaml"), []byte("repo: o/r\n"+yaml), 0o644)
 	for name, body := range workflows {
-		os.WriteFile(filepath.Join(dir, ".sortie", "workflows", name), []byte(body), 0o644)
+		os.WriteFile(filepath.Join(dir, ".jigz", "workflows", name), []byte(body), 0o644)
 	}
 	cfg, err := Load(dir)
 	if err != nil {
@@ -288,7 +237,7 @@ func TestSleepInvalid(t *testing.T) {
 	}
 }
 
-const budgetYAML = "workflows:\n  plan:\n    budget:\n      period: weekly\n      timezone: Africa/Johannesburg\n      max_tokens: 20000000\n      warn_percent: 70\n      on_exceed: pause\n      poll_interval: 30s\n      max_usd: 50\n"
+const budgetYAML = "work:\n  plan:\n    managed: false\n    query_filter: x\n    budget:\n      period: weekly\n      timezone: Africa/Johannesburg\n      max_tokens: 20000000\n      warn_percent: 70\n      on_exceed: pause\n      poll_interval: 30s\n      max_usd: 50\n"
 
 func TestBudgetValid(t *testing.T) {
 	cfg, err := loadWithConfig(t, budgetYAML, map[string]string{"WORKFLOW.plan.md": "---\n---\n"})
@@ -298,7 +247,7 @@ func TestBudgetValid(t *testing.T) {
 	if err := cfg.CheckBudgets(); err != nil {
 		t.Fatal(err)
 	}
-	b := cfg.Budgets["plan"]
+	b := cfg.Budgets()["plan"]
 	if b.Period != "weekly" || b.Location.String() != "Africa/Johannesburg" || b.MaxTokens != 20000000 ||
 		b.WarnPercent != 70 || b.PollInterval != 30*time.Second || b.MaxUSD != 50 {
 		t.Errorf("unexpected budget: %+v", b)
@@ -306,23 +255,23 @@ func TestBudgetValid(t *testing.T) {
 }
 
 func TestBudgetDefaults(t *testing.T) {
-	cfg, err := loadWithConfig(t, "workflows:\n  plan:\n    budget:\n      period: monthly\n      max_tokens: 5\n", nil)
+	cfg, err := loadWithConfig(t, "work:\n  plan:\n    managed: false\n    query_filter: x\n    budget:\n      period: monthly\n      max_tokens: 5\n", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := cfg.Budgets["plan"]
+	b := cfg.Budgets()["plan"]
 	if b.Location.String() != "UTC" || b.WarnPercent != 80 || b.PollInterval != time.Minute {
 		t.Errorf("unexpected defaults: %+v", b)
 	}
 }
 
 func TestBudgetDisabledWithoutMaxTokens(t *testing.T) {
-	cfg, err := loadWithConfig(t, "workflows:\n  plan:\n    budget:\n      period: weekly\n", nil)
-	if err != nil || cfg.Budgets["plan"].MaxTokens != 0 {
+	cfg, err := loadWithConfig(t, "work:\n  plan:\n    managed: false\n    query_filter: x\n    budget:\n      period: weekly\n", nil)
+	if err != nil || cfg.Budgets()["plan"].MaxTokens != 0 {
 		t.Errorf("cfg %+v err %v, want a disabled budget", cfg, err)
 	}
-	if cfg, err = loadWithConfig(t, "", nil); err != nil || len(cfg.Budgets) != 0 {
-		t.Errorf("no workflows: %v", err)
+	if cfg, err = loadWithConfig(t, "", nil); err != nil || len(cfg.Budgets()) != 0 {
+		t.Errorf("no work entries: %v", err)
 	}
 }
 
@@ -337,7 +286,7 @@ func TestBudgetInvalid(t *testing.T) {
 		{"bad poll interval", "period: weekly\n      max_tokens: 5\n      poll_interval: soon", "poll_interval"},
 		{"negative usd", "period: weekly\n      max_tokens: 5\n      max_usd: -1", "max_usd"},
 	} {
-		_, err := loadWithConfig(t, "workflows:\n  plan:\n    budget:\n      "+c.body+"\n", nil)
+		_, err := loadWithConfig(t, "work:\n  plan:\n    managed: false\n    query_filter: x\n    budget:\n      "+c.body+"\n", nil)
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: error %v, want it to mention %q", c.name, err, c.want)
 		}
@@ -345,11 +294,132 @@ func TestBudgetInvalid(t *testing.T) {
 }
 
 func TestBudgetUnknownLoop(t *testing.T) {
-	cfg, err := loadWithConfig(t, "workflows:\n  nope:\n    budget:\n      period: weekly\n      max_tokens: 5\n", map[string]string{"WORKFLOW.plan.md": "---\n---\n"})
+	cfg, err := loadWithConfig(t, "work:\n  nope:\n    managed: false\n    query_filter: x\n    budget:\n      period: weekly\n      max_tokens: 5\n", map[string]string{"WORKFLOW.plan.md": "---\n---\n"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := cfg.CheckBudgets(); err == nil || !strings.Contains(err.Error(), "nope") {
 		t.Errorf("error %v, want the unknown loop named", err)
+	}
+}
+
+func TestMigrateRepoDirMovesLegacyDirectory(t *testing.T) {
+	dir := t.TempDir()
+	old := filepath.Join(dir, ".sortie")
+	if err := os.MkdirAll(filepath.Join(old, "workflows"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(old, "config.yaml"), []byte("repo: o/r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	MigrateRepoDir(dir)
+	if _, err := os.Stat(filepath.Join(dir, ".jigz", "config.yaml")); err != nil {
+		t.Fatalf("config not moved: %v", err)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Fatalf(".sortie still present after move")
+	}
+	// A second run leaves an existing .jigz alone.
+	if err := os.MkdirAll(old, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	MigrateRepoDir(dir)
+	if _, err := os.Stat(old); err != nil {
+		t.Fatalf("a leftover .sortie must not be moved over an existing .jigz: %v", err)
+	}
+}
+
+func TestGitHubBlock(t *testing.T) {
+	cfg, err := loadWithConfig(t, "github:\n  enrich: true\n  questions: false\n  api_url: http://127.0.0.1:9/\n  interval: 5m\n  details: true\n  questions_interval: 3m\n  questions_window: 24h\n", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := cfg.GitHub
+	if !g.Enrich || g.QuestionsOn() || !g.DetailsOn() || g.BaseURL() != "http://127.0.0.1:9" || g.PassInterval() != 5*time.Minute ||
+		g.QuestionPassInterval() != 3*time.Minute || g.QuestionWindow() != 24*time.Hour {
+		t.Errorf("unexpected github block: %+v", g)
+	}
+	dir := filepath.Dir(filepath.Dir(cfg.Workspaces))
+	if lg, err := LoadGitHub(dir); err != nil || !reflect.DeepEqual(lg, g) {
+		t.Errorf("LoadGitHub = %+v, %v; want %+v", lg, err, g)
+	}
+}
+
+func TestGitHubBlockDefaults(t *testing.T) {
+	cfg, err := loadWithConfig(t, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := cfg.GitHub
+	if g.Enrich || !g.QuestionsOn() || g.BaseURL() != "https://api.github.com" || g.PassInterval() != 10*time.Minute ||
+		g.QuestionPassInterval() != 2*time.Minute || g.QuestionWindow() != 168*time.Hour {
+		t.Errorf("unexpected default github block: %+v", g)
+	}
+}
+
+func TestGitHubQuestionsKey(t *testing.T) {
+	for _, tc := range []struct {
+		yaml string
+		want bool
+	}{
+		{"github:\n  enrich: false\n", true},
+		{"github:\n  questions: true\n", true},
+		{"github:\n  questions: false\n", false},
+	} {
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, ".jigz"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".jigz", "config.yaml"), []byte(tc.yaml), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		g, err := LoadGitHub(dir)
+		if err != nil || g.QuestionsOn() != tc.want {
+			t.Errorf("%q: QuestionsOn = %v, %v; want %v", tc.yaml, g.QuestionsOn(), err, tc.want)
+		}
+	}
+}
+
+func TestGitHubBlockInvalid(t *testing.T) {
+	cases := []struct{ name, yaml, want string }{
+		{"unknown key", "github:\n  enrich: true\n  enrichh: true\n", "enrichh"},
+		{"bad api url", "github:\n  api_url: ftp://x\n", "github.api_url"},
+		{"short interval", "github:\n  interval: 10s\n", "github.interval"},
+		{"bad questions window", "github:\n  questions_window: soon\n", "github.questions_window"},
+	}
+	for _, tc := range cases {
+		_, err := loadWithConfig(t, tc.yaml, nil)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: error %v, want %q", tc.name, err, tc.want)
+		}
+	}
+}
+
+func TestLoadTokenHasNoSideEffects(t *testing.T) {
+	t.Setenv("JIG_TOKEN", "")
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".jigz"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".jigz", "config.yaml"), []byte("token: filetok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// No repo: and no git checkout, so Load would fail on detectRepo.
+	if tok, err := LoadToken(dir); err != nil || tok != "filetok" {
+		t.Errorf("LoadToken = %q, %v; want filetok", tok, err)
+	}
+	t.Setenv("JIG_TOKEN", "jigtok")
+	if tok, _ := LoadToken(dir); tok != "jigtok" {
+		t.Errorf("LoadToken = %q, want JIG_TOKEN first", tok)
+	}
+	old := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(old, ".sortie"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadToken(old); err == nil {
+		t.Error("LoadToken read a config from a dir without .jigz/config.yaml")
+	}
+	if _, err := os.Stat(filepath.Join(old, ".sortie")); err != nil {
+		t.Errorf("LoadToken moved .sortie: %v", err)
 	}
 }
