@@ -116,11 +116,11 @@ const minPiVersion = "0.99.0"
 
 var versionRe = regexp.MustCompile(`^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]*)?$`)
 
-// parseVersion returns the first field of the first non-empty line that
-// is a full semantic version, after one leading "v" and one trailing "."
-// are dropped.
+// parseVersion returns the first field of the output that is a full
+// semantic version, after one leading "v" and one trailing "." are
+// dropped.
 func parseVersion(out string) string {
-	for _, field := range strings.Fields(firstLine(out)) {
+	for _, field := range strings.Fields(out) {
 		field = strings.TrimSuffix(strings.TrimPrefix(field, "v"), ".")
 		if versionRe.MatchString(field) {
 			return field

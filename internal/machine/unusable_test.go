@@ -57,6 +57,7 @@ func TestVersionProblem(t *testing.T) {
 		{"opencode 1.x", "opencode", "1.18.29\n", "OpenCode 1.18.29 is not supported; install OpenCode 2.x, published on npm as @opencode/cli"},
 		{"opencode 2.x", "opencode", "2.0.3\n", ""},
 		{"opencode prefixed", "opencode", "opencode v2.1.0\n", ""},
+		{"opencode banner before version", "opencode", "Update available: run npm i -g opencode\nopencode v2.1.0\n", ""},
 		{"opencode 3.x", "opencode", "3.0.0\n", "OpenCode 3.0.0 is not supported; install OpenCode 2.x, published on npm as @opencode/cli"},
 		{"opencode no version", "opencode", "usage: opencode\n", "the OpenCode command reported no version that can be read: usage: opencode"},
 		{"opencode empty", "opencode", "", "the OpenCode command reported no version that can be read: no output"},
