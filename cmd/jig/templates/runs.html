@@ -16,6 +16,7 @@ table.runs .out { min-width: 10rem; }
 <form class="filters" method="get" action="/runs" role="search">
   <label class="f">Project<select name="project"><option value="">all</option>{{range .Opts.Projects}}<option {{if eq . $.Q.Project}}selected{{end}}>{{.}}</option>{{end}}</select></label>
   <label class="f">Workflow<select name="workflow"><option value="">all</option>{{range .Opts.Workflows}}<option {{if eq . $.Q.Workflow}}selected{{end}}>{{.}}</option>{{end}}</select></label>
+  <label class="f">Rule<select name="rule"><option value="">all</option>{{range .Opts.Rules}}<option {{if eq . $.Q.Rule}}selected{{end}}>{{.}}</option>{{end}}</select></label>
   <label class="f">State<select name="state"><option value="">all</option>{{range .States}}<option {{if eq . $.Q.State}}selected{{end}}>{{.}}</option>{{end}}</select></label>
   <label class="f">Model<select name="model"><option value="">all</option>{{range .Opts.Models}}<option {{if eq . $.Q.Model}}selected{{end}}>{{.}}</option>{{end}}</select></label>
   <label class="f">Adapter<select name="adapter"><option value="">all</option>{{range .Opts.Adapters}}<option {{if eq . $.Q.Adapter}}selected{{end}}>{{.}}</option>{{end}}</select></label>

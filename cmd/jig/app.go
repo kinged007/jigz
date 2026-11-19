@@ -165,7 +165,8 @@ func validateWorkflow(dir, path string) (plan.FileResult, error) {
 			}
 		}
 	} else if cfg, err := config.Load(dir); err == nil {
-		env = append(env, cfg.Env()...)
+		token, _ := cfg.TrackerToken(cfg.TrackerDefaults)
+		env = append(env, cfg.Env(token)...)
 	}
 	// The dashboard of a --unite run validates documents of several
 	// repos in one process, so each repo's own .env goes into this

@@ -22,12 +22,12 @@ func resolveSortieBin() (string, error) {
 }
 
 // managedEnv is the env file entries jig owns, in file order.
-func managedEnv(cfg *config.Config) [][2]string {
+func managedEnv(cfg *config.Config, token string) [][2]string {
 	return [][2]string{
 		{"SORTIE_TRACKER_PROJECT", cfg.Tracker},
 		{"JIG_TRACKER_PROJECT", cfg.Tracker},
 		{"JIG_WORKSPACES", cfg.Workspaces},
-		{"SORTIE_TRACKER_API_KEY", cfg.Token},
+		{"SORTIE_TRACKER_API_KEY", token},
 	}
 }
 
@@ -35,13 +35,20 @@ func managedEnv(cfg *config.Config) [][2]string {
 // workflows can load them via --env-file without touching the user's env.
 // Lines jig does not manage are kept as they are. changed reports whether
 // a managed value differs from the file as it was.
-func writeEnvFile(dir string, cfg *config.Config) (path string, changed bool, err error) {
-	path = filepath.Join(dir, ".jigz", ".env.loop")
+// token is the tracker credential. A loop with its own tracker.api_key
+// passes its name and gets .jigz/.env.loop.<name>, so the shared file
+// keeps the credential of the defaults.
+func writeEnvFile(dir, loop string, cfg *config.Config, token string) (path string, changed bool, err error) {
+	file := ".env.loop"
+	if loop != "" {
+		file += "." + loop
+	}
+	path = filepath.Join(dir, ".jigz", file)
 	old, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return "", false, err
 	}
-	managed := managedEnv(cfg)
+	managed := managedEnv(cfg, token)
 	changed = mergeEnv(string(old), managed) != mergeEnv(string(old), nil)
 	if err := writeFileAtomicMode(path, []byte(mergeEnv(string(old), managed)), 0o600); err != nil {
 		return "", false, err

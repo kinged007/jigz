@@ -18,14 +18,14 @@ const dateLayout = "2006-01-02"
 
 // runQuery is the Runs page's filter as it appears in the URL.
 type runQuery struct {
-	Project, Workflow, State, Model, Adapter string
-	From, To, Q                              string
-	Cursor, After                            int64
+	Project, Workflow, Rule, State, Model, Adapter string
+	From, To, Q                                    string
+	Cursor, After                                  int64
 }
 
 func parseRunQuery(v url.Values) runQuery {
 	q := runQuery{
-		Project: v.Get("project"), Workflow: v.Get("workflow"), State: v.Get("state"),
+		Project: v.Get("project"), Workflow: v.Get("workflow"), Rule: v.Get("rule"), State: v.Get("state"),
 		Model: v.Get("model"), Adapter: v.Get("adapter"), Q: strings.TrimSpace(v.Get("q")),
 	}
 	if _, err := time.Parse(dateLayout, v.Get("from")); err == nil {
@@ -47,7 +47,7 @@ func parseRunQuery(v url.Values) runQuery {
 func (q runQuery) values() url.Values {
 	v := url.Values{}
 	for k, s := range map[string]string{
-		"project": q.Project, "workflow": q.Workflow, "state": q.State, "model": q.Model,
+		"project": q.Project, "workflow": q.Workflow, "rule": q.Rule, "state": q.State, "model": q.Model,
 		"adapter": q.Adapter, "from": q.From, "to": q.To, "q": q.Q,
 	} {
 		if s != "" {
@@ -61,7 +61,7 @@ func (q runQuery) Filtered() bool { return len(q.values()) > 0 }
 
 func (q runQuery) filter() store.RunFilter {
 	f := store.RunFilter{
-		Project: q.Project, Workflow: q.Workflow, State: q.State, Model: q.Model, Adapter: q.Adapter, Q: q.Q,
+		Project: q.Project, Workflow: q.Workflow, Rule: q.Rule, State: q.State, Model: q.Model, Adapter: q.Adapter, Q: q.Q,
 		Cursor: q.Cursor, After: q.After,
 	}
 	if q.From != "" {
@@ -175,7 +175,7 @@ func storedRow(r store.Run) runRow {
 		Identifier: r.DisplayIdentifier, Short: shortIdentifier(r.DisplayIdentifier),
 		IssueURL: issueURL(r.Project, r.DisplayIdentifier, r.IssueID),
 		Href:     "/runs/" + r.Project + "/" + r.Workflow + "/" + strconv.FormatInt(r.ID, 10),
-		Project:  r.Project, Repo: repoNameFromProject(r.Project), Workflow: r.Workflow, Rule: r.Workflow, State: r.Status,
+		Project:  r.Project, Repo: repoNameFromProject(r.Project), Workflow: r.Workflow, Rule: r.RuleName, State: r.Status,
 		Model: r.Model, ModelSource: r.ModelSource, Adapter: r.AgentAdapter,
 		Started: utc(r.StartedAt), Duration: duration(r.StartedAt, r.CompletedAt),
 		Tokens: tokenText(r), Unmeasured: !r.TokensMeasured, Error: r.Error,
@@ -184,7 +184,8 @@ func storedRow(r store.Run) runRow {
 }
 
 // activeRows are the fleet's running agents that match the filter. Their
-// state is the engine's own, so a state filter matches it directly.
+// state is the engine's own, so a state filter matches it directly. They
+// carry no rule, so a rule filter matches none.
 func activeRows(all []activeRun, q runQuery) []runRow {
 	f := q.filter()
 	var out []runRow
@@ -193,6 +194,7 @@ func activeRows(all []activeRun, q runQuery) []runRow {
 		switch {
 		case q.Project != "" && a.Repo != q.Project,
 			q.Workflow != "" && a.Loop != q.Workflow,
+			q.Rule != "",
 			q.State != "" && a.State != q.State,
 			q.Model != "" && a.Model != q.Model,
 			q.Adapter != "" && a.Agent != q.Adapter,
@@ -383,7 +385,7 @@ func (a *app) runsCSV(w http.ResponseWriter, r *http.Request) {
 			}
 			out.Write(append(append([]string{
 				strconv.FormatInt(s.ID, 10), csvText(s.DisplayIdentifier), csvText(s.Project), csvText(s.Workflow),
-				csvText(s.Workflow), s.Status, csvText(s.Model), s.ModelSource, csvText(s.AgentAdapter),
+				csvText(s.RuleName), s.Status, csvText(s.Model), s.ModelSource, csvText(s.AgentAdapter),
 				s.StartedAt, s.CompletedAt, duration(s.StartedAt, s.CompletedAt)}, tok...),
 				strconv.FormatBool(s.TokensMeasured), store.ClassifyOutcome(s.Status, s.Error).Class, csvText(s.Error)))
 		}

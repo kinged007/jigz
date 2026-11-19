@@ -240,3 +240,89 @@ func TestWorkflowKindIsStoredOnNewRunsAndBackfilled(t *testing.T) {
 		t.Errorf("run 1 kind = %q, want pr", r.WorkflowKind)
 	}
 }
+
+const (
+	dropRuleName = `ALTER TABLE run_history DROP COLUMN rule_name`
+	addRuleName  = `ALTER TABLE run_history ADD COLUMN rule_name TEXT NOT NULL DEFAULT ''`
+)
+
+func TestRuleNameIsCopiedFromTheEngineDatabase(t *testing.T) {
+	path, db := fixture(t, `UPDATE run_history SET rule_name = 'plan-check' WHERE id = 5`)
+	c, st := newCollector(t, path)
+	c.Once(context.Background())
+	if r, _ := st.Run("acme/app", "build", 5); r.RuleName != "plan-check" {
+		t.Errorf("run 5 rule = %q, want plan-check", r.RuleName)
+	}
+	if _, err := db.Exec(`INSERT INTO run_history (issue_id, identifier, attempt, agent_adapter, workspace,
+		started_at, completed_at, status, display_identifier, rule_name)
+		VALUES ('21','21',1,'pi','','2026-10-15T00:00:00Z','2026-10-15T00:01:00Z','succeeded','acme/app#21','spec')`); err != nil {
+		t.Fatal(err)
+	}
+	c.Once(context.Background())
+	if r, _ := st.Run("acme/app", "build", 17); r.RuleName != "spec" {
+		t.Errorf("new run rule = %q, want spec", r.RuleName)
+	}
+}
+
+func TestEngineSchemaWithoutRuleNameIsReadAndBackfilledLater(t *testing.T) {
+	path, db := fixture(t, dropRuleName)
+	c, st := newCollector(t, path)
+	c.Once(context.Background())
+	all, err := st.Runs(store.RunFilter{Limit: store.MaxLimit})
+	if err != nil || len(all) != 16 {
+		t.Fatalf("runs = %d, %v, want 16", len(all), err)
+	}
+	for _, r := range all {
+		if r.RuleName != "" {
+			t.Fatalf("run %d rule = %q, want empty for a schema without the column", r.ID, r.RuleName)
+		}
+	}
+
+	for _, q := range []string{addRuleName, `UPDATE run_history SET rule_name = 'triage' WHERE id <= 2`,
+		`UPDATE run_history SET rule_name = 'plan' WHERE id = 3`} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c.filled = nil
+	c.Once(context.Background())
+	for id, want := range map[int64]string{1: "triage", 2: "triage", 3: "plan", 4: ""} {
+		if r, _ := st.Run("acme/app", "build", id); r.RuleName != want {
+			t.Errorf("backfilled run %d rule = %q, want %q", id, r.RuleName, want)
+		}
+	}
+	g, _ := st.Usage(store.UsageFilter{Rule: "triage"}, "rule")
+	if len(g) != 1 || g[0].Key != "triage" || g[0].Runs != 2 {
+		t.Errorf("usage by rule = %+v, want 2 triage runs", g)
+	}
+}
+
+func TestRuleBackfillRunsOnceEvenWithRulelessRuns(t *testing.T) {
+	path, db := fixture(t, `UPDATE run_history SET rule_name = 'plan' WHERE id = 3`, `UPDATE run_history SET rule_name = '' WHERE id = 4`)
+	c, st := newCollector(t, path)
+	c.Once(context.Background())
+	if need, err := st.NeedsRuleBackfill("acme/app", "build"); err != nil || need {
+		t.Fatalf("needs rule backfill after the first pass = %v, %v, want false", need, err)
+	}
+	if r, _ := st.Run("acme/app", "build", 3); r.RuleName != "plan" {
+		t.Errorf("run 3 rule = %q, want plan", r.RuleName)
+	}
+
+	if _, err := db.Exec(`UPDATE run_history SET rule_name = 'late' WHERE id = 4`); err != nil {
+		t.Fatal(err)
+	}
+	c.filled = nil
+	c.Once(context.Background())
+	if r, _ := st.Run("acme/app", "build", 4); r.RuleName != "" {
+		t.Errorf("run 4 rule = %q, want empty: the backfill must not run again", r.RuleName)
+	}
+}
+
+func TestRuleBackfillStaysPendingWithoutTheEngineColumn(t *testing.T) {
+	path, _ := fixture(t, dropRuleName)
+	c, st := newCollector(t, path)
+	c.Once(context.Background())
+	if need, err := st.NeedsRuleBackfill("acme/app", "build"); err != nil || !need {
+		t.Fatalf("needs rule backfill = %v, %v, want true so a later column is read", need, err)
+	}
+}

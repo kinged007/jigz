@@ -56,7 +56,7 @@ func TestWriteEnvFileKeepsUserLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := &config.Config{Tracker: "new/repo", Token: "tok", Workspaces: "/ws"}
-	if _, _, err := writeEnvFile(dir, cfg); err != nil {
+	if _, _, err := writeEnvFile(dir, "", cfg, cfg.Token); err != nil {
 		t.Fatal(err)
 	}
 	want := "# my notes\nMY_VAR=1\nSORTIE_TRACKER_PROJECT=new/repo\n\nexport OTHER=\"a b\"\nSORTIE_TRACKER_API_KEY=tok\nSORTIE_AGENT_MAX_TURNS=7\n" +
@@ -71,7 +71,7 @@ func TestWriteEnvFileKeepsUserLines(t *testing.T) {
 	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
 		t.Errorf("mode %v, want 0600", fi.Mode().Perm())
 	}
-	if _, _, err := writeEnvFile(dir, cfg); err != nil {
+	if _, _, err := writeEnvFile(dir, "", cfg, cfg.Token); err != nil {
 		t.Fatal(err)
 	}
 	again, _ := os.ReadFile(path)
@@ -87,7 +87,7 @@ func TestWriteEnvFileKeepsUserLines(t *testing.T) {
 func TestWriteEnvFileCreatesMissingFile(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &config.Config{Tracker: "o/r", Token: "tok", Workspaces: "/ws"}
-	path, _, err := writeEnvFile(dir, cfg)
+	path, _, err := writeEnvFile(dir, "", cfg, cfg.Token)
 	if err != nil {
 		t.Fatal(err)
 	}
