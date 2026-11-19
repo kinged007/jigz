@@ -589,7 +589,7 @@ func TestGateWorkEntryAgentHoursCloseAndReopen(t *testing.T) {
 
 func TestGateDoesNotStartAPausedLoop(t *testing.T) {
 	r := newGateRig(t, opHoursFinish)
-	r.sup.pauseLoop("plan", "manual")
+	r.sup.pauseLoop("plan", "manual", false)
 	r.settle(t)
 	r.now = gateClosedAt
 	r.step(t, 0)
