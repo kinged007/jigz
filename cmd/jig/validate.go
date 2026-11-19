@@ -78,7 +78,8 @@ func collectValidateChecks(root string) ([]validateCheck, []string, []string) {
 const agentVersionTimeout = 10 * time.Second
 
 // agentVersionOutput runs the agent command with --version and the agent's
-// env mapping added to the process environment, and returns its stdout.
+// env mapping added to the process environment, and returns its combined
+// stdout and stderr: some CLIs print the version on stderr.
 // Tests replace it.
 var agentVersionOutput = func(command string, env []string) (string, error) {
 	words := strings.Fields(command)
@@ -93,7 +94,7 @@ var agentVersionOutput = func(command string, env []string) (string, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, append(words[1:], "--version")...)
 	cmd.Env = append(os.Environ(), env...)
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
 

@@ -262,7 +262,7 @@ func spawnAgentChild(stdin io.Reader, stdout, stderr io.Writer, fail func(int, s
 			})
 		}
 	}
-	var version strings.Builder
+	var version, versionErr strings.Builder
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
@@ -274,7 +274,15 @@ func spawnAgentChild(stdin io.Reader, stdout, stderr io.Writer, fail func(int, s
 			onLine(l, false)
 		})
 	}()
-	go func() { defer wg.Done(); copyLines(errPipe, stderr, func(l string) { onLine(l, true) }) }()
+	go func() {
+		defer wg.Done()
+		copyLines(errPipe, stderr, func(l string) {
+			if versionProblem != nil && versionErr.Len() < 4096 {
+				versionErr.WriteString(l + "\n")
+			}
+			onLine(l, true)
+		})
+	}()
 	wg.Wait()
 	waitErr := cmd.Wait()
 
@@ -290,7 +298,7 @@ func spawnAgentChild(stdin io.Reader, stdout, stderr io.Writer, fail func(int, s
 		}
 	}
 	if versionProblem != nil && code == 0 && !limited {
-		if msg := versionProblem(version.String()); msg != "" {
+		if msg := versionProblem(version.String() + versionErr.String()); msg != "" {
 			markUnusable(statePath, markName, displayName, msg, now, stderr)
 		}
 	}
