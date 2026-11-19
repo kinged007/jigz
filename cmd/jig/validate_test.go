@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -123,6 +124,46 @@ func TestAgentVersionChecksUseTheAgentEnv(t *testing.T) {
 	if len(checks) != 1 || checks[0].OK || !strings.Contains(checks[0].Error, "from-process") {
 		t.Fatalf("the probe did not see the agent env: %+v", checks)
 	}
+}
+
+func TestAgentVersionChecksMissingEnv(t *testing.T) {
+	cfgFor := func(t *testing.T) *config.Config {
+		t.Helper()
+		root := t.TempDir()
+		mustWrite(t, filepath.Join(root, ".jigz", "config.yaml"), "repo: o/r\nagents:\n  pi: {runtime: pi, env: {PI_API_KEY: {from_env: JIG_TEST_MISSING_70_SRC}}}\n")
+		cfg, err := config.Load(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cfg
+	}
+	t.Run("unset from_env fails the check", func(t *testing.T) {
+		os.Unsetenv("JIG_TEST_MISSING_70_SRC")
+		called := false
+		old := agentVersionOutput
+		agentVersionOutput = func(string, []string) (string, error) { called = true; return "0.99.0\n", nil }
+		t.Cleanup(func() { agentVersionOutput = old })
+		checks := agentVersionChecks(cfgFor(t))
+		if len(checks) != 1 || checks[0].Name != "agent-version:pi" || checks[0].OK {
+			t.Fatalf("checks %+v", checks)
+		}
+		if want := "agent pi needs JIG_TEST_MISSING_70_SRC, which is not set"; !strings.Contains(checks[0].Error, want) {
+			t.Fatalf("error %q does not contain %q", checks[0].Error, want)
+		}
+		if called {
+			t.Fatal("the version probe ran despite the missing variable")
+		}
+	})
+	t.Run("set from_env probes the version", func(t *testing.T) {
+		t.Setenv("JIG_TEST_MISSING_70_SRC", "x")
+		old := agentVersionOutput
+		agentVersionOutput = func(string, []string) (string, error) { return "0.99.0\n", nil }
+		t.Cleanup(func() { agentVersionOutput = old })
+		checks := agentVersionChecks(cfgFor(t))
+		if len(checks) != 1 || !checks[0].OK {
+			t.Fatalf("checks %+v", checks)
+		}
+	})
 }
 
 func TestAgentVersionOutputRunsTheCommand(t *testing.T) {
