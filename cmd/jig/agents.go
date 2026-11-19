@@ -135,6 +135,8 @@ func fleetViewFor(p fleetconfig.Resolved, g engine.Gate, now time.Time) fleetVie
 			row.State, row.Reason = "unavailable", g.RuntimeOff(a.Runtime)
 		case len(refs.Agents[name]) > 0:
 			row.State, row.Reason = "unavailable", "unresolved references: "+strings.Join(refs.Agents[name], ", ")
+		case now.Before(st.Agents[name].ExhaustedUntil) && st.Agents[name].Unusable():
+			row.State, row.Reason = "unusable", st.Agents[name].UnusableText()
 		case now.Before(st.Agents[name].ExhaustedUntil):
 			row.State, row.Reason = "exhausted", exhaustionText(st.Agents[name])
 		case !a.Schedule.Open(now):

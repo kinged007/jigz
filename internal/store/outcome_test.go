@@ -37,6 +37,12 @@ func TestClassifyOutcome(t *testing.T) {
 		{"handoff undetermined sentence", "failed", "Sortie could not tell whether the agent changed anything, so it did not hand the issue off.", OutcomeHandoffWithheld},
 		{"handoff other sentence", "failed", "Sortie did not hand the issue off: policy refused.", OutcomeHandoffWithheld},
 
+		{"opencode version raw", "failed", "agent session start: agent: agent_not_found: OpenCode 1.18.29 is not supported; install OpenCode 2.x, published on npm as @opencode/cli", OutcomeFailedAgent},
+		{"command missing sentence", "failed", "Sortie could not find the agent command: exec: \"opencode\": executable file not found in $PATH", OutcomeFailedAgent},
+		{"credential refused raw", "failed", "agent turn 1: agent: credential_unverified: the agent runtime refused its credential: Invalid API key", OutcomeFailedAgent},
+		{"credential refused sentence", "failed", "The agent's credential was refused or could not be confirmed: Invalid API key.", OutcomeFailedAgent},
+		{"limit in credential_unverified raw", "failed", "agent turn 1: agent: credential_unverified: You've hit your 5-hour limit", OutcomeFailedLimit},
+
 		{"turn timeout raw", "failed", "agent turn 3: agent: turn_timeout: turn timed out", OutcomeTimeout},
 		{"turn timeout sentence", "failed", "The agent did not finish turn 3 within the turn time limit, so Sortie stopped it.", OutcomeTimeout},
 		{"response timeout raw", "failed", "agent turn 1: agent: response_timeout: no response", OutcomeTimeout},
