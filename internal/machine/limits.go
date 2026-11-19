@@ -157,10 +157,20 @@ const clockPat = `(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:\(([^)]+)\))?`
 
 var (
 	resetRelative = regexp.MustCompile(`(?i)\b(?:resets?|try again|retry|available again)\s+in\s+((?:\d+\s*[a-z]+[\s,]*(?:and\s+)?)+)`)
-	relativeUnit  = regexp.MustCompile(`(?i)(\d+)\s*(d|h|m|s)[a-z]*`)
+	relativeUnit  = regexp.MustCompile(`(?i)(\d+)\s*([a-z]+)`)
 	resetDate     = regexp.MustCompile(`(?i)resets?\s+(?:on\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s*(?:at\s+)?` + clockPat)
 	resetWeekday  = regexp.MustCompile(`(?i)resets?\s+(?:on\s+)?(mon|tue|wed|thu|fri|sat|sun)[a-z]*,?\s*(?:at\s+)?` + clockPat)
 )
+
+// durationUnits maps unit words to durations. resetTime rounds the sum up to
+// whole seconds so a reset never lands earlier than the message says.
+var durationUnits = map[string]time.Duration{
+	"ms": time.Millisecond, "msec": time.Millisecond, "msecs": time.Millisecond, "millisecond": time.Millisecond, "milliseconds": time.Millisecond,
+	"d": 24 * time.Hour, "day": 24 * time.Hour, "days": 24 * time.Hour,
+	"h": time.Hour, "hr": time.Hour, "hrs": time.Hour, "hour": time.Hour, "hours": time.Hour,
+	"m": time.Minute, "min": time.Minute, "mins": time.Minute, "minute": time.Minute, "minutes": time.Minute,
+	"s": time.Second, "sec": time.Second, "secs": time.Second, "second": time.Second, "seconds": time.Second,
+}
 
 var (
 	monthNames   = []string{"jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"}
@@ -185,10 +195,10 @@ func (c *Config) resetTime(text string, now time.Time) time.Time {
 		var d time.Duration
 		for _, u := range relativeUnit.FindAllStringSubmatch(m[1], -1) {
 			n, _ := strconv.Atoi(u[1])
-			d += time.Duration(n) * map[string]time.Duration{"d": 24 * time.Hour, "h": time.Hour, "m": time.Minute, "s": time.Second}[strings.ToLower(u[2])]
+			d += time.Duration(n) * durationUnits[strings.ToLower(u[2])]
 		}
 		if d > 0 {
-			return now.Add(d)
+			return now.Add((d + time.Second - 1) / time.Second * time.Second)
 		}
 	}
 	if m := resetDate.FindStringSubmatch(text); m != nil && (m[4] != "" || m[5] != "") {

@@ -127,6 +127,8 @@ func TestResetTime(t *testing.T) {
 		{"resets on Mon at 1:10am (UTC)", at(2026, 10, 26, 1, 10)},
 		{"resets in 3h", at(2026, 10, 21, 15, 0)},
 		{"try again in 2 hours 15 minutes", at(2026, 10, 21, 14, 15)},
+		{"Please try again in 820ms.", now.Add(time.Second)},
+		{"resets in 1h30m", at(2026, 10, 21, 13, 30)},
 		{"resets in 1 day, 2 hours and 5 minutes", at(2026, 10, 22, 14, 5)},
 		{"retry in 90 minutes", at(2026, 10, 21, 13, 30)},
 		{"resets 1:10am (UTC)", at(2026, 10, 22, 1, 10)},
