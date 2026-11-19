@@ -94,6 +94,13 @@ func TestAgentVersionChecks(t *testing.T) {
 			t.Fatalf("checks %+v ran %v", checks, *ran)
 		}
 	})
+	t.Run("a shared command is probed once", func(t *testing.T) {
+		ran := stub(t, "2.0.0\n", nil)
+		checks := agentVersionChecks(cfgFor(t, "  a: {runtime: opencode}\n  b: {runtime: opencode}\n  c: {runtime: opencode, env: {X: y}}\n"))
+		if len(checks) != 3 || len(*ran) != 2 {
+			t.Fatalf("checks %+v ran %v", checks, *ran)
+		}
+	})
 	t.Run("the agent command is run", func(t *testing.T) {
 		ran := stub(t, "2.0.0\n", nil)
 		agentVersionChecks(cfgFor(t, "  oc: {runtime: opencode, command: \"npx opencode\"}\n"))

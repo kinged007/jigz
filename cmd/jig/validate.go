@@ -99,6 +99,11 @@ var agentVersionOutput = func(command string, env []string) (string, error) {
 // engine refuses below a minimum release, the same check the engine makes
 // at each session start.
 func agentVersionChecks(cfg *config.Config) []validateCheck {
+	type probe struct {
+		out string
+		err error
+	}
+	probes := map[string]probe{}
 	var checks []validateCheck
 	for _, name := range sortedKeys(cfg.Agents) {
 		a := cfg.Agents[name]
@@ -111,7 +116,13 @@ func agentVersionChecks(cfg *config.Config) []validateCheck {
 		}
 		c := validateCheck{Name: "agent-version:" + name, OK: true}
 		env, _ := agentEnv(a)
-		out, err := agentVersionOutput(command, env)
+		key := command + "\x00" + strings.Join(env, "\x00")
+		p, seen := probes[key]
+		if !seen {
+			p.out, p.err = agentVersionOutput(command, env)
+			probes[key] = p
+		}
+		out, err := p.out, p.err
 		switch {
 		case err != nil && out == "":
 			c.OK, c.Error = false, fmt.Sprintf("agent %s: could not run %q --version: %v", name, command, err)
