@@ -55,10 +55,14 @@ type budgetRequest struct {
 	Workflow string `json:"workflow"`
 }
 
-// periodStart returns the start of the weekly (ISO week, Monday) or
-// monthly period that contains now, in loc.
+// periodStart returns the start of the 5h (windows at 00:00, 05:00, 10:00,
+// 15:00 and 20:00), weekly (ISO week, Monday) or monthly period that
+// contains now, in loc.
 func periodStart(now time.Time, period string, loc *time.Location) time.Time {
 	t := now.In(loc)
+	if period == "5h" {
+		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour()/5*5, 0, 0, 0, loc)
+	}
 	if period == "monthly" {
 		return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, loc)
 	}
