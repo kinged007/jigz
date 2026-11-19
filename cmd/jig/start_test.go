@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -21,6 +23,7 @@ type fakeStart struct {
 }
 
 func newFakeStart(t *testing.T) *fakeStart {
+	t.Setenv("JIG_REGISTRY_DIR", t.TempDir())
 	f := &fakeStart{logPath: filepath.Join(t.TempDir(), "repo.log")}
 	f.st = starter{
 		logPath: func(string) (string, error) { return f.logPath, nil },
@@ -173,5 +176,85 @@ func TestIsJigdName(t *testing.T) {
 		if got := isJigdName(arg); got != want {
 			t.Errorf("isJigdName(%q) = %v, want %v", arg, got, want)
 		}
+	}
+}
+
+func TestRotateStartLogKeepsSmallFile(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "s.log")
+	appendLog(t, p, "small\n")
+	rotateStartLog(p)
+	if _, err := os.Stat(p + ".1"); !os.IsNotExist(err) {
+		t.Errorf("small log rotated unexpectedly")
+	}
+	data, err := os.ReadFile(p)
+	if err != nil || string(data) != "small\n" {
+		t.Errorf("small log changed: %q %v", data, err)
+	}
+}
+
+func TestRotateStartLogShiftsLargeFile(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "s.log")
+	big := make([]byte, childLogMaxBytes+1024)
+	for i := range big {
+		big[i] = 'x'
+	}
+	if err := os.WriteFile(p, big, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	appendLog(t, p+".1", "old1\n")
+	rotateStartLog(p)
+	if _, err := os.Stat(p + ".1"); err != nil {
+		t.Fatalf("rotated log missing: %v", err)
+	}
+	if _, err := os.Stat(p + ".2"); err != nil {
+		t.Fatalf("shifted log missing: %v", err)
+	}
+	if _, err := os.Stat(p); !os.IsNotExist(err) {
+		t.Errorf("original should move to .1, leaving no file behind")
+	}
+}
+
+func TestStartConcurrentSecondSeesAlreadyRunning(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("JIG_REGISTRY_DIR", dir)
+	var live atomic.Bool
+	var spawns atomic.Int32
+	logs := []string{filepath.Join(t.TempDir(), "r1.log"), filepath.Join(t.TempDir(), "r2.log")}
+	mk := func(logPath string) starter {
+		return starter{
+			logPath: func(string) (string, error) { return logPath, nil },
+			running: func(string) (registryEntry, error) {
+				if live.Load() {
+					return registryEntry{PID: 77}, nil
+				}
+				return registryEntry{}, errors.New("no loop is running")
+			},
+			spawn: func([]string, string) (int, <-chan error, error) {
+				spawns.Add(1)
+				time.Sleep(100 * time.Millisecond)
+				live.Store(true)
+				return 77, make(chan error), nil
+			},
+			budget: 5 * time.Second,
+			out:    func(string, ...any) {},
+		}
+	}
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for i := range 2 {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errs[i] = mk(logs[i]).start(cmdline{}, "/r")
+		}(i)
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := spawns.Load(); n != 1 {
+		t.Errorf("spawned %d times, want 1", n)
 	}
 }

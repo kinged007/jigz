@@ -126,6 +126,11 @@ func runStart(args []string) int {
 }
 
 func (s starter) start(c cmdline, root string) error {
+	lock, err := lockFile(".start.lock")
+	if err != nil {
+		return err
+	}
+	defer lock.release()
 	if e, err := s.running(root); err == nil {
 		s.out("already running for %s (pid %d)\n", root, e.PID)
 		if e.Dashboard != "" {
@@ -138,6 +143,7 @@ func (s starter) start(c cmdline, root string) error {
 	if err != nil {
 		return err
 	}
+	rotateStartLog(logPath)
 	var offset int64
 	if fi, err := os.Stat(logPath); err == nil {
 		offset = fi.Size()
@@ -169,6 +175,21 @@ func (s starter) start(c cmdline, root string) error {
 	}
 	s.out("log:    %s\nstatus: jig status %s\nstop:   jig stop %s\n", logPath, root, root)
 	return nil
+}
+
+// rotateStartLog shifts a previous state log aside when it is already over
+// the child-log limit, so the supervisor log cannot grow without bound
+// across restarts. The child appends directly, so there is no live rotation.
+func rotateStartLog(path string) {
+	fi, err := os.Stat(path)
+	if err != nil || fi.Size() <= childLogMaxBytes {
+		return
+	}
+	_ = os.Remove(fmt.Sprintf("%s.%d", path, childLogKeep))
+	for i := childLogKeep - 1; i >= 1; i-- {
+		_ = os.Rename(fmt.Sprintf("%s.%d", path, i), fmt.Sprintf("%s.%d", path, i+1))
+	}
+	_ = os.Rename(path, path+".1")
 }
 
 func logFrom(path string, offset int64) string {
