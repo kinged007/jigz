@@ -87,7 +87,8 @@ Details: [docs/concepts.md](docs/concepts.md).
 - Stamp prompt files with the binary version that wrote them, so an
   upgrade can offer a new version of a file the user has not edited.
 
-The full ordered plan lives in [ROADMAP.md](ROADMAP.md).
+The full ordered plan lives in [ROADMAP.md](ROADMAP.md); where the product
+is heading is in [VISION.md](VISION.md).
 
 ## Contributing
 
