@@ -186,6 +186,12 @@ func TestWorkGateDecide(t *testing.T) {
 			end: machine.EndStop, want: gateStopNow,
 		},
 		{
+			name: "an unusable candidate outside its hours has no estimate", cfg: agentHoursA + workPlan,
+			st:  machine.State{Agents: map[string]machine.EntryState{"a": unusableEntry(now, "Invalid API key")}},
+			now: now, loops: []gateLoop{{name: "plan", up: true}},
+			agent: "a", reason: reasonUnusable + ": a: Invalid API key", end: machine.EndStop, want: gateStopNow,
+		},
+		{
 			name: "all from_env references unresolved",
 			cfg:  "agents:\n  a:\n    runtime: pi\n    env:\n      PLAN_TOKEN: {from_env: JIGZ_TEST_PLAN_TOKEN}\n  b:\n    runtime: pi\n    env:\n      PLAN_TOKEN: {from_env: JIGZ_TEST_PLAN_TOKEN}\nwork:\n  plan:\n    agent: [a, b]\n    query_filter: x\n    rules:\n      - { name: r, match: { labels: [x] }, prompt: p.md }\n",
 			env:  map[string]string{"JIGZ_TEST_PLAN_TOKEN": ""},

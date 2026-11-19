@@ -190,9 +190,9 @@ func (in gateInputs) workView(res config.Resolved, now time.Time) loopView {
 
 // estimate fills the estimated start: the earliest of the next working
 // hours start of a candidate, the earliest usage-limit reset of a
-// candidate and the next operating hours start. An unusable agent has no
-// reset. No future input leaves the estimate zero and the reason shows
-// alone.
+// candidate and the next operating hours start. A blocked unusable agent
+// is not a candidate. No future input leaves the estimate zero and the
+// reason shows alone.
 func (v *loopView) estimate(res config.Resolved, in gateInputs, now time.Time) {
 	consider := func(t time.Time) {
 		if t.After(now) && (v.ETA.IsZero() || t.Before(v.ETA)) {
@@ -201,13 +201,14 @@ func (v *loopView) estimate(res config.Resolved, in gateInputs, now time.Time) {
 	}
 	names, over := candidates(res)
 	for _, name := range names {
+		if es := in.state.Agents[name]; es.Unusable() && now.Before(es.ExhaustedUntil) {
+			continue
+		}
 		sched := in.schedule(name, over)
 		if !sched.Open(now) {
 			consider(sched.Next(now))
 		}
-		if es := in.state.Agents[name]; !es.Unusable() {
-			consider(es.ExhaustedUntil)
-		}
+		consider(in.state.Agents[name].ExhaustedUntil)
 	}
 	if !in.operating.Open(now) {
 		consider(in.operating.Next(now))
