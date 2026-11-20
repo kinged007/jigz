@@ -164,6 +164,29 @@ func TestAgentVersionChecksMissingEnv(t *testing.T) {
 			t.Fatalf("checks %+v", checks)
 		}
 	})
+	t.Run("unset from_env fails for a runtime without a version check", func(t *testing.T) {
+		os.Unsetenv("JIG_TEST_MISSING_70_SRC")
+		called := false
+		old := agentVersionOutput
+		agentVersionOutput = func(string, []string) (string, error) { called = true; return "", nil }
+		t.Cleanup(func() { agentVersionOutput = old })
+		root := t.TempDir()
+		mustWrite(t, filepath.Join(root, ".jigz", "config.yaml"), "repo: o/r\nagents:\n  cc: {runtime: claude-code, env: {ANTHROPIC_API_KEY: {from_env: JIG_TEST_MISSING_70_SRC}}}\n")
+		cfg, err := config.Load(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checks := agentVersionChecks(cfg)
+		if len(checks) != 1 || checks[0].Name != "agent-version:cc" || checks[0].OK {
+			t.Fatalf("checks %+v", checks)
+		}
+		if want := "agent cc needs JIG_TEST_MISSING_70_SRC, which is not set"; !strings.Contains(checks[0].Error, want) {
+			t.Fatalf("error %q does not contain %q", checks[0].Error, want)
+		}
+		if called {
+			t.Fatal("the version probe ran despite the missing variable")
+		}
+	})
 }
 
 func TestAgentVersionOutputRunsTheCommand(t *testing.T) {
