@@ -453,16 +453,18 @@ func (s *supervisor) reload() {
 	}
 	if envChanged {
 		for _, name := range s.runningNames() {
-			fmt.Fprintf(os.Stderr, "jig: %s: env changed, draining and restarting\n", name)
-			s.recycleDrain(name)
+			if s.recycleDrain(name) {
+				fmt.Fprintf(os.Stderr, "jig: %s: env changed, draining and restarting\n", name)
+			}
 		}
 	}
 	old := s.querySnapshot()
 	s.refreshState(s.clock(), true)
 	for name, q := range s.querySnapshot() {
 		if oq, ok := old[name]; ok && oq != q {
-			fmt.Fprintf(os.Stderr, "jig: %s: query changed, draining and restarting\n", name)
-			s.recycleDrain(name)
+			if s.recycleDrain(name) {
+				fmt.Fprintf(os.Stderr, "jig: %s: query changed, draining and restarting\n", name)
+			}
 		}
 	}
 	added := s.mergeDiscoveredDefs()

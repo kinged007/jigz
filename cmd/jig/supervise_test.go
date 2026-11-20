@@ -335,3 +335,13 @@ func TestReloadWithAnUnchangedConfigRecyclesNothing(t *testing.T) {
 		t.Errorf("user lines lost:\n%s", body)
 	}
 }
+
+func TestReloadDoesNotRecycleStoppingLoops(t *testing.T) {
+	sup, root := reloadRig(t)
+	mustWrite(t, filepath.Join(root, ".jigz", "config.yaml"), "repo: owner/after\n")
+	sup.procs["plan"].stopping, sup.procs["plan"].drain, sup.procs["plan"].recycle = true, true, false
+	sup.reload()
+	if p := sup.procs["plan"]; p.recycle {
+		t.Errorf("a loop stopping for a stop request was recycled: %+v", p)
+	}
+}
