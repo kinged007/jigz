@@ -6,6 +6,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+)
+
+// repoEnvFromFile records the keys loadDotenv set from each file path, so
+// a reload can re-apply changed values. A key the environment already
+// held is never recorded, so the environment keeps winning for it.
+var (
+	repoEnvMu       sync.Mutex
+	repoEnvFromFile = map[string]map[string]bool{}
 )
 
 // loadRepoEnv loads <root>/.jigz/.env, the file the user owns. Jig never
@@ -14,15 +23,57 @@ func loadRepoEnv(root string) error {
 	return loadDotenv(filepath.Join(root, ".jigz", ".env"))
 }
 
+// reloadRepoEnv re-reads <root>/.jigz/.env into this process. Keys first
+// set from the file are updated to the new file values, and new keys the
+// environment does not hold are added. A key the environment held before
+// the first load keeps winning. A missing file is not an error.
+func reloadRepoEnv(root string) error {
+	path := filepath.Join(root, ".jigz", ".env")
+	pairs, err := parseDotenv(path)
+	if err != nil {
+		return err
+	}
+	repoEnvMu.Lock()
+	defer repoEnvMu.Unlock()
+	fromFile := repoEnvFromFile[path]
+	if fromFile == nil {
+		fromFile = map[string]bool{}
+		repoEnvFromFile[path] = fromFile
+	}
+	for _, kv := range pairs {
+		if fromFile[kv[0]] {
+			if err := os.Setenv(kv[0], kv[1]); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, set := os.LookupEnv(kv[0]); !set {
+			if err := os.Setenv(kv[0], kv[1]); err != nil {
+				return err
+			}
+			fromFile[kv[0]] = true
+		}
+	}
+	return nil
+}
+
 // loadDotenv sets the KEY=VALUE pairs of the file at path that are not
 // already in the environment. A missing file is not an error.
 func loadDotenv(path string) error {
 	pairs, err := parseDotenv(path)
+	repoEnvMu.Lock()
+	defer repoEnvMu.Unlock()
+	fromFile := repoEnvFromFile[path]
+	if fromFile == nil {
+		fromFile = map[string]bool{}
+		repoEnvFromFile[path] = fromFile
+	}
 	for _, kv := range pairs {
 		if _, set := os.LookupEnv(kv[0]); !set {
 			if err := os.Setenv(kv[0], kv[1]); err != nil {
 				return err
 			}
+			fromFile[kv[0]] = true
 		}
 	}
 	return err

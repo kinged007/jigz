@@ -738,7 +738,10 @@ lines and lines starting with `#` are skipped, a leading `export ` is allowed,
 and one pair of quotes around a value is removed.
 
 Every command that takes a repo root loads the file first, so the loops, the
-engine and the agent processes see the values. A variable that is already in
+engine and the agent processes see the values. A running supervisor re-reads
+the file on `jig reload`: keys first set from the file take the new file
+values, new keys are added, and keys the environment already held keep their
+values. A variable that is already in
 the environment is not overridden by the file. The file applies to its own
 repo only: each repo runs in its own process, and the dashboard that serves
 several repos passes a repo's `.env` only to the engine check it runs for that

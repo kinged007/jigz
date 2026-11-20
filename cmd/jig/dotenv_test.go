@@ -95,6 +95,44 @@ func TestTargetRepoEnvOverridesDashboardValueOnly(t *testing.T) {
 	}
 }
 
+func TestReloadRepoEnvUpdatesChangedValues(t *testing.T) {
+	root := t.TempDir()
+	writeRepoEnv(t, root, "JIG_TEST_RELOAD=file-v1\n")
+	os.Unsetenv("JIG_TEST_RELOAD")
+	t.Cleanup(func() { os.Unsetenv("JIG_TEST_RELOAD") })
+	if err := loadRepoEnv(root); err != nil {
+		t.Fatal(err)
+	}
+	writeRepoEnv(t, root, "JIG_TEST_RELOAD=file-v2\nJIG_TEST_RELOAD_NEW=added\n")
+	os.Unsetenv("JIG_TEST_RELOAD_NEW")
+	t.Cleanup(func() { os.Unsetenv("JIG_TEST_RELOAD_NEW") })
+	if err := reloadRepoEnv(root); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("JIG_TEST_RELOAD"); got != "file-v2" {
+		t.Errorf("JIG_TEST_RELOAD = %q, want file-v2", got)
+	}
+	if got := os.Getenv("JIG_TEST_RELOAD_NEW"); got != "added" {
+		t.Errorf("JIG_TEST_RELOAD_NEW = %q, want added", got)
+	}
+}
+
+func TestReloadRepoEnvKeepsEnvironmentWins(t *testing.T) {
+	root := t.TempDir()
+	writeRepoEnv(t, root, "JIG_TEST_RELOAD_ENV=file\n")
+	t.Setenv("JIG_TEST_RELOAD_ENV", "environment")
+	if err := loadRepoEnv(root); err != nil {
+		t.Fatal(err)
+	}
+	writeRepoEnv(t, root, "JIG_TEST_RELOAD_ENV=changed\n")
+	if err := reloadRepoEnv(root); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("JIG_TEST_RELOAD_ENV"); got != "environment" {
+		t.Errorf("JIG_TEST_RELOAD_ENV = %q, want environment", got)
+	}
+}
+
 func TestRepoEnvIsGitignored(t *testing.T) {
 	root := t.TempDir()
 	if out, err := exec.Command("git", "-C", root, "init", "-q").CombinedOutput(); err != nil {

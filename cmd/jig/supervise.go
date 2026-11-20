@@ -409,11 +409,17 @@ func (s *supervisor) runningNames() []string {
 	return names
 }
 
-// reload re-reads the configuration, picks up new loop documents, rewrites
-// the env file, and restarts the loops whose query or env file values
-// changed: the engine reads the filter and the env file only at start. A changed loop drains first, so in-flight work
+// reload re-reads the configuration and .jigz/.env, picks up new loop
+// documents, rewrites the env file, and restarts the loops whose query
+// or env file values changed: the engine reads the filter and the env
+// file only at start. A changed loop drains first, so in-flight work
 // finishes; a loop that is not running is held for the gate to start.
 func (s *supervisor) reload() {
+	if err := reloadRepoEnv(s.root); err != nil {
+		fmt.Fprintln(os.Stderr, "jig: reload:", err)
+		s.republish()
+		return
+	}
 	cfg, err := config.Load(s.root)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "jig: reload:", err)
