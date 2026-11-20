@@ -465,6 +465,7 @@ func (s *supervisor) reload() {
 		}
 	}
 	old := s.querySnapshot()
+	s.clearUnusable()
 	s.refreshState(s.clock(), true)
 	for name, q := range s.querySnapshot() {
 		if oq, ok := old[name]; ok && oq != q {

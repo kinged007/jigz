@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kinged007/jigz/internal/config"
+	"github.com/kinged007/jigz/internal/machine"
 )
 
 func mustLoc(t *testing.T, name string) *time.Location {
@@ -37,6 +38,11 @@ func TestPeriodStart(t *testing.T) {
 		{"weekly across a month", "weekly", time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC), time.UTC, "2026-10-26T00:00:00Z"},
 		{"weekly across a year", "weekly", time.Date(2027, 1, 1, 10, 0, 0, 0, time.UTC), time.UTC, "2026-12-28T00:00:00Z"},
 		{"weekly timezone ahead of UTC", "weekly", time.Date(2026, 10, 18, 23, 30, 0, 0, time.UTC), jhb, "2026-10-19T00:00:00+02:00"},
+		{"5h before the first reset", "5h", time.Date(2026, 10, 14, 4, 59, 0, 0, time.UTC), time.UTC, "2026-10-14T00:00:00Z"},
+		{"5h at a reset", "5h", time.Date(2026, 10, 14, 5, 0, 0, 0, time.UTC), time.UTC, "2026-10-14T05:00:00Z"},
+		{"5h last window of the day", "5h", time.Date(2026, 10, 14, 21, 30, 0, 0, time.UTC), time.UTC, "2026-10-14T20:00:00Z"},
+		{"5h resets at midnight", "5h", time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC), time.UTC, "2026-10-15T00:00:00Z"},
+		{"5h timezone ahead of UTC", "5h", time.Date(2026, 10, 14, 21, 30, 0, 0, time.UTC), jhb, "2026-10-14T20:00:00+02:00"},
 		{"monthly", "monthly", time.Date(2026, 10, 31, 23, 0, 0, 0, time.UTC), time.UTC, "2026-10-01T00:00:00Z"},
 		{"monthly rollover", "monthly", time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), time.UTC, "2026-11-01T00:00:00Z"},
 		{"monthly timezone ahead of UTC", "monthly", time.Date(2026, 10, 31, 23, 0, 0, 0, time.UTC), jhb, "2026-11-01T00:00:00+02:00"},
@@ -206,6 +212,87 @@ func TestBudgetWarnsOnceThenPausesAtCap(t *testing.T) {
 	}
 }
 
+func TestBudgetEndFinishDrainsInsteadOfKilling(t *testing.T) {
+	r := newBudgetRig(t, 1000)
+	b := r.sup.budgets["plan"]
+	b.End = machine.EndFinish
+	r.sup.budgets["plan"] = b
+	r.addRun(t, 1000, 1, r.now)
+	r.step(t, time.Minute)
+	if w := r.workflow(t); w.State != "paused" || w.Budget == nil || w.Budget.PausedBy != "budget" {
+		t.Fatalf("at cap: %+v %+v", w, w.Budget)
+	}
+	r.sup.mu.Lock()
+	p := r.sup.procs["plan"]
+	stopping, drain := p.stopping, p.drain
+	r.sup.mu.Unlock()
+	if !stopping || !drain {
+		t.Errorf("stopping %v drain %v, want a drain that leaves the child running", stopping, drain)
+	}
+	select {
+	case ev := <-r.sup.events:
+		t.Fatalf("the child exited at the cap: %+v", ev)
+	case <-time.After(300 * time.Millisecond):
+	}
+	r.sup.terminate("plan")
+	r.settle(t)
+}
+
+func TestManualPauseStopsAtOnceWithEndFinish(t *testing.T) {
+	r := newBudgetRig(t, 1000)
+	b := r.sup.budgets["plan"]
+	b.End = machine.EndFinish
+	r.sup.budgets["plan"] = b
+	if err := requestBudgetAction(r.root, "pause", "plan"); err != nil {
+		t.Fatal(err)
+	}
+	r.step(t, time.Minute)
+	if w := r.workflow(t); w.State != "paused" || w.Budget == nil || w.Budget.PausedBy != "manual" {
+		t.Fatalf("after pause: %+v %+v", w, w.Budget)
+	}
+	r.sup.mu.Lock()
+	p := r.sup.procs["plan"]
+	stopping, drain := p.stopping, p.drain
+	r.sup.mu.Unlock()
+	if !stopping || drain {
+		t.Errorf("stopping %v drain %v, want an immediate stop", stopping, drain)
+	}
+	r.settle(t)
+	if w := r.workflow(t); w.LastExitCode == nil {
+		t.Errorf("the child did not exit: %+v", w)
+	}
+}
+
+func TestManualPauseDuringBudgetFinishDrainStopsAtOnce(t *testing.T) {
+	r := newBudgetRig(t, 1000)
+	b := r.sup.budgets["plan"]
+	b.End = machine.EndFinish
+	r.sup.budgets["plan"] = b
+	r.addRun(t, 1000, 1, r.now)
+	r.step(t, time.Minute)
+	if w := r.workflow(t); w.State != "paused" || w.Budget.PausedBy != "budget" {
+		t.Fatalf("at cap: %+v %+v", w, w.Budget)
+	}
+	if err := requestBudgetAction(r.root, "pause", "plan"); err != nil {
+		t.Fatal(err)
+	}
+	r.step(t, time.Minute)
+	if w := r.workflow(t); w.State != "paused" || w.Budget.PausedBy != "manual" {
+		t.Fatalf("after manual pause: %+v %+v", w, w.Budget)
+	}
+	r.sup.mu.Lock()
+	p := r.sup.procs["plan"]
+	stopping, drain := p.stopping, p.drain
+	r.sup.mu.Unlock()
+	if !stopping || drain {
+		t.Errorf("stopping %v drain %v, want an immediate stop", stopping, drain)
+	}
+	r.settle(t)
+	if w := r.workflow(t); w.LastExitCode == nil {
+		t.Errorf("the child did not exit: %+v", w)
+	}
+}
+
 func TestBudgetThrottledToPollInterval(t *testing.T) {
 	r := newBudgetRig(t, 1000)
 	r.step(t, time.Minute)
@@ -267,7 +354,7 @@ func TestBudgetStatePersistsAndHoldsTheChildDown(t *testing.T) {
 
 func TestBudgetStateRolloverAtBootKeepsManualPause(t *testing.T) {
 	r := newBudgetRig(t, 1000)
-	r.sup.pauseLoop("plan", "manual")
+	r.sup.pauseLoop("plan", "manual", false)
 	r.sup.saveBudgetStates()
 	r.settle(t)
 	r.now = r.now.Add(30 * 24 * time.Hour)
@@ -387,7 +474,7 @@ func TestOverrideWithoutBudgetIsIgnored(t *testing.T) {
 
 func TestSleepDoesNotWakePausedWorkflows(t *testing.T) {
 	r := newSleepRig(t, true)
-	r.sup.pauseLoop("plan", "manual")
+	r.sup.pauseLoop("plan", "manual", false)
 	r.settle(t)
 	r.sup.sleep(r.now)
 	r.sup.wake(r.now)
@@ -402,7 +489,7 @@ func TestSleepDoesNotWakePausedWorkflows(t *testing.T) {
 func TestRecycleDoesNotStartAPausedWorkflow(t *testing.T) {
 	r := newBudgetRig(t, 0)
 	r.sup.stopAll(false, true)
-	r.sup.pauseLoop("plan", "manual")
+	r.sup.pauseLoop("plan", "manual", false)
 	r.settle(t)
 	if !r.sup.empty() {
 		t.Error("a recycle started a paused workflow")

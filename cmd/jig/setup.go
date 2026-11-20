@@ -451,10 +451,11 @@ func configTemplateBody(repo string) string {
 		"    # Spend cap for this loop, per period. The slug needs its\n" +
 		"    # WORKFLOW.<slug>.md; the loop pauses at max_tokens.\n" +
 		"    #budget:\n" +
-		"    #  period: monthly\n" +
+		"    #  period: monthly   # 5h | weekly | monthly\n" +
 		"    #  max_tokens: 5000000\n" +
 		"    #  warn_percent: 80\n" +
 		"    #  on_exceed: pause\n" +
+		"    #  end: stop         # stop | finish (let runs in flight complete)\n" +
 		"    rules:\n" +
 		"    - { name: plan, match: { labels: [agent:plan] }, prompt: prompts/plan.md }\n" +
 		"    - { name: plan-build, match: { labels: [agent:plan-build] }, prompt: prompts/plan.md, next: build-chain }\n" +

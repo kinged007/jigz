@@ -94,6 +94,8 @@ func runAgentTarget(cfg *config.Config, state machine.State, statePath string, f
 				return fail(exitNoAgent, "agent %s is exhausted until %s", name, until.Format(time.RFC3339))
 			}
 			state.Agents[name] = e
+		} else if e.Unusable() {
+			return fail(exitNoAgent, "agent %s is unusable: %s", name, e.UnusableText())
 		} else {
 			return fail(exitNoAgent, "agent %s is exhausted until %s", name, until.Format(time.RFC3339))
 		}
@@ -102,18 +104,11 @@ func runAgentTarget(cfg *config.Config, state machine.State, statePath string, f
 	if wd, err := os.Getwd(); err == nil {
 		env = append(env, "JIG_WORKSPACE="+wd)
 	}
-	for _, k := range sortedKeys(a.Env) {
-		v := a.Env[k]
-		if v.FromEnv != "" {
-			if s := os.Getenv(v.FromEnv); s != "" {
-				env = append(env, k+"="+s)
-			} else {
-				return fail(exitNoAgent, "agent %s needs %s, which is not set", name, v.FromEnv)
-			}
-			continue
-		}
-		env = append(env, k+"="+v.Str)
+	mapped, missing := agentEnv(a)
+	if missing != "" {
+		return fail(exitNoAgent, "agent %s needs %s, which is not set", name, missing)
 	}
+	env = append(env, mapped...)
 	// Usage-limit text uses the machine file's limits block when it
 	// loads; a fleet agent carries no custom patterns of its own.
 	mine := &machine.Config{}
@@ -128,12 +123,37 @@ func runAgentTarget(cfg *config.Config, state machine.State, statePath string, f
 	modelDetect := func(line string, isStderr bool) (string, bool) {
 		return machine.IsModelError(a.Runtime, line, isStderr)
 	}
+	unusableDetect := func(line string, isStderr bool) (string, bool) {
+		return machine.IsUnusable(a.Runtime, line, isStderr)
+	}
+	// The engine reads the version through the agent command before it
+	// starts a session, so the check runs on that call.
+	var versionProblem func(string) string
+	if len(childArgs) == 1 && childArgs[0] == "--version" {
+		versionProblem = func(out string) string { return machine.VersionProblem(a.Runtime, out) }
+	}
 	command := a.Command
 	if command == "" {
 		command = machine.DefaultCommand(a.Runtime)
 	}
 	return spawnAgentChild(stdin, stdout, stderr, fail, command, childArgs,
-		append(os.Environ(), env...), detect, modelDetect, name, name, a.Model, statePath, time.Now())
+		append(os.Environ(), env...), detect, modelDetect, unusableDetect, versionProblem, name, name, a.Model, statePath, time.Now())
+}
+
+// agentEnv resolves the agent's env mapping from this process's
+// environment. It returns the first from_env reference that is unset.
+func agentEnv(a config.Agent) (env []string, missing string) {
+	for _, k := range sortedKeys(a.Env) {
+		v := a.Env[k]
+		if v.FromEnv == "" {
+			env = append(env, k+"="+v.Str)
+		} else if s := os.Getenv(v.FromEnv); s != "" {
+			env = append(env, k+"="+s)
+		} else if missing == "" {
+			missing = v.FromEnv
+		}
+	}
+	return env, missing
 }
 
 // agentExecRoot finds the repository the loop runs in: agent-exec runs
@@ -170,8 +190,11 @@ func isRepoRoot(dir string) bool {
 // spawnAgentChild runs the agent command, split on whitespace without a
 // shell, with the engine's arguments
 // and environment, marks the entry used, and exhausts it when the
-// output matches a usage-limit pattern. markName is the state key.
-func spawnAgentChild(stdin io.Reader, stdout, stderr io.Writer, fail func(int, string, ...any) int, command string, childArgs, env []string, detect func(string, bool) (time.Time, string, bool), modelDetect func(string, bool) (string, bool), markName, displayName, model, statePath string, now time.Time) int {
+// output matches a usage-limit pattern. It marks the agent unusable when
+// the output shows a failure that no retry fixes, when the command is not
+// installed, or when versionProblem (set for a --version call) refuses the
+// version. markName is the state key.
+func spawnAgentChild(stdin io.Reader, stdout, stderr io.Writer, fail func(int, string, ...any) int, command string, childArgs, env []string, detect func(string, bool) (time.Time, string, bool), modelDetect, unusableDetect func(string, bool) (string, bool), versionProblem func(string) string, markName, displayName, model, statePath string, now time.Time) int {
 	if err := machine.MarkUsed(statePath, markName, now); err != nil {
 		fmt.Fprintln(stderr, "jig agent-exec: warning:", err)
 	}
@@ -182,6 +205,7 @@ func spawnAgentChild(stdin io.Reader, stdout, stderr io.Writer, fail func(int, s
 	}
 	path, err := exec.LookPath(words[0])
 	if err != nil {
+		markUnusable(statePath, markName, displayName, "agent command not found: "+err.Error(), now, stderr)
 		return fail(127, "%v", err)
 	}
 	cmd := exec.Command(path, append(words[1:], childArgs...)...)
@@ -232,12 +256,36 @@ func spawnAgentChild(stdin io.Reader, stdout, stderr io.Writer, fail func(int, s
 				}
 				fmt.Fprintf(stderr, "jig agent-exec: %s: model unavailable, exhausted until %s: %s\n", displayName, modelCooldown.Format(time.RFC3339), msg)
 			})
+			return
+		}
+		if msg, ok := unusableDetect(line, isStderr); ok {
+			once.Do(func() {
+				limited = true
+				markUnusable(statePath, markName, displayName, msg, now, stderr)
+			})
 		}
 	}
+	var version, versionErr strings.Builder
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go func() { defer wg.Done(); copyLines(outPipe, stdout, func(l string) { onLine(l, false) }) }()
-	go func() { defer wg.Done(); copyLines(errPipe, stderr, func(l string) { onLine(l, true) }) }()
+	go func() {
+		defer wg.Done()
+		copyLines(outPipe, stdout, func(l string) {
+			if versionProblem != nil && version.Len() < 4096 {
+				version.WriteString(l + "\n")
+			}
+			onLine(l, false)
+		})
+	}()
+	go func() {
+		defer wg.Done()
+		copyLines(errPipe, stderr, func(l string) {
+			if versionProblem != nil && versionErr.Len() < 4096 {
+				versionErr.WriteString(l + "\n")
+			}
+			onLine(l, true)
+		})
+	}()
 	wg.Wait()
 	waitErr := cmd.Wait()
 
@@ -252,10 +300,22 @@ func spawnAgentChild(stdin io.Reader, stdout, stderr io.Writer, fail func(int, s
 			code = 128 + int(ws.Signal())
 		}
 	}
+	if versionProblem != nil && code == 0 && !limited {
+		if msg := versionProblem(version.String() + versionErr.String()); msg != "" {
+			markUnusable(statePath, markName, displayName, msg, now, stderr)
+		}
+	}
 	if limited && code == 0 {
 		code = 1
 	}
 	return code
+}
+
+func markUnusable(statePath, name, displayName, reason string, now time.Time, stderr io.Writer) {
+	if err := machine.MarkUnusable(statePath, name, now, reason); err != nil {
+		fmt.Fprintln(stderr, "jig agent-exec: warning:", err)
+	}
+	fmt.Fprintf(stderr, "jig agent-exec: %s is unusable until its block is cleared: %s\n", displayName, reason)
 }
 
 // copyLines writes each line to w as soon as it is read, byte for byte, and

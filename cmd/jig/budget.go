@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kinged007/jigz/internal/config"
+	"github.com/kinged007/jigz/internal/machine"
 )
 
 const (
@@ -55,10 +56,14 @@ type budgetRequest struct {
 	Workflow string `json:"workflow"`
 }
 
-// periodStart returns the start of the weekly (ISO week, Monday) or
-// monthly period that contains now, in loc.
+// periodStart returns the start of the 5h (windows at 00:00, 05:00, 10:00,
+// 15:00 and 20:00), weekly (ISO week, Monday) or monthly period that
+// contains now, in loc.
 func periodStart(now time.Time, period string, loc *time.Location) time.Time {
 	t := now.In(loc)
+	if period == "5h" {
+		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour()/5*5, 0, 0, 0, loc)
+	}
 	if period == "monthly" {
 		return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, loc)
 	}
@@ -258,16 +263,19 @@ func (s *supervisor) isPaused(name string) bool {
 }
 
 // pauseLoop marks the workflow paused and stops its child as a requested
-// stop, so the exit does not count as a crash.
-func (s *supervisor) pauseLoop(name, by string) {
+// stop, so the exit does not count as a crash. With drain the child keeps
+// running until it has no work in flight, then drainStep stops it.
+func (s *supervisor) pauseLoop(name, by string, drain bool) {
 	s.mu.Lock()
 	st := s.stateLocked(name)
 	st.Paused, st.PausedBy = true, by
 	if p := s.procs[name]; p != nil {
-		p.stopping, p.drain, p.recycle = true, false, false
+		p.stopping, p.drain, p.recycle = true, drain, false
 	}
 	s.mu.Unlock()
-	s.terminate(name)
+	if !drain {
+		s.terminate(name)
+	}
 }
 
 func (s *supervisor) clearPause(name string) {
@@ -398,7 +406,7 @@ func (s *supervisor) budgetPoll(boot bool) (bool, error) {
 		if exceed {
 			fmt.Fprintf(os.Stderr, "jig: budget: %s reached its cap of %d tokens, pausing the loop until the next period or a resume\n",
 				name, b.MaxTokens)
-			s.pauseLoop(name, "budget")
+			s.pauseLoop(name, "budget", b.End == machine.EndFinish)
 		}
 	}
 	return polled, nil
@@ -455,11 +463,9 @@ func (s *supervisor) applyBudgetRequest(req budgetRequest) (bool, error) {
 	case "pause":
 		switch {
 		case !paused:
-			s.pauseLoop(req.Workflow, "manual")
+			s.pauseLoop(req.Workflow, "manual", false)
 		case by == "budget":
-			s.mu.Lock()
-			s.stateLocked(req.Workflow).PausedBy = "manual"
-			s.mu.Unlock()
+			s.pauseLoop(req.Workflow, "manual", false)
 		default:
 			return false, nil
 		}

@@ -134,7 +134,9 @@ the config model everything else sits on), then the scheduled-work extension
 that builds on that model (item 2), then reliability fixes that affect
 every run, then small independent improvements, then the remaining features
 of the phase plan. Reorder freely; only item 1 has real sequencing
-constraints (its phases share one branch and one config model).
+constraints (its phases share one branch and one config model). The product
+sequence for the next four quarters is [VISION.md](VISION.md); this list is
+the implementation detail behind it.
 
 ### 1. Configuration interface — in progress
 
@@ -277,8 +279,6 @@ pick up opportunistically.
 
 ## 4. Open decisions
 
-1. Default agent runtime for new users: `claude-code` or `pi`
-   (`plans/jigz/vision-and-roadmap.md` section 7).
-2. Issue #20: stricter, configurable author filter for question answers.
-3. Repository visibility: going public, and what to do about the author
+1. Issue #20: stricter, configurable author filter for question answers.
+2. Repository visibility: going public, and what to do about the author
    identity in the git history (`plans/jigz/production-readiness.md`).

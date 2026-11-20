@@ -119,11 +119,12 @@ work:
     max_turns: 10
     polling_interval_ms: 60000
     budget:
-      period: monthly    # weekly (ISO week, Monday start) | monthly (calendar month)
+      period: monthly    # 5h (windows at 00:00, 05:00, 10:00, 15:00, 20:00) | weekly (ISO week, Monday start) | monthly (calendar month)
       timezone: UTC      # IANA name, default UTC; period boundaries use it
       max_tokens: 5000000  # 0 or absent turns the budget off
       warn_percent: 80   # 1-100, default 80
       on_exceed: pause   # only pause is accepted
+      end: stop          # stop (default) | finish
       poll_interval: 1m  # default 1m
     rules:
     - { name: plan, match: { labels: [agent:plan] }, prompt: prompts/plan.md }
@@ -616,11 +617,12 @@ a name without a workflow file is an error at startup.
 work:
   issues:
     budget:
-      period: weekly          # weekly (ISO week, Monday start) or monthly (calendar month)
+      period: weekly          # 5h, weekly (ISO week, Monday start) or monthly (calendar month)
       timezone: Africa/Johannesburg   # IANA name, default UTC; period boundaries use it
       max_tokens: 20000000    # 0 or absent turns the budget off
       warn_percent: 80        # default 80
       on_exceed: pause        # only pause is accepted
+      end: stop               # stop (default) | finish, see below
       poll_interval: 1m       # default 1m
       # max_usd: 50           # ignored with a startup warning: the engine records no cost
 ```
@@ -635,16 +637,25 @@ a DB cannot be read, the supervisor prints one line and keeps the last
 figures until the next successful poll.
 
 At `warn_percent` the supervisor prints one line to stderr per period and
-sets `warned` in the status document. At `max_tokens` it stops that
-workflow's engine loop and keeps it stopped (`paused_by: budget`). Other
-workflows keep running. The loop starts again at the next period, or on
+sets `warned` in the status document. At `max_tokens` the workflow's
+loop is paused (`paused_by: budget`) and the other workflows keep running.
+`end` has the same values as `schedule.end` and chooses what happens to
+runs in flight: `stop` (default) signals the loop at once, which aborts
+them; `finish` lets them complete and stops the loop when none is left in
+flight. A loop that is draining under `finish` shows as paused. The loop starts again at the next period, or on
 `resume` or `budget override`, or at the next poll when the tokens used are
 below the cap again (for example after `max_tokens` was raised and the
-supervisor restarted). The cap is not a hard limit: runs in flight
-when it is reached finish their tokens first, and use up to `poll_interval`
-more. The pause survives a supervisor restart, and a workflow that is over
+supervisor restarted). The cap is not a hard limit: with `finish` the
+runs in flight use their tokens after the cap is reached, and the loop can
+still claim new work until the drain goes idle (see the `max_concurrent_agents`
+limitation below), and under either value the tokens of a poll interval can
+pass the cap. A manual pause always
+stops at once. The pause survives a supervisor restart, and a workflow that is over
 its cap is not started. Pause state is stored in `<hash>.budget.json` next
 to the status document. Idle sleep does not start paused workflows at wake.
+The `5h` period uses fixed windows that start at 00:00, 05:00, 10:00, 15:00
+and 20:00 in the budget timezone. The last window of the day, 20:00 to
+24:00, is 4 hours long, and the budget resets at midnight.
 A manual pause is kept across periods; the override and the warning reset at
 each period.
 
@@ -823,20 +834,20 @@ environment references resolve. The first available candidate is the
 loop's agent, shown by `jig status` and the dashboard. A blocked loop
 goes offline with the reason in the status document — outside
 operating hours, `agent <name> is outside its working hours`, every
-agent is exhausted, every agent has unresolved environment references,
-or no agent runtime is registered on the engine — and an estimated
-start: the earliest of the next working-hours start of its candidates,
+agent is exhausted, `agents need fixing: <name>: <reason>` (see Unusable
+agents), every agent has unresolved environment references, or no agent
+runtime is registered on the engine — and an estimated start: the earliest of the next working-hours start of its candidates,
 their usage-limit resets and the next operating-hours window; without a
 future input the estimate is empty. A paused loop is never started.
 
 When the gate closes, the end behaviour is the `end` of the
 `operating_hours` block when operating hours closed it, otherwise the
 `schedule.end` of the candidate whose hours closed it. When every
-candidate is exhausted, the loop stops at once, without waiting for
-running sessions, because every retry would fail and use up one of the
+candidate is exhausted or unusable, the loop stops at once, without waiting
+for running sessions, because every retry would fail and use up one of the
 issue's `agent.max_sessions`. In every other case the behaviour is `finish`.
-The loop starts again at the earliest reset among its candidates; the
-first candidate that is available then runs the loop.
+The loop starts again at the earliest usage-limit reset among its candidates;
+the first candidate that is available then runs the loop.
 
 With a pool, the supervisor starts each loop with the agent command set to
 `jig agent-exec <agent>`. `agent-exec` runs the CLI of that fleet agent
@@ -845,8 +856,12 @@ stdout through unchanged and exits with the CLI's exit code. An unset
 credential reference makes the agent unavailable and `agent-exec` exits
 75 without running anything. When the CLI output
 reports a usage limit, the agent is marked exhausted until the reset time in
-the message (`resets 1:10am (UTC)` or an epoch after `|`), or one hour later
-when the message carries none. The state is stored in
+the message, or one hour later when the message carries none. The reset is
+read from an epoch after `|`, a duration (`resets in 3h`, `try again in 2
+hours 15 minutes`; milliseconds round up to one second), a date and clock (`resets Nov 14 at 5pm (UTC)`), a
+weekday and clock (`resets Friday 5pm`) or a clock alone (`resets 1:10am
+(UTC)`). A time that has passed rolls forward to next year, next week or
+tomorrow. The state is stored in
 `<repo root>/.jigz/data/state.json`, created by `jig setup` and kept out
 of commits by the `.jigz/` gitignore rule. A `pool.json` written by an
 older jig in the per-user state directory is still read and never
@@ -887,6 +902,61 @@ gate before the engine's first retry. Each engine run, including one that
 counts toward `agent.max_sessions` of that issue; the count survives a loop
 restart. Runs that fail on a limit therefore use up the budget unless the gate
 stops the loop first.
+
+#### Unusable agents
+
+Some failures do not fix themselves: the CLI is not installed, its version
+is not supported, it is not logged in, its API key is invalid or missing, or
+it has no model. A retry fails the same way and uses up one of the issue's
+`agent.max_sessions`, so `agent-exec` marks the agent unusable in
+`state.json`, with the CLI's text as the reason, and exits 75 for it from then
+on. An unknown model (`model not found`) is recorded the same way. The gate
+treats an unusable agent like an exhausted one: the loop document switches to
+the next candidate, `jig status` and the agent list show the agent as
+`unusable` with its reason, and the loop's fallback reason reads
+`agent unusable: <reason>`.
+
+`agent-exec` marks an agent unusable when:
+
+- the agent command is not found on `PATH` (exit 127);
+- the engine's version call, `<command> --version`, which the engine makes
+  through `agent-exec` before every session, reports a release the engine
+  refuses: for `opencode` any major other than 2 (`OpenCode 1.18.29 is not
+  supported; install OpenCode 2.x, published on npm as @opencode/cli`), for
+  `pi` a release below 0.99.0;
+- a CLI output line, checked like usage-limit lines (a stdout error event, a
+  stderr line with error wording, or a plain `Invalid API key` or `Not logged
+  in` line), matches a credential or model wording: `Invalid API key`,
+  `Not logged in`, `Please run /login`, `OAuth token has expired`,
+  `401 Unauthorized`, `Missing bearer or basic authentication`,
+  `No API key found for`, `ProviderAuthError`, `codex login`,
+  `No models available`, `No model selected`, `no model configured`.
+
+A usage-limit message always has precedence: a limit wrapped in a
+`credential_unverified` error stays a usage limit with its reset time.
+
+An unusable agent has no reset time. When every candidate is blocked and at
+least one is unusable, the loop stops at once and goes offline with
+`agents need fixing: <agent>: <reason>`, for example `agents need fixing: oc:
+OpenCode 1.18.29 is not supported; install OpenCode 2.x`. `jig status` and
+the dashboard alert show that text. The estimated start is the earliest
+usage-limit reset among the candidates that are only limited; with none, the
+estimate is empty and the loop stays down until the block is cleared. The
+block is cleared when the supervisor starts, when `jig reload` runs and when
+`.jigz/config.yaml` changes, so after installing a supported CLI, logging in
+or fixing the model, run `jig reload` (or edit the config). The gate then
+starts the loop; an agent that is still broken is marked again by its next
+failed run. Usage-limit blocks are not cleared this way.
+
+Engine run errors in the workflow database are not used for this detection:
+the engine makes every CLI call through `agent-exec`, which sees the output
+itself. The run history classes these errors as `failed_agent`; a text that
+carries a usage-limit phrase stays `failed_limit`.
+
+`jig validate` runs `<command> --version` with the agent's `env` mapping for
+each agent of runtime `opencode` or `pi` (once per distinct command and
+environment) and fails when the engine would refuse the release or the
+command cannot be run (see [Validation](workflows.md#validation)).
 
 A usage limit is usually detected by `agent-exec` during the engine's credential
 check, which runs before each worker run. The run then fails before the turn
