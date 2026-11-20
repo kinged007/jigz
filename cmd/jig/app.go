@@ -156,6 +156,7 @@ func validateWorkflow(dir, path string) (plan.FileResult, error) {
 		return plan.FileResult{}, err
 	}
 	env := os.Environ()
+	base := len(env)
 	// The env file is what the loops themselves run with, and it keeps
 	// the tracker token even when this process's environment lost it.
 	if raw, err := os.ReadFile(filepath.Join(dir, ".jigz", ".env.loop")); err == nil {
@@ -170,13 +171,12 @@ func validateWorkflow(dir, path string) (plan.FileResult, error) {
 	}
 	// The dashboard of a --unite run validates documents of several
 	// repos in one process, so each repo's own .env goes into this
-	// child only.
+	// child only. Keys already set from .env.loop or cfg.Env stay as
+	// they are; other keys are appended, so the target repo's value
+	// wins for this child even when the dashboard repo's .env set the
+	// same key in the process environment.
 	if pairs, err := parseDotenv(filepath.Join(dir, ".jigz", ".env")); err == nil {
-		for _, kv := range pairs {
-			if _, set := os.LookupEnv(kv[0]); !set {
-				env = append(env, kv[0]+"="+kv[1])
-			}
-		}
+		env = applyTargetRepoEnv(env, base, pairs)
 	}
 	cmd := exec.Command(bin, "validate", "--format", "json", path)
 	cmd.Dir = dir

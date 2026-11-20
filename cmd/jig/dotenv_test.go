@@ -75,6 +75,26 @@ func TestMissingRepoEnvIsNotAnError(t *testing.T) {
 	}
 }
 
+func TestTargetRepoEnvOverridesDashboardValueOnly(t *testing.T) {
+	env := []string{"JIG_TEST_SHARED=dashboard", "PATH=/bin"}
+	base := len(env)
+	env = append(env, "SORTIE_TRACKER_PROJECT=owner/repo")
+	got := applyTargetRepoEnv(env, base, [][2]string{
+		{"JIG_TEST_SHARED", "target"},
+		{"SORTIE_TRACKER_PROJECT", "owner/other"},
+		{"JIG_TEST_NEW", "new"},
+	})
+	if last := lastEnv(got, "JIG_TEST_SHARED"); last != "target" {
+		t.Errorf("shared key = %q, want target", last)
+	}
+	if last := lastEnv(got, "SORTIE_TRACKER_PROJECT"); last != "owner/repo" {
+		t.Errorf("managed key = %q, want owner/repo", last)
+	}
+	if last := lastEnv(got, "JIG_TEST_NEW"); last != "new" {
+		t.Errorf("new key = %q, want new", last)
+	}
+}
+
 func TestRepoEnvIsGitignored(t *testing.T) {
 	root := t.TempDir()
 	if out, err := exec.Command("git", "-C", root, "init", "-q").CombinedOutput(); err != nil {

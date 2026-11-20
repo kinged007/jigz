@@ -60,3 +60,30 @@ func parseDotenv(path string) ([][2]string, error) {
 	}
 	return pairs, sc.Err()
 }
+
+// applyTargetRepoEnv appends a target repo's .env pairs to a child env.
+// Keys already set after base (from .env.loop or the config) stay as they
+// are; other keys are appended, so the target repo's value wins for this
+// child even when the process environment holds the dashboard repo's value
+// for the same key.
+func applyTargetRepoEnv(env []string, base int, pairs [][2]string) []string {
+	if base < 0 {
+		base = 0
+	}
+	if base > len(env) {
+		base = len(env)
+	}
+	managed := map[string]bool{}
+	for _, kv := range env[base:] {
+		if k, _, ok := strings.Cut(kv, "="); ok {
+			managed[k] = true
+		}
+	}
+	for _, kv := range pairs {
+		if managed[kv[0]] {
+			continue
+		}
+		env = append(env, kv[0]+"="+kv[1])
+	}
+	return env
+}
