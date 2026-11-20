@@ -110,6 +110,11 @@ func agentVersionChecks(cfg *config.Config) []validateCheck {
 	var checks []validateCheck
 	for _, name := range sortedKeys(cfg.Agents) {
 		a := cfg.Agents[name]
+		env, missing := agentEnv(a)
+		if missing != "" {
+			checks = append(checks, validateCheck{Name: "agent-version:" + name, OK: false, Error: fmt.Sprintf("agent %s needs %s, which is not set", name, missing)})
+			continue
+		}
 		if !machine.VersionChecked(a.Runtime) {
 			continue
 		}
@@ -118,12 +123,6 @@ func agentVersionChecks(cfg *config.Config) []validateCheck {
 			command = machine.DefaultCommand(a.Runtime)
 		}
 		c := validateCheck{Name: "agent-version:" + name, OK: true}
-		env, missing := agentEnv(a)
-		if missing != "" {
-			c.OK, c.Error = false, fmt.Sprintf("agent %s needs %s, which is not set", name, missing)
-			checks = append(checks, c)
-			continue
-		}
 		key := command + "\x00" + strings.Join(env, "\x00")
 		p, seen := probes[key]
 		if !seen {
