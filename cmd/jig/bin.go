@@ -39,6 +39,9 @@ func managedEnv(cfg *config.Config, token string) [][2]string {
 // passes its name and gets .jigz/.env.loop.<name>, so the shared file
 // keeps the credential of the defaults.
 func writeEnvFile(dir, loop string, cfg *config.Config, token string) (path string, changed bool, err error) {
+	if strings.Contains(loop, "/") || strings.Contains(loop, "\\") || strings.Contains(loop, "..") {
+		return "", false, fmt.Errorf("invalid loop name %q", loop)
+	}
 	file := ".env.loop"
 	if loop != "" {
 		file += "." + loop
@@ -47,6 +50,11 @@ func writeEnvFile(dir, loop string, cfg *config.Config, token string) (path stri
 	old, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return "", false, err
+	}
+	if loop != "" && errors.Is(err, os.ErrNotExist) {
+		if shared, serr := os.ReadFile(filepath.Join(dir, ".jigz", ".env.loop")); serr == nil {
+			old = shared
+		}
 	}
 	managed := managedEnv(cfg, token)
 	changed = mergeEnv(string(old), managed) != mergeEnv(string(old), nil)
