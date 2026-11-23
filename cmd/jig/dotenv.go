@@ -25,8 +25,9 @@ func loadRepoEnv(root string) error {
 
 // reloadRepoEnv re-reads <root>/.jigz/.env into this process. Keys first
 // set from the file are updated to the new file values, and new keys the
-// environment does not hold are added. A key the environment held before
-// the first load keeps winning. A missing file is not an error.
+// environment does not hold are added. Keys deleted from the file are
+// unset. A key the environment held before the first load keeps winning.
+// A missing file is not an error.
 func reloadRepoEnv(root string) error {
 	path := filepath.Join(root, ".jigz", ".env")
 	pairs, err := parseDotenv(path)
@@ -39,6 +40,18 @@ func reloadRepoEnv(root string) error {
 	if fromFile == nil {
 		fromFile = map[string]bool{}
 		repoEnvFromFile[path] = fromFile
+	}
+	seen := map[string]bool{}
+	for _, kv := range pairs {
+		seen[kv[0]] = true
+	}
+	for key := range fromFile {
+		if !seen[key] {
+			if err := os.Unsetenv(key); err != nil {
+				return err
+			}
+			delete(fromFile, key)
+		}
 	}
 	for _, kv := range pairs {
 		if fromFile[kv[0]] {
@@ -116,7 +129,8 @@ func parseDotenv(path string) ([][2]string, error) {
 // Keys already set after base (from .env.loop or the config) stay as they
 // are; other keys are appended, so the target repo's value wins for this
 // child even when the process environment holds the dashboard repo's value
-// for the same key.
+// for the same key. A key the process environment held before any .env
+// load keeps winning over the target file.
 func applyTargetRepoEnv(env []string, base int, pairs [][2]string) []string {
 	if base < 0 {
 		base = 0
@@ -134,7 +148,24 @@ func applyTargetRepoEnv(env []string, base int, pairs [][2]string) []string {
 		if managed[kv[0]] {
 			continue
 		}
+		if _, set := os.LookupEnv(kv[0]); set && !repoEnvFileSourced(kv[0]) {
+			continue
+		}
 		env = append(env, kv[0]+"="+kv[1])
 	}
 	return env
+}
+
+// repoEnvFileSourced reports whether key was set from any loaded .jigz/.env
+// file. Such keys may be overridden by a target repo's file; exported keys
+// may not.
+func repoEnvFileSourced(key string) bool {
+	repoEnvMu.Lock()
+	defer repoEnvMu.Unlock()
+	for _, keys := range repoEnvFromFile {
+		if keys[key] {
+			return true
+		}
+	}
+	return false
 }
