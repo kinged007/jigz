@@ -457,6 +457,32 @@ func (s *supervisor) reload() {
 		s.republish()
 		return
 	}
+	old := s.querySnapshot()
+	s.clearUnusable()
+	s.refreshState(s.clock(), true)
+	s.mu.Lock()
+	workCopy := make(map[string]config.Resolved, len(s.work))
+	for name, res := range s.work {
+		workCopy[name] = res
+	}
+	s.mu.Unlock()
+	for _, name := range s.runningNames() {
+		w, ok := workCopy[name]
+		if !ok || !w.Managed || w.Tracker.ApiKey == cfg.TrackerDefaults.ApiKey {
+			continue
+		}
+		tok, terr := cfg.TrackerToken(w.Tracker)
+		if terr != nil {
+			continue
+		}
+		_, changed, werr := writeEnvFile(s.root, name, cfg, tok)
+		if werr != nil {
+			fmt.Fprintln(os.Stderr, "jig: reload:", werr)
+			s.republish()
+			return
+		}
+		envChanged = envChanged || changed
+	}
 	if envChanged {
 		for _, name := range s.runningNames() {
 			if s.recycleDrain(name) {
@@ -464,9 +490,6 @@ func (s *supervisor) reload() {
 			}
 		}
 	}
-	old := s.querySnapshot()
-	s.clearUnusable()
-	s.refreshState(s.clock(), true)
 	for name, q := range s.querySnapshot() {
 		if oq, ok := old[name]; ok && oq != q {
 			if s.recycleDrain(name) {
