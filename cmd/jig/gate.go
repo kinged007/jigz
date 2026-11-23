@@ -432,7 +432,7 @@ func (s *supervisor) refreshWork(stamp string) {
 	for _, slug := range sortedKeys(resolved) {
 		res := resolved[slug]
 		if !res.Managed {
-			r := config.Resolved{Slug: res.Slug, Managed: false, QueryFilter: res.QueryFilter, OperatingHours: res.OperatingHours}
+			r := config.Resolved{Slug: res.Slug, Managed: false, QueryFilter: res.QueryFilter, OperatingHours: res.OperatingHours, Tracker: res.Tracker}
 			work[res.Slug] = r
 			queries[res.Slug] = res.QueryFilter
 			continue
