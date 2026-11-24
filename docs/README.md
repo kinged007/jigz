@@ -16,4 +16,4 @@ Fast paths:
 - To cap spend or limit hours: [configuration.md](configuration.md) (budgets, working hours).
 - To add a loop: [workflows.md](workflows.md) (custom loops), then [configuration.md](configuration.md) (its `work:` entry and labels).
 
-`plans/` holds design notes; these `docs/` pages describe current behavior.
+These pages describe current behavior. Design notes for planned work are in `plans/`.

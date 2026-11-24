@@ -74,6 +74,7 @@ repo: "owner/name"        # empty = detect from git remote at runtime
 token: ""                # empty = JIG_TOKEN, then GITHUB_TOKEN / GH_TOKEN
 filters:                 # query filter of a work entry without query_filter, keyed by slug
   triage: "label:agent:triage -label:needs-human"
+assignees: ["alice", "bot-x"]  # users whose assigned items the loops watch; empty/absent = @me
 labels:                   # setup creates/edits these; a custom loop adds its own here
 - {name: "agent:plan", color: "fbca04", description: "Trigger: write an implementation plan for this issue"}
 - {name: "agent:build", color: "fbca04", description: "Trigger: implement this issue, or apply review feedback on this PR"}
@@ -164,14 +165,13 @@ github:                   # dashboard GitHub access; re-read on every pass, no r
 ### Fleet and work
 
 The same file holds the engine target, the operating hours, the tracker
-and hook defaults, the agent fleet and the work entries
-(`plans/jigz/engine-interface.md` has the design). Secrets are never
+and hook defaults, the agent fleet and the work entries. Secrets are never
 stored in the file: a credential is a reference to an environment
 variable of the supervising process, `{from_env: NAME}`. A key whose
 name ends in `TOKEN`, `KEY`, `SECRET` or `PASSWORD` (in any case) must
 be a reference; a literal is rejected. An unresolved reference does not
-fail the load; it makes the agent unavailable, and the unresolved names
-are retrievable (`Config.UnresolvedRefs`). `max_concurrent_agents`
+fail the load; it makes the agent unavailable (see
+[Unusable agents](#unusable-agents)). `max_concurrent_agents`
 counts the running sessions of one work entry; `0` (or omitted) means
 no limit.
 
@@ -209,8 +209,9 @@ work:
 ```
 
 A work entry's `query_filter` is the complete tracker query and wins over
-the `filters:` entry of its slug; `assignee:@me` is appended at launch.
-A work entry with neither `query_filter` nor a `filters:` entry is a
+the `filters:` entry of its slug; the assignee scope is appended at
+launch (see [Assignee scope](#assignee-scope)). A work entry with
+neither `query_filter` nor a `filters:` entry is a
 config error (`work.<slug> needs query_filter`), and so is a managed entry
 without `rules`. `max_concurrent_agents`, `max_turns`, `max_sessions` and
 `polling_interval_ms` sit next to `budget`. A rule's `agent` may be a
@@ -228,7 +229,8 @@ launch and validates and resolves the remaining sections.
 | Key | Type | Default | Notes |
 |---|---|---|---|
 | `managed` | bool | `true` | `false` = the document is neither generated nor overwritten; `validate` reports it as unmanaged |
-| `query_filter` | string | the `filters:` entry of the slug | The complete tracker query; wins over `filters:`; `assignee:@me` is appended at launch. Required unless `filters:` names the slug |
+| `assignees` | list of strings | top-level `assignees` | Replaces the global assignee scope for this entry's loops only; empty/absent inherits the global scope. See [Assignee scope](#assignee-scope) |
+| `query_filter` | string | the `filters:` entry of the slug | The complete tracker query; wins over `filters:`; the assignee scope is appended at launch (see [Assignee scope](#assignee-scope)). Required unless `filters:` names the slug |
 | `tracker` | mapping | top-level `tracker` | Overlay: `kind`, `api_key`, `project`, `active_states`, `in_progress_state`, `handoff_state` |
 | `hooks` | mapping | top-level `hooks` | Overlay: `after_create`, `before_run`, `after_run`, `timeout_ms`. Scripts can read the `JIG_*` variables in [Hook environment](#hook-environment) |
 | `max_concurrent_agents` | int | `1` in the generated document | `0`/absent renders `1` |
@@ -244,6 +246,33 @@ Slugs match `^[A-Za-z0-9][A-Za-z0-9_-]*$`. `work.<slug>.budget` with no
 `WORKFLOW.<slug>.md` (or `WORKFLOW.<slug>-*.md` split loop) is a startup
 error, and the removed `workflows:` key is rejected with a pointer to
 `work.<slug>.budget`.
+
+#### Assignee scope
+
+`assignees:` lists the GitHub users whose assigned items the loops
+watch. Every loop filter carries one `assignee:` term: `assignee:alice`
+for one user, `assignee:alice,bot-x` for several (one term matches an
+item assigned to any of them; separate terms would each have to match).
+`@me` stands for whoever owns the token and may be mixed with named
+users. Empty or absent means `@me`, so existing configs keep working
+with no change. A value must be a GitHub username (letters, digits and
+hyphens, 1-39 characters, not starting or ending with a hyphen) or
+`@me`; anything else fails the load with an error naming the key and
+the value.
+
+```yaml
+assignees: ["alice", "bot-x"]   # global scope: every loop watches these users
+work:
+  issues:
+    query_filter: "label:agent:build"
+    assignees: [bot-x]          # this entry's loops watch bot-x only; others keep the global scope
+```
+
+`jig` also sets `JIG_ASSIGNEE` for each loop process (`@me` when
+unconfigured, else the comma-joined users), so a prompt file can
+reference the configured value instead of naming a user. The variable
+carries the global scope; a loop-level override changes only that
+loop's tracker filter.
 
 #### Session cap
 
@@ -715,6 +744,7 @@ run). `JIG_ONLY=issues` starts only those loops; see
 | `JIG_REPO` | Pins the repo id (`owner/name`) instead of detecting it from git `origin`. |
 | `JIG_ONLY` | Comma-separated `WORKFLOW.*.md` stems to start; unset runs all. Unknown names are fatal. See [Selecting loops](usage.md#selecting-loops). |
 | `JIG_WORKSPACES` | Directory that holds the agent checkouts. `jig` sets it for each loop (`.jigz/workspaces` by default) and the generated workflows use it as `workspace.root: $JIG_WORKSPACES/<loop>`. Set it by hand only when validating a workflow file with the engine directly. |
+| `JIG_ASSIGNEE` | Assignee scope `jig` sets for each loop process (`@me` when unconfigured, else the comma-joined `assignees`), for prompt files to reference. See [Assignee scope](#assignee-scope). |
 | `JIG_BIN` | Path of the `jig` binary that the supervisor starts for each loop. Without it, `jig` uses a `jig` binary next to the running one, then `jig` on `PATH`. |
 | `JIG_REGISTRY_DIR` | Directory for the project registry and status files. Unset, they are kept in the shared user cache directory, so several `jig` processes on one machine see each other. |
 | `JIG_TRACKER_TOKEN` | The variable `jig setup` writes as a commented `#api_key: { from_env: JIG_TRACKER_TOKEN }` line. When you enable the line, export the variable in the supervisor's environment; it then wins over `JIG_TOKEN` and the rest of the chain, and `jig validate` and `jig start` fail while it is unset. |
@@ -975,8 +1005,8 @@ engine's error text. A usage limit is recognised in that text when the agent
 CLI reports it, or when `agent-exec` writes its limit line and the engine
 includes it in the error. `failed_agent` covers every other failure.
 
-Known limitation: with `max_concurrent_agents` above 1, a loop can claim new
-work between the window close and the moment it is stopped.
+With `max_concurrent_agents` above 1, a loop can claim new work between the
+window closing and the loop being stopped.
 
 Using a subscription account unattended can be restricted by the provider.
 Checking the provider's terms is your responsibility.
@@ -1005,7 +1035,7 @@ limits:
 `JIG_ENGINE_BIN` beats both. The dashboard re-reads `machine.yaml` when
 the file changes, so hiding edits apply without a restart.
 
-Hideable pages (from `internal/machine/dashboard.go`):
+Hideable pages:
 
 | Name | Hides |
 |---|---|
@@ -1030,9 +1060,7 @@ Hideable sections:
 | `audit_log` | Audit log on Operations and project pages, `GET /api/v1/audit` |
 | `effective_config` | Effective configuration table on project pages |
 
-`limits.patterns` extends the built-in usage-limit match (`internal/machine/limits.go`)
+`limits.patterns` extends the built-in usage-limit match
 used by `jig agent-exec`: when the CLI output matches, the agent is marked
 exhausted until the reset time in the message, or `default_reset` later.
 A bad regexp fails the machine file load.
-
-Evidence status: Confirmed against `internal/config`, `internal/gen`, and `internal/machine` unless noted.

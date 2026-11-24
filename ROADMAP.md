@@ -1,17 +1,11 @@
 # Jigz roadmap
 
-An ordered view of what is implemented and what is planned. Detailed plans
-live in `plans/`; this document sequences the work and tracks status.
+An ordered view of what is implemented and what is planned.
 
-- `[x]` — implemented. Items on `main` are marked done without a note; items
-  on a feature branch name the branch.
+- `[x]` — implemented.
 - `[ ]` — not implemented.
 
-Status verified against `main` at `a7c7d4c` (2026-10-27) and the
-`feat/engine-interface` branch. Sources: `plans/jigz/vision-and-roadmap.md`
-(the phase plan), `plans/jigz/features.md`, `plans/jigz/enhancements.md`,
-`plans/jigz/handoff.md`, `plans/jigz/production-readiness.md`,
-`plans/jigz/engine-interface.md`, `plans/system/`, README.
+Detailed plans live in `plans/`.
 
 The hub product has its own roadmap:
 [plans/hub/ROADMAP.md](plans/hub/ROADMAP.md).
@@ -138,23 +132,22 @@ constraints (its phases share one branch and one config model). The product
 sequence for the next four quarters is [VISION.md](VISION.md); this list is
 the implementation detail behind it.
 
-### 1. Configuration interface — in progress
+### 1. Configuration interface — phases 0 to 6 done
 
 Jigz owns all user-facing configuration in one file (`.jigz/config.yaml`)
 and generates the engine's workflow documents from it; supervision runs
 against the agents' availability. Plan: `plans/jigz/engine-interface.md`.
-Branch `feat/engine-interface`; phases 0 to 2 are done there, the rest is
-open.
+Phase 7 is open.
 
 - [x] Phase 0: documentation fix (README model-configuration claims)
 - [x] Phase 1: config model and loader (single-file config, resolved work
   entries)
 - [x] Phase 2: hours and offline handling (per-loop hours, offline reason
   and estimated start)
-- [ ] Phase 3: document generation (workflow documents from the config)
-- [ ] Phase 4: fallback (pool fallback order into loop supervision)
-- [ ] Phase 5: contract tests and CI
-- [ ] Phase 6: cleanup (remove legacy config paths and patching)
+- [x] Phase 3: document generation (workflow documents from the config)
+- [x] Phase 4: fallback (pool fallback order into loop supervision)
+- [x] Phase 5: contract tests and CI
+- [x] Phase 6: cleanup (remove legacy config paths and patching)
 - [ ] Phase 7: model-unavailable trigger
 
 ### 2. Scheduled work
@@ -189,13 +182,14 @@ provides schedules, gates, and permissions.
 ### 3. Reliability: loop crash containment
 
 - [ ] Restart a loop that exits instead of ending the run. Today one
-  crashed loop stops every other loop (README "Known limitations").
+  crashed loop stops every other loop (see
+  [When a loop exits](docs/usage.md#when-a-loop-exits)).
 
-### 4. Upgrade UX: workflow file versioning
+### 4. Upgrade UX: prompt file versioning
 
-- [ ] Stamp workflow files with the binary version that wrote them, so an
-  upgrade can offer a new version of a file the user has not edited (README
-  "Known limitations").
+- [ ] Stamp prompt files with the binary version that wrote them, so an
+  upgrade can offer a new version of a file the user has not edited (see
+  [Prompts](docs/workflows.md#prompts)).
 
 ### 5. Prompt quality
 

@@ -16,11 +16,15 @@ that is not running still shows its last known state (see
 3 seconds the changing parts are re-fetched as fragments, so the page
 needs no build step and works as static HTML without scripting.
 
+![Operations page: loops, runs, tokens and activity](images/dashboard-operations.png)
+
 Pages: Operations (fleet, alerts, token charts, per-repository and
 per-loop rows), Runs and Usage from the history database, Workflows (the
 pipeline each repository's files describe, plus validation), Projects,
 Agents (the settings each workflow file declares), Settings, Backups, and
 each loop's child log.
+
+![Runs per day, average tokens per issue and PR, and per-loop token budgets](images/dashboard-runs.png)
 
 The Usage page and `GET /api/v1/usage` group runs by `project`, `workflow`,
 `rule` (the engine's routing rule, such as triage or plan), `model` or `day`

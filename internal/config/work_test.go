@@ -89,6 +89,22 @@ func TestUnresolvedRefsReported(t *testing.T) {
 	}
 }
 
+func TestAssigneesLoopOverride(t *testing.T) {
+	cfg, err := loadWithConfig(t, "assignees: [alice]\nwork:\n  issues:\n    managed: false\n    query_filter: label:one\n    assignees: [bot-x]\n  other:\n    managed: false\n    query_filter: label:two\n  inherit:\n    managed: false\n    query_filter: label:three\n    assignees: []\n", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.FilterFor("issues"); got != "label:one assignee:bot-x" {
+		t.Errorf("override loop: %q", got)
+	}
+	if got := cfg.FilterFor("other"); got != "label:two assignee:alice" {
+		t.Errorf("inheriting loop: %q", got)
+	}
+	if got := cfg.FilterFor("inherit"); got != "label:three assignee:alice" {
+		t.Errorf("empty override inherits global: %q", got)
+	}
+}
+
 func TestNameResolution(t *testing.T) {
 	cases := []struct{ name, body, want string }{
 		{"pool names a missing agent", "agents:\n  a: {runtime: pi}\npools:\n  p: [a, ghost]\n", `pools.p: unknown agent "ghost"`},

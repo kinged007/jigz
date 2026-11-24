@@ -249,7 +249,7 @@ func (s *supervisor) childEnv(name string) (envFile string, env []string, runtim
 	env = append(os.Environ(), cfg.Env(token)...)
 	env = append(env, "JIG_STATE_PATH="+machine.StatePath(s.root))
 	if q, ok := s.queryFor(name); ok && strings.TrimSpace(q) != "" {
-		env = append(env, "SORTIE_TRACKER_QUERY_FILTER="+q+" assignee:@me")
+		env = append(env, "SORTIE_TRACKER_QUERY_FILTER="+q+" "+config.AssigneeScope(cfg.AssigneesForLoop(name)))
 	} else if filter := cfg.FilterFor(name); filter != "" {
 		env = append(env, "SORTIE_TRACKER_QUERY_FILTER="+filter)
 	}

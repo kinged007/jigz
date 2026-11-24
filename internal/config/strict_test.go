@@ -9,6 +9,7 @@ import (
 
 const allKeysYAML = `repo: o/r
 token: t
+assignees: [alice]
 filters:
   issues: "label:agent:build"
 labels:
@@ -74,6 +75,7 @@ work:
   issues:
     managed: false
     query_filter: "label:agent:build"
+    assignees: [bot-x]
     tracker:
       kind: github-pr
     hooks:
@@ -165,7 +167,7 @@ func TestUnknownKeysRejected(t *testing.T) {
 func TestRemovedKeysRejected(t *testing.T) {
 	cases := []struct{ name, body, want string }{
 		{"milestone", "milestone: m1\n", `unknown key "milestone" (milestone is not configurable)`},
-		{"assignee", "assignee: \"@me\"\n", `unknown key "assignee" (the assignee scope is always assignee:@me)`},
+		{"assignee", "assignee: \"@me\"\n", `unknown key "assignee" (use assignees: (a list of GitHub usernames) instead)`},
 		{"workflows", "workflows:\n  issues:\n    budget: {}\n", `unknown key "workflows" (workflows.<name>.budget moves to work.<slug>.budget)`},
 	}
 	for _, c := range cases {

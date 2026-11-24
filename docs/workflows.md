@@ -150,7 +150,10 @@ Hook scripts read the item through `JIG_*` variables; see
 
 Each rule's `template` is a Markdown file under `.jigz/workflows/`,
 usually in `prompts/`. The engine renders it with the issue context and
-runs the result as the agent's instructions:
+runs the result as the agent's instructions. `jig setup` writes the shipped
+prompts only when they are missing and never overwrites one, so your edits
+are kept. A prompt you have not edited is also not updated when you upgrade
+`jig`: delete the file and run `jig setup` to take the shipped version.
 
 | Variable | Meaning |
 |---|---|
@@ -207,5 +210,3 @@ the config to fix.
 
 See [the engine](install.md#the-engine) for pinning and capability
 detection.
-
-Evidence status: Confirmed against `cmd/jig/workflows/`, `cmd/jig/generate.go`, `internal/gen`, and `internal/config` unless noted.
