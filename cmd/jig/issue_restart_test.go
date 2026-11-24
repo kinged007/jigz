@@ -593,6 +593,46 @@ func TestRestartRefusesWhenSessionsUnknown(t *testing.T) {
 	mustRefuse(t, d2, 8, "", "issue 8 is claimed by a live session")
 }
 
+// The history fallback picks the most recent run by start time, not by
+// run id, and re-applies that run's rule label: run ids are per-loop
+// counters, so the highest id can belong to the older run.
+func TestRestartHistoryPrefersNewestRunAndRule(t *testing.T) {
+	tr := newFakeTracker()
+	tr.labels[7] = []string{"in-progress"}
+	loops := map[string]config.Resolved{
+		"issues": {Slug: "issues",
+			Rules: []config.ResolvedRule{
+				{Name: "build", Labels: []string{"agent:build"}},
+				{Name: "slow", Labels: []string{"agent:slow"}},
+			},
+			Tracker: config.Tracker{InProgressState: "in-progress"}},
+		"prs": {Slug: "prs",
+			Rules: []config.ResolvedRule{
+				{Name: "review", Labels: []string{"agent:review"}},
+			},
+			Tracker: config.Tracker{InProgressState: "in-progress"}},
+	}
+	d := testDeps(t, tr)
+	d.loops = loops
+	if err := d.history.AddRuns([]store.Run{
+		{Project: "o/r", Workflow: "prs", ID: 9, IssueID: "7",
+			DisplayIdentifier: "o/r#7", Status: "failed", RuleName: "review",
+			StartedAt: "2026-11-24T08:00:00Z", CompletedAt: "2026-11-24T08:05:00Z"},
+		{Project: "o/r", Workflow: "issues", ID: 2, IssueID: "7",
+			DisplayIdentifier: "o/r#7", Status: "failed", RuleName: "slow",
+			StartedAt: "2026-11-24T09:00:00Z", CompletedAt: "2026-11-24T09:05:00Z"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	res := mustRestart(t, d, 7, "")
+	if res.Loop != "issues" || res.Trigger != "agent:slow" {
+		t.Fatalf("restart = %+v, want loop issues with trigger agent:slow", res)
+	}
+	if !slices.Equal(tr.labels[7], []string{"agent:slow"}) {
+		t.Fatalf("labels after restart = %v", tr.labels[7])
+	}
+}
+
 // A loop that matches by query, not by label, restarts by releasing the
 // claim alone: there is no trigger to re-apply.
 func TestRestartTriggerlessLoop(t *testing.T) {

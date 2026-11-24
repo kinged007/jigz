@@ -209,26 +209,56 @@ func triggerOf(resolved map[string]config.Resolved, loop string) string {
 	return ""
 }
 
+// triggerForRule is the first label of a loop's named rule, the label a
+// restart re-applies when the issue carries no trigger of its own. An
+// unknown rule name falls back to the loop's first rule label.
+func triggerForRule(resolved map[string]config.Resolved, loop, rule string) string {
+	if r, ok := resolved[loop]; ok {
+		for _, rr := range r.Rules {
+			if rr.Name == rule && len(rr.Labels) > 0 {
+				return rr.Labels[0]
+			}
+		}
+	}
+	return triggerOf(resolved, loop)
+}
+
 // latestRestartWorkflow is the history fallback for a
 // claim-without-trigger issue: the workflow of its most recent stored
-// run. A nil store means no history is available.
-func latestRestartWorkflow(st *store.Store, project string, resolved map[string]config.Resolved, num int) string {
+// run, with that run's rule. Run ids are per-workflow counters, so
+// recency compares start times, not ids; ties keep name order, and the
+// newest run of one workflow wins by id. A nil store means no history
+// is available.
+func latestRestartWorkflow(st *store.Store, project string, resolved map[string]config.Resolved, num int) (string, string) {
 	if st == nil {
-		return ""
+		return "", ""
 	}
-	best, bestID := "", int64(-1)
+	best, bestRule := "", ""
+	var bestAt time.Time
+	bestID := int64(-1)
+	have := false
 	for _, n := range sortedKeys(resolved) {
 		runs, err := st.IssueRuns(project, n, strconv.Itoa(num))
 		if err != nil {
 			continue
 		}
 		for _, r := range runs {
-			if r.ID > bestID {
-				best, bestID = n, r.ID
+			at := parseRestartTime(r.StartedAt)
+			if !have || at.After(bestAt) || (at.Equal(bestAt) && n == best && r.ID > bestID) {
+				best, bestAt, bestID, bestRule, have = n, at, r.ID, r.RuleName, true
 			}
 		}
 	}
-	return best
+	return best, bestRule
+}
+
+// parseRestartTime reads a stored run start. An empty or unreadable
+// stamp sorts before any real one.
+func parseRestartTime(s string) time.Time {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t
+	}
+	return time.Time{}
 }
 
 // liveRestartIssues normalizes supervisor sessions to plain issue
@@ -285,8 +315,8 @@ func applyIssueRestart(ctx context.Context, d *restartDeps, num int, hintLoop st
 	}
 	loop, trigger := resolveRestartLoop(d.loops, labels)
 	if loop == "" {
-		if w := latestRestartWorkflow(d.history, d.slug, d.loops, num); w != "" && (hintLoop == "" || w == hintLoop) {
-			loop, trigger = w, triggerOf(d.loops, w)
+		if w, rule := latestRestartWorkflow(d.history, d.slug, d.loops, num); w != "" && (hintLoop == "" || w == hintLoop) {
+			loop, trigger = w, triggerForRule(d.loops, w, rule)
 		}
 	}
 	if hintLoop != "" && loop != hintLoop {
