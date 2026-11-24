@@ -10,13 +10,20 @@ import (
 
 // absRoot is the registry key for a repo-root given on the command line:
 // the absolute path with symlinks resolved, so a run started through a
-// link and stopped from the real directory address the same entry.
+// link and stopped from the real directory address the same entry. It also
+// loads the repo's .jigz/.env into the process environment, so every
+// command that resolves a root sees those variables. One process serves one
+// repo, so the file cannot reach another repo's children.
 func absRoot(dir string) (string, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return "", err
 	}
-	return resolvedPath(abs), nil
+	root := resolvedPath(abs)
+	if err := loadRepoEnv(root); err != nil {
+		return "", err
+	}
+	return root, nil
 }
 
 func resolvedPath(p string) string {
