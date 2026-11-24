@@ -104,6 +104,79 @@ func TestFilterForWorkQueryFilter(t *testing.T) {
 	}
 }
 
+func TestFilterForConfiguredAssignee(t *testing.T) {
+	cfg, err := loadWithConfig(t, "assignees: [alice]\nfilters:\n  issues: label:agent:custom\n", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.FilterFor("issues"); got != "label:agent:custom assignee:alice" {
+		t.Errorf("configured assignee: %q", got)
+	}
+}
+
+func TestFilterForDefaultAssignee(t *testing.T) {
+	cfg, err := loadWithConfig(t, "filters:\n  issues: label:agent:custom\n", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.FilterFor("issues"); got != "label:agent:custom assignee:@me" {
+		t.Errorf("default assignee: %q", got)
+	}
+}
+
+func TestFilterForMultipleAssignees(t *testing.T) {
+	cfg, err := loadWithConfig(t, "assignees: [alice, bot-x]\nfilters:\n  issues: label:agent:custom\n", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.FilterFor("issues"); got != "label:agent:custom assignee:alice,bot-x" {
+		t.Errorf("multiple assignees: %q", got)
+	}
+}
+
+func TestAssigneesInvalidRejected(t *testing.T) {
+	cases := []struct{ name, body, key, value string }{
+		{"blank", "assignees: [\"\"]\n", "assignees", `""`},
+		{"spaces", "assignees: [\"not a user\"]\n", "assignees", "not a user"},
+		{"punctuation", "assignees: [alice!]\n", "assignees", "alice!"},
+		{"leading hyphen", "assignees: [-alice]\n", "assignees", "-alice"},
+		{"loop blank", "work:\n  issues:\n    managed: false\n    query_filter: label:agent:build\n    assignees: [\"\"]\n", "work.issues.assignees", `""`},
+		{"loop invalid", "work:\n  issues:\n    managed: false\n    query_filter: label:agent:build\n    assignees: [alice!]\n", "work.issues.assignees", "alice!"},
+	}
+	for _, c := range cases {
+		_, err := loadWithConfig(t, c.body, nil)
+		if err == nil || !strings.Contains(err.Error(), c.key) || !strings.Contains(err.Error(), c.value) {
+			t.Errorf("%s: error %v, want it to name %q and %q", c.name, err, c.key, c.value)
+		}
+	}
+}
+
+func envValue(env []string, key string) string {
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, key+"="); ok {
+			return v
+		}
+	}
+	return ""
+}
+
+func TestEnvAssignee(t *testing.T) {
+	cfg, err := loadWithConfig(t, "assignees: [alice, bot-x]\n", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := envValue(cfg.Env("tok"), "JIG_ASSIGNEE"); got != "alice,bot-x" {
+		t.Errorf("JIG_ASSIGNEE = %q, want %q", got, "alice,bot-x")
+	}
+	unset, err := loadWithConfig(t, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := envValue(unset.Env("tok"), "JIG_ASSIGNEE"); got != "@me" {
+		t.Errorf("JIG_ASSIGNEE default = %q, want %q", got, "@me")
+	}
+}
+
 func TestWorkEntryWithoutFilterFails(t *testing.T) {
 	_, err := loadWithConfig(t, "work:\n  issues:\n    rules:\n    - {name: build, match: {labels: [agent:build]}, prompt: prompts/build.md}\n", nil)
 	if err == nil || !strings.Contains(err.Error(), "work.issues needs query_filter") {

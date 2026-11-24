@@ -359,7 +359,7 @@ func run() (code int) {
 		if !ok || strings.TrimSpace(filter) == "" {
 			filter = cfg.FilterFor(l.name)
 		} else {
-			filter += " assignee:@me"
+			filter += " " + config.AssigneeScope(cfg.AssigneesForLoop(l.name))
 		}
 		fmt.Printf("loop %-10s %s filter %q\n", l.name, l.file, filter)
 	}
