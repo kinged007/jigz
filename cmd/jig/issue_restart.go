@@ -622,8 +622,12 @@ func restartActor(ctx context.Context, tracker issueTracker, slug, token string)
 // the next start and may record the restart event twice; the duplicate
 // is accepted because the labels stay correct and the window is short.
 // A request that no longer restarts is final: the marker is gone and the
-// outcome is recorded as an event. A permanent tracker failure drops
-// the request with an outcome instead of retrying forever; any other
+// outcome is recorded as an event. A permanent failure (a missing config
+// file, a missing token, or a tracker 401/403/404) drops the request
+// with an outcome instead of retrying forever. Any other config read
+// failure (for example a half-written config file) is retryable but
+// capped: after maxRestartConfigAttempts ticks the request is dropped
+// with an outcome, so a transient error cannot retry forever. Any other
 // failure keeps the file for the next tick and moves on to the next
 // request, so one stuck issue never starves the rest.
 func (s *supervisor) restartStep() {
@@ -665,6 +669,20 @@ func (s *supervisor) restartStep() {
 				s.recordRestartOutcome(req, "", "", fmt.Sprintf("gave up on issue %d: %v", req.Issue, err))
 				continue
 			}
+			var terr *restartTransientConfigError
+			if errors.As(err, &terr) {
+				attempts := restartConfigAttempts(data)
+				if attempts+1 >= maxRestartConfigAttempts {
+					_ = os.Remove(inflight)
+					s.recordRestartOutcome(req, "", "", fmt.Sprintf("gave up on issue %d after %d attempts: %v", req.Issue, attempts+1, err))
+					continue
+				}
+				if werr := writeFileAtomic(f, append(data, '\n')); werr != nil {
+					fmt.Fprintln(os.Stderr, "jig: restart: restore:", werr)
+				}
+				_ = os.Remove(inflight)
+				continue
+			}
 			fmt.Fprintln(os.Stderr, "jig: restart:", err)
 			if rerr := os.Rename(inflight, f); rerr != nil {
 				if werr := writeFileAtomic(f, data); werr != nil {
@@ -677,11 +695,10 @@ func (s *supervisor) restartStep() {
 	}
 }
 
-// restartPermanent reports a tracker failure retrying cannot fix: bad
-// credentials, a forbidden label write, or a gone repository. A bad
-// config or token fails the same way: the next tick would fail
-// identically, so the request is dropped with an outcome instead of
-// retrying forever.
+// restartPermanent reports a stored-restart failure retrying cannot
+// fix: a missing config file, a missing token, a forbidden label write,
+// or a gone repository. Any other config read failure is transient and
+// stays retryable under a bounded attempt count.
 func restartPermanent(err error) bool {
 	var perm *restartPermanentError
 	if errors.As(err, &perm) {
@@ -695,11 +712,42 @@ func restartPermanent(err error) bool {
 }
 
 // restartPermanentError marks a stored-restart failure no retry can
-// fix, such as a bad config or token.
+// fix: a missing config file or token, or a final tracker refusal.
 type restartPermanentError struct{ err error }
 
 func (e *restartPermanentError) Error() string { return e.err.Error() }
 func (e *restartPermanentError) Unwrap() error { return e.err }
+
+// maxRestartConfigAttempts caps retries of a transient config read
+// failure (for example a half-written config file) before the request
+// is dropped with a recorded outcome.
+const maxRestartConfigAttempts = 5
+
+// restartTransientConfigError marks a stored-restart config failure that
+// may heal between ticks. restartStep retries it, not forever.
+type restartTransientConfigError struct{ err error }
+
+func (e *restartTransientConfigError) Error() string { return e.err.Error() }
+func (e *restartTransientConfigError) Unwrap() error { return e.err }
+
+// restartConfigAttempts counts prior transient-config attempts stored as
+// trailing newlines on the request file. JSON ignores the whitespace, so
+// the count survives without a format change.
+func restartConfigAttempts(data []byte) int {
+	n := 0
+	for len(data) > 0 && data[len(data)-1] == '\n' {
+		n++
+		data = data[:len(data)-1]
+	}
+	return n
+}
+
+// isMissingConfig reports whether root has no config file. config.Load
+// does not preserve the not-exist chain, so check the file directly.
+func isMissingConfig(root string) bool {
+	_, err := os.Stat(filepath.Join(root, ".jigz", "config.yaml"))
+	return os.IsNotExist(err)
+}
 
 // applyStoredRestart runs one stored restart request to completion:
 // labels, event and wake, like the command line. While the live session
@@ -709,7 +757,10 @@ func (e *restartPermanentError) Unwrap() error { return e.err }
 func (s *supervisor) applyStoredRestart(req restartRequest) error {
 	cfg, err := config.Load(s.root)
 	if err != nil {
-		return &restartPermanentError{err}
+		if isMissingConfig(s.root) {
+			return &restartPermanentError{err}
+		}
+		return &restartTransientConfigError{err}
 	}
 	if err := cfg.CheckToken(); err != nil {
 		return &restartPermanentError{err}
