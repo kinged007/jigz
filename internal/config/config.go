@@ -33,6 +33,11 @@ type Config struct {
 	// Filters are the per-loop query filters by work slug, used when the
 	// work entry has no query_filter of its own.
 	Filters map[string]string `yaml:"filters"`
+	// Assignees is the global assignee scope: the GitHub users whose
+	// assigned items the loops watch. Empty means @me, today's
+	// behavior. A work entry's assignees replaces this for that
+	// entry's loops only.
+	Assignees []string
 	// Labels are the GitHub labels setup ensures exist (create-or-edit;
 	// labels absent here are left alone). No labels: key = none.
 	Labels     []Label `yaml:"labels"`
@@ -320,13 +325,14 @@ type Label struct {
 
 // configFile is the document of .jigz/config.yaml.
 type configFile struct {
-	Repo    string             `yaml:"repo"`
-	Token   string             `yaml:"token"`
-	Filters map[string]string  `yaml:"filters"`
-	Labels  []Label            `yaml:"labels"`
-	Cleanup cleanupFile        `yaml:"cleanup"`
-	Sleep   sleepFile          `yaml:"sleep"`
-	GitHub  fleetconfig.GitHub `yaml:"github"`
+	Repo      string             `yaml:"repo"`
+	Token     string             `yaml:"token"`
+	Filters   map[string]string  `yaml:"filters"`
+	Assignees []string           `yaml:"assignees"`
+	Labels    []Label            `yaml:"labels"`
+	Cleanup   cleanupFile        `yaml:"cleanup"`
+	Sleep     sleepFile          `yaml:"sleep"`
+	GitHub    fleetconfig.GitHub `yaml:"github"`
 
 	Engine         machine.Engine      `yaml:"engine"`
 	OperatingHours machine.Hours       `yaml:"operating_hours"`
@@ -341,7 +347,7 @@ type configFile struct {
 // names the replacement where one exists.
 var removedKeys = map[string]string{
 	"milestone": "milestone is not configurable",
-	"assignee":  "the assignee scope is always assignee:@me",
+	"assignee":  "use assignees: (a list of GitHub usernames) instead",
 	"workflows": "workflows.<name>.budget moves to work.<slug>.budget",
 }
 
@@ -402,6 +408,10 @@ func Load(dir string) (*Config, error) {
 		c.GitHub = file.GitHub
 		c.Repo, c.Token = file.Repo, file.Token
 		c.Filters = file.Filters
+		if err := validateAssignees("assignees", file.Assignees); err != nil {
+			return nil, err
+		}
+		c.Assignees = file.Assignees
 		c.Labels = file.Labels
 		cl, err := file.Cleanup.resolve()
 		if err != nil {
@@ -524,10 +534,54 @@ func MigrateRepoDir(dir string) {
 	_ = os.Rename(old, cur)
 }
 
+// AssigneeScope renders the tracker query fragment scoping a loop to
+// items assigned to any one of names: one assignee: term, with several
+// users comma-joined. One term is an OR; separate terms are an AND,
+// both in the engine's harness (internal/fakegithub) and on GitHub, so
+// the multi-user form stays a single term. Empty means @me, today's
+// behavior.
+func AssigneeScope(names []string) string {
+	if len(names) == 0 {
+		return "assignee:@me"
+	}
+	return "assignee:" + strings.Join(names, ",")
+}
+
+// assigneeValue is the JIG_ASSIGNEE form of the scope: @me when unset,
+// else the comma-joined users.
+func assigneeValue(names []string) string {
+	if len(names) == 0 {
+		return "@me"
+	}
+	return strings.Join(names, ",")
+}
+
+// AssigneesForLoop resolves the assignee scope of a loop: the work
+// entry's override when the loop belongs to an entry that sets one,
+// else the global scope. name is a work slug or a split loop name
+// (<slug>-<group>); the longest matching slug wins.
+func (c *Config) AssigneesForLoop(name string) []string {
+	best := ""
+	for slug := range c.Work {
+		if name != slug && !strings.HasPrefix(name, slug+"-") {
+			continue
+		}
+		if len(slug) > len(best) {
+			best = slug
+		}
+	}
+	if best != "" {
+		if a := c.Work[best].Assignees; len(a) > 0 {
+			return a
+		}
+	}
+	return c.Assignees
+}
+
 // FilterFor returns the query filter for a loop: the work entry's
 // query_filter (the complete tracker query) when set, else the filters:
 // entry of the slug, else "". Jigz appends the assignee scope at launch,
-// so a filter carries assignee:@me.
+// so a filter carries an assignee: term (@me by default).
 func (c *Config) FilterFor(name string) string {
 	base := c.Work[name].QueryFilter
 	if base == "" {
@@ -536,18 +590,21 @@ func (c *Config) FilterFor(name string) string {
 	if base == "" {
 		return ""
 	}
-	return base + " assignee:@me"
+	return base + " " + AssigneeScope(c.AssigneesForLoop(name))
 }
 
 // Env returns the environment for one engine subprocess. token is the
 // loop's tracker credential from TrackerToken; it travels as
-// SORTIE_TRACKER_API_KEY.
+// SORTIE_TRACKER_API_KEY. JIG_ASSIGNEE carries the global assignee
+// scope (@me when unset) for prompt files; a loop-level override
+// changes only that loop's tracker filter.
 func (c *Config) Env(token string) []string {
 	return []string{
 		"SORTIE_TRACKER_PROJECT=" + c.Tracker,
 		"JIG_TRACKER_PROJECT=" + c.Tracker,
 		"SORTIE_TRACKER_API_KEY=" + token,
 		"JIG_WORKSPACES=" + c.Workspaces,
+		"JIG_ASSIGNEE=" + assigneeValue(c.Assignees),
 	}
 }
 
