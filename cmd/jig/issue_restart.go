@@ -405,6 +405,11 @@ func pendingRestartIssues(root string) ([]restartRequest, error) {
 // name. It is a variable so tests can force the hard-link failure path.
 var restartLink = os.Link
 
+// restartRestoreWrite restores a retryable request file after a
+// transient config failure. It is a variable so tests can force the
+// restore failure path without making the state dir unwritable.
+var restartRestoreWrite = writeFileAtomic
+
 func storeRestartRequest(root string, req restartRequest) (already bool, err error) {
 	if pending, err := pendingRestartIssues(root); err == nil {
 		for _, p := range pending {
@@ -677,8 +682,9 @@ func (s *supervisor) restartStep() {
 					s.recordRestartOutcome(req, "", "", fmt.Sprintf("gave up on issue %d after %d attempts: %v", req.Issue, attempts+1, err))
 					continue
 				}
-				if werr := writeFileAtomic(f, append(data, '\n')); werr != nil {
+				if werr := restartRestoreWrite(f, append(data, '\n')); werr != nil {
 					fmt.Fprintln(os.Stderr, "jig: restart: restore:", werr)
+					continue
 				}
 				_ = os.Remove(inflight)
 				continue

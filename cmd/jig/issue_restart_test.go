@@ -981,3 +981,46 @@ func TestRestartStepRetriesTransientConfigThenDrops(t *testing.T) {
 		t.Fatalf("files after attempt %d = %v, want the request dropped", maxRestartConfigAttempts, files)
 	}
 }
+
+// A failed restore keeps the in-flight marker: the only copy of a
+// retryable request is not deleted when the state dir cannot take the
+// restored file, so the next tick can reprocess it.
+func TestRestartStepKeepsInflightWhenRestoreFails(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("JIG_REGISTRY_DIR", t.TempDir())
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".jigz"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".jigz", "config.yaml"), []byte("{broken"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prefix, err := cleanupFilePath(root, restartRequestSuffix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(prefix), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	req := restartRequest{Issue: 7, Actor: "tester", At: time.Now().UTC()}
+	data, _ := json.Marshal(req)
+	if err := os.WriteFile(prefix+"7", data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := restartRestoreWrite
+	restartRestoreWrite = func(string, []byte) error { return errors.New("disk full") }
+	defer func() { restartRestoreWrite = old }()
+	(&supervisor{root: root}).restartStep()
+	files, _ := filepath.Glob(prefix + "*")
+	if len(files) != 1 || !strings.HasSuffix(files[0], ".applying") {
+		t.Fatalf("files after failed restore = %v, want the in-flight marker kept", files)
+	}
+	raw, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got restartRequest
+	if err := json.Unmarshal(raw, &got); err != nil || got.Issue != 7 {
+		t.Fatalf("in-flight file = %q, want the stored request kept", raw)
+	}
+}
