@@ -345,3 +345,32 @@ func TestReloadDoesNotRecycleStoppingLoops(t *testing.T) {
 		t.Errorf("a loop stopping for a stop request was recycled: %+v", p)
 	}
 }
+
+// A wait-for-idle stop survives a query-change reload: the draining loop
+// is not restarted and the run still ends once it exits. A held loop is
+// not started by the reload either.
+func TestStopWhenIdleSurvivesQueryChangeReload(t *testing.T) {
+	root := t.TempDir()
+	const before = "repo: owner/repo\nwork:\n  plan:\n    managed: false\n    query_filter: \"label:a\"\n  build:\n    managed: false\n    query_filter: \"label:a\"\n"
+	const after = "repo: owner/repo\nwork:\n  plan:\n    managed: false\n    query_filter: \"label:b\"\n  build:\n    managed: false\n    query_filter: \"label:b\"\n"
+	mustWrite(t, filepath.Join(root, ".jigz", "config.yaml"), before)
+	sup := newTestSup(t, root, "plan", "build")
+	sup.procs["plan"] = &loopProc{def: loopDef{name: "plan", file: "WORKFLOW.plan.md"}}
+	if _, done := sup.onSignal(sigStopIdle); done {
+		t.Fatal("the run ended with a loop still draining")
+	}
+	mustWrite(t, filepath.Join(root, ".jigz", "config.yaml"), after)
+	sup.reload()
+	if p := sup.procs["plan"]; p == nil || p.recycle {
+		t.Fatalf("the stopping loop was restarted by the reload: %+v", p)
+	}
+	if _, ok := sup.procs["build"]; ok {
+		t.Fatal("the reload started a held loop during the stop")
+	}
+	if _, done := sup.onExit(exitEvent{loop: "plan"}); !done {
+		t.Fatal("the run did not end once the draining loop stopped")
+	}
+	if !sup.finished() {
+		t.Error("finished is false after the last loop stopped during a stop")
+	}
+}
