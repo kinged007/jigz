@@ -432,7 +432,7 @@ func (s *supervisor) refreshWork(stamp string) {
 	for _, slug := range sortedKeys(resolved) {
 		res := resolved[slug]
 		if !res.Managed {
-			r := config.Resolved{Slug: res.Slug, Managed: false, QueryFilter: res.QueryFilter, OperatingHours: res.OperatingHours}
+			r := config.Resolved{Slug: res.Slug, Managed: false, QueryFilter: res.QueryFilter, OperatingHours: res.OperatingHours, Tracker: res.Tracker}
 			work[res.Slug] = r
 			queries[res.Slug] = res.QueryFilter
 			continue
@@ -500,15 +500,25 @@ func (s *supervisor) querySnapshot() map[string]string {
 
 // recycleDrain stops a loop once idle and starts it again: the query
 // filter is read only at start, so a changed query needs a restart.
-// A loop that is not running is held for the gate to start.
-func (s *supervisor) recycleDrain(name string) {
+// A loop that is not running is held for the gate to start. A loop
+// already stopping for a stop request keeps its intent, so a reload
+// during a drain does not restart it. It reports whether the loop was
+// marked for restart.
+func (s *supervisor) recycleDrain(name string) bool {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if p := s.procs[name]; p != nil {
+		if p.stopping && !p.recycle {
+			return false
+		}
 		p.stopping, p.drain, p.recycle = true, true, true
-	} else if _, ok := s.defs[name]; ok {
-		s.gateHeld[name] = true
+		return true
 	}
-	s.mu.Unlock()
+	if _, ok := s.defs[name]; ok {
+		s.gateHeld[name] = true
+		return true
+	}
+	return false
 }
 
 // gateInputsLocked assembles the gate decision inputs. The caller holds
