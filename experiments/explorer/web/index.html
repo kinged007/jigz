@@ -23,46 +23,53 @@
   <div class="cmd small">&gt; jig explore <span id="cmdrepo"></span><i class="caret"></i></div>
 </nav>
 
-<section class="stage" id="stage">
-  <canvas id="graph"></canvas>
-  <div class="hud tl" id="hudCount">GRAPH / 0 NODES · 0 LINKS</div>
-  <div class="hud tr" id="hudCam">AZ 0.0° Z 0</div>
-  <div class="hud bl" id="hudStatus"></div>
-  <div class="hud br legend" id="legend"></div>
-  <div class="callout" id="callout" hidden><span id="calloutName"></span> / <b>MATCHED</b></div>
-  <div class="card" id="card" hidden></div>
-  <div class="tip" id="tip" hidden></div>
-</section>
+<div class="main">
+  <section class="left">
+    <div class="stage" id="stage">
+      <canvas id="graph"></canvas>
+      <div class="hud tl" id="hudCount">GRAPH / 0 NODES · 0 LINKS</div>
+      <div class="hud tr" id="hudCam">AZ 0.0° Z 0</div>
+      <div class="hud bl" id="hudStatus"></div>
+      <div class="callout" id="callout" hidden><span id="calloutName"></span> / <b>MATCHED</b></div>
+      <div class="card" id="card" hidden></div>
+      <div class="tip" id="tip" hidden></div>
+    </div>
 
-<section class="scrub">
-  <button id="play" title="Replay history">▶</button>
-  <div class="scrubtrack">
-    <canvas id="spark"></canvas>
-    <input type="range" id="time" min="0" max="1000" value="1000" aria-label="History position">
-  </div>
-  <div class="scrubdate" id="timeLabel">NOW</div>
-</section>
+    <div class="legend" id="legend"></div>
 
-<section class="prompt">
-  <span>&gt;</span>
-  <input id="q" autocomplete="off" spellcheck="false" placeholder="search nodes: #123, @user, label, keyword, path/to/file — Enter to focus">
-  <span class="hint" id="qhint">JIGZ</span>
-</section>
+    <section class="scrub">
+      <button id="play" title="Replay history">▶</button>
+      <div class="scrubdate from" id="fromLabel">START</div>
+      <div class="scrubtrack">
+        <canvas id="spark"></canvas>
+        <input type="range" id="timeFrom" min="0" max="1000" value="0" aria-label="Window start">
+        <input type="range" id="time" min="0" max="1000" value="1000" aria-label="Window end">
+      </div>
+      <div class="scrubdate" id="timeLabel">NOW</div>
+    </section>
 
-<main class="grid">
-  <article class="panel" id="p1"><h2><span>01 REPO</span><em id="p1r"></em></h2><div class="body"></div></article>
-  <article class="panel" id="p2"><h2><span>02 LABEL BOARD</span><em>LIVE</em></h2><div class="body"></div></article>
-  <article class="panel" id="p3"><h2><span>03 NODE INSPECTOR</span><em>TRACE</em></h2><div class="body"></div></article>
-  <article class="panel" id="p4"><h2><span>04 NEIGHBOUR RADAR</span><em>SCAN</em></h2><div class="body radar"><canvas id="radar"></canvas><div class="radarnums"></div></div></article>
-  <article class="panel" id="p5"><h2><span>05 FILE TREE</span><em id="p5r">HOTSPOTS</em></h2><div class="body"></div></article>
-  <article class="panel" id="p6"><h2><span>06 EVENT LOG</span><em>TAIL -F</em></h2><div class="body"></div></article>
-  <article class="panel" id="p7"><h2><span>07 PROCESS MATRIX</span><em>FROM × TO</em></h2><div class="body"></div></article>
-  <article class="panel" id="p8"><h2><span>08 ACTIVITY</span><em>GITHUB</em></h2><div class="body"></div></article>
-  <article class="panel" id="p9"><h2><span>09 TRAJECTORY</span><em id="p9r">PATH</em></h2><div class="body"></div></article>
-  <article class="panel" id="p10"><h2><span>10 KEYWORD STREAM</span><em>TF-IDF</em></h2><div class="body"></div></article>
-  <article class="panel" id="p11"><h2><span>11 FLOW METRICS</span><em>ALL TIME</em></h2><div class="body"></div></article>
-  <article class="panel" id="p12"><h2><span>12 WORKFLOW VARIANTS</span><em>INFERRED</em></h2><div class="body"></div></article>
-</main>
+    <section class="prompt">
+      <span>&gt;</span>
+      <input id="q" autocomplete="off" spellcheck="false" placeholder="search: #123, @user, label, keyword, path — Enter to focus">
+      <span class="hint" id="qhint">JIGZ</span>
+    </section>
+  </section>
+
+  <aside class="right">
+    <article class="panel" id="p1"><h2><span>01 REPO</span><em id="p1r"></em></h2><div class="body"></div></article>
+    <article class="panel" id="p2"><h2><span>02 LABEL BOARD</span><em id="p2r">WINDOW</em></h2><div class="body"></div></article>
+    <article class="panel" id="p3"><h2><span>03 NODE INSPECTOR</span><em id="p3r">TRACE</em></h2><div class="body"></div></article>
+    <article class="panel" id="p4"><h2><span>04 NEIGHBOUR RADAR</span><em>SCAN</em></h2><div class="body radar"><canvas id="radar"></canvas><div class="radarnums"></div></div></article>
+    <article class="panel" id="p5"><h2><span>05 FILE TREE</span><em id="p5r">HOTSPOTS</em></h2><div class="body"></div></article>
+    <article class="panel" id="p6"><h2><span>06 EVENT LOG</span><em>TAIL -F</em></h2><div class="body"></div></article>
+    <article class="panel" id="p7"><h2><span>07 PROCESS MATRIX</span><em>FROM × TO</em></h2><div class="body"></div></article>
+    <article class="panel" id="p8"><h2><span>08 ACTIVITY</span><em>GITHUB</em></h2><div class="body"></div></article>
+    <article class="panel" id="p9"><h2><span>09 TRAJECTORY</span><em id="p9r">PATH</em></h2><div class="body"></div></article>
+    <article class="panel" id="p10"><h2><span>10 KEYWORD STREAM</span><em>TF-IDF</em></h2><div class="body"></div></article>
+    <article class="panel" id="p11"><h2><span>11 FLOW METRICS</span><em id="p11r">WINDOW</em></h2><div class="body"></div></article>
+    <article class="panel" id="p12"><h2><span>12 WORKFLOW VARIANTS</span><em>INFERRED</em></h2><div class="body"></div></article>
+  </aside>
+</div>
 
 <script src="app.js"></script>
 </body>

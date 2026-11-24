@@ -174,3 +174,23 @@ func TestLayoutIsDeterministicAndFinite(t *testing.T) {
 		}
 	}
 }
+
+func TestClosedByPR(t *testing.T) {
+	yes := &Item{Events: []Event{{Type: "closed", Ref: 12}}}
+	viaXref := &Item{Events: []Event{{Type: "xref", Ref: 3, Close: true}}}
+	no := &Item{Events: []Event{{Type: "closed"}, {Type: "xref", Ref: 3}}}
+	if !closedByPR(yes) || !closedByPR(viaXref) || closedByPR(no) {
+		t.Fatal("closedByPR mismatch")
+	}
+}
+
+func TestLinkKindUpgradesToCloses(t *testing.T) {
+	b := &builder{idx: map[string]int{}, links: map[[2]int]*Link{}}
+	b.node("a", "issue", "a", 0)
+	b.node("b", "pr", "b", 0)
+	b.link("a", "b", "mentions")
+	b.link("b", "a", "closes")
+	if len(b.order) != 1 || b.order[0].Kind != "closes" || b.order[0].W != 2 {
+		t.Fatalf("link = %+v", b.order[0])
+	}
+}

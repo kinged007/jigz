@@ -74,17 +74,29 @@ Data is stored in `.explorer/<owner>__<name>/` (ignored by git):
 
 ## UI
 
-- Drag to orbit, wheel to zoom, click a node to focus it; `/` focuses the
-  prompt, `Esc` clears.
+The graph is on the left and the twelve panels are on the right (scrollable).
+
+- Drag to orbit, wheel to zoom, Ctrl/Cmd/Shift-drag or middle-button drag to
+  pan, click a node to focus it, `r` resets the view, `/` focuses the prompt,
+  `Esc` clears.
+- Each node type has its own colour and shape (legend below the graph;
+  clicking a legend entry hides or shows that type). Open issues and PRs are
+  filled, closed and merged ones are outlined.
 - Prompt: free text over labels, titles and ids; `#123` for an item. Enter
   focuses the best match.
 - Tabs filter node types (issues, pulls, code, people, topics, workflow).
-- The bar under the graph replays history: nodes appear at their creation time.
-- Panels: repository, label counts, inspector, neighbour radar, file tree
-  (hotspots, or the files of the selected commit/PR/issue), event log, stage
-  transition matrix, activity, the selected item's trajectory, keywords, flow
-  metrics, and workflow variants.
-- The URL hash keeps the selection and view (`#node=issue:1840&tab=workflow`).
+- The timeline has a start handle (amber) and an end handle (cyan). Only items
+  and commits created inside the window are shown, together with the labels,
+  people, files and so on linked to them. The play button moves the end handle
+  forward from the start handle.
+- All panels are computed for the window, so they change while the replay
+  runs: label counts, file hotspots, event log, stage matrix, activity,
+  keywords, flow metrics and workflow variants.
+- The inspector has an "Open in GitHub" button (new tab) for issues, PRs,
+  commits, files, directories, labels, stages, scopes, keywords, milestones
+  and people.
+- The URL hash keeps the selection, view and window
+  (`#node=issue:1840&tab=workflow&f=1790812800&t=1791763200`).
 
 ## Limits
 

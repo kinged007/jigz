@@ -127,6 +127,9 @@ func (b *builder) link(a, c, kind string) {
 	}
 	if l, ok := b.links[k]; ok {
 		l.W++
+		if kind == "closes" {
+			l.Kind = kind
+		}
 		return
 	}
 	l := &Link{S: i, T: j, Kind: kind, W: 1}
@@ -246,6 +249,9 @@ func buildGraph(st *Store, dataDir string) (*Graph, error) {
 		}
 		if it.Milestone != "" {
 			n.Meta["milestone"] = it.Milestone
+		}
+		if it.Kind == "issue" && closedByPR(it) {
+			n.Meta["byPR"] = true
 		}
 		w := day(created)
 		if it.Kind == "issue" {
@@ -539,11 +545,8 @@ func metrics(items []*Item, paths map[*Item][]Step, commits int) map[string]any 
 				issueClose = append(issueClose, float64(parseTime(it.ClosedAt)-parseTime(it.CreatedAt))/3600)
 			}
 			issueSteps = append(issueSteps, float64(len(paths[it])))
-			for _, e := range it.Events {
-				if (e.Type == "closed" && e.Ref != 0) || (e.Type == "xref" && e.Close) {
-					issuesClosedByPR++
-					break
-				}
+			if closedByPR(it) {
+				issuesClosedByPR++
 			}
 			continue
 		}
@@ -569,4 +572,14 @@ func metrics(items []*Item, paths map[*Item][]Step, commits int) map[string]any 
 		"medianStages": median(issueSteps), "mergeRate": pct(prsMerged, prs),
 		"issuesLinkedPct": pct(issuesClosedByPR, issues),
 	}
+}
+
+// closedByPR reports whether a pull request closed or will close the issue.
+func closedByPR(it *Item) bool {
+	for _, e := range it.Events {
+		if (e.Type == "closed" && e.Ref != 0) || (e.Type == "xref" && e.Close) {
+			return true
+		}
+	}
+	return false
 }
