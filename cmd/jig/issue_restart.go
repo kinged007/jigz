@@ -32,8 +32,9 @@ import (
 const defaultClaimLabel = "in-progress"
 
 // restartRequestSuffix names the durable restart-request files next to
-// the status file. One file per request, so concurrent restarts never
-// overwrite each other; the supervisor consumes them on its next tick.
+// the status file. One file per issue, so concurrent restarts of one
+// issue leave one pending re-queue; the supervisor consumes them on
+// its next tick.
 const restartRequestSuffix = ".restart.request."
 
 // restartEventKind is the history event kind a restart records. The run
@@ -369,15 +370,6 @@ func claimLabelOf(resolved map[string]config.Resolved, loop string) string {
 	return defaultClaimLabel
 }
 
-// requestRestartPath is the file one restart request is stored in.
-func requestRestartPath(root string, at time.Time) (string, error) {
-	prefix, err := cleanupFilePath(root, restartRequestSuffix)
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("%s%d-%d", prefix, at.UnixNano(), os.Getpid()), nil
-}
-
 // pendingRestartIssues lists the issues with a stored restart request,
 // oldest first. A restart while the supervisor is down stores one; the
 // supervisor consumes them on its next tick and on start.
@@ -405,27 +397,43 @@ func pendingRestartIssues(root string) ([]restartRequest, error) {
 
 // storeRestartRequest records one restart for the next supervisor start.
 // It reports whether an identical request was already pending, so two
-// runs leave exactly one pending re-queue.
+// runs leave exactly one pending re-queue. The pending record is one
+// file per issue created exclusive, so two concurrent restarts leave
+// one file: the loser sees the winner's file.
 func storeRestartRequest(root string, req restartRequest) (already bool, err error) {
-	pending, err := pendingRestartIssues(root)
+	if pending, err := pendingRestartIssues(root); err == nil {
+		for _, p := range pending {
+			if p.Issue == req.Issue {
+				return true, nil
+			}
+		}
+	} else {
+		return false, err
+	}
+	prefix, err := cleanupFilePath(root, restartRequestSuffix)
 	if err != nil {
 		return false, err
 	}
-	for _, p := range pending {
-		if p.Issue == req.Issue {
+	if err := os.MkdirAll(filepath.Dir(prefix), 0o755); err != nil {
+		return false, err
+	}
+	path := prefix + strconv.Itoa(req.Issue)
+	data, _ := json.Marshal(req)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		if os.IsExist(err) {
 			return true, nil
 		}
-	}
-	path, err := requestRestartPath(root, req.At)
-	if err != nil {
 		return false, err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return false, err
+	if _, werr := f.Write(data); werr != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
+		return false, werr
 	}
-	data, _ := json.Marshal(req)
-	if err := writeFileAtomic(path, data); err != nil {
-		return false, err
+	if cerr := f.Close(); cerr != nil {
+		_ = os.Remove(path)
+		return false, cerr
 	}
 	return false, nil
 }

@@ -170,7 +170,7 @@ mid-run, claimed by a live session, belongs to another loop, is a pull
 request, or does not exist. It exits non-zero when no tracker token
 resolves. When no supervisor serves the repo-root, the restart is stored
 next to the status document
-(`<hash>.restart.request.<time>-<pid>`) and applied once on the next
+(`<hash>.restart.request.<issue>`) and applied once on the next
 start; a second run while it is pending reports the request as already
 recorded instead of queuing it twice.
 
