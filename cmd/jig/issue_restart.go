@@ -622,7 +622,9 @@ func restartActor(ctx context.Context, tracker issueTracker, slug, token string)
 // for a retryable failure. While the live session set is unknown the
 // request is kept for a later tick, not refused. A crash between the
 // label change and the marker removal re-applies idempotent labels on
-// the next start. A request that no longer restarts is final: the marker is gone and the
+// the next start and may record the restart event twice; the duplicate
+// is accepted because the labels stay correct and the window is short.
+// A request that no longer restarts is final: the marker is gone and the
 // outcome is recorded as an event. A permanent tracker failure drops
 // the request with an outcome instead of retrying forever; any other
 // failure keeps the file for the next tick and moves on to the next

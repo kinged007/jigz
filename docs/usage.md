@@ -172,7 +172,9 @@ resolves. When no supervisor serves the repo-root, the restart is stored
 next to the status document
 (`<hash>.restart.request.<issue>`) and applied once on the next
 start; a second run while it is pending reports the request as already
-recorded instead of queuing it twice.
+recorded instead of queuing it twice. A crash between the label change
+and the request cleanup may record the restart event twice; the
+duplicate is accepted because the labels stay correct.
 
 Flags: `--unite` joins (or starts) the shared dashboard,
 `--dashboard-port=N` forces the dashboard onto port N,
