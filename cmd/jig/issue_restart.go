@@ -596,9 +596,10 @@ func restartActor(ctx context.Context, tracker issueTracker, slug, token string)
 // was down or busy, oldest first. Each file is renamed to an in-flight
 // marker before its request runs, so two ticks never apply one request
 // twice; the marker is removed on success or refusal and renamed back
-// for a retryable failure. A crash between the label change and the
-// marker removal re-applies idempotent labels on the next start. A
-// request that no longer restarts is final: the marker is gone and the
+// for a retryable failure. While the live session set is unknown the
+// request is kept for a later tick, not refused. A crash between the
+// label change and the marker removal re-applies idempotent labels on
+// the next start. A request that no longer restarts is final: the marker is gone and the
 // outcome is recorded as an event. A permanent tracker failure drops
 // the request with an outcome instead of retrying forever; any other
 // failure keeps the file for the next tick and moves on to the next
@@ -665,7 +666,10 @@ func restartPermanent(err error) bool {
 }
 
 // applyStoredRestart runs one stored restart request to completion:
-// labels, event and wake, like the command line.
+// labels, event and wake, like the command line. While the live session
+// set is unknown the request is deferred with a retryable error, so
+// restartStep keeps it for a later tick instead of refusing it as
+// mid-run; the command line and dashboard keep refusing that state.
 func (s *supervisor) applyStoredRestart(req restartRequest) error {
 	cfg, err := config.Load(s.root)
 	if err != nil {
@@ -674,16 +678,21 @@ func (s *supervisor) applyStoredRestart(req restartRequest) error {
 	if err := cfg.CheckToken(); err != nil {
 		return err
 	}
+	sessions, known := statusSessions(s.root)
+	if !known {
+		return fmt.Errorf("restart deferred: live sessions unknown")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	tracker := &ghIssueTracker{client: &github.Client{BaseURL: "https://api.github.com"}}
+	tracker := s.restartTracker
+	if tracker == nil {
+		tracker = &ghIssueTracker{client: &github.Client{BaseURL: "https://api.github.com"}}
+	}
 	deps := &restartDeps{
 		tracker: tracker, token: cfg.Token, slug: cfg.Repo,
 		loops: cfg.Resolve(), actor: req.Actor,
 	}
-	sessions, known := statusSessions(s.root)
 	deps.live = liveRestartIssues(sessions)
-	deps.sessionsUnknown = !known
 	if hst, herr := store.Open(dashboardStateDir()); herr == nil {
 		deps.history, deps.events = hst, hst
 		defer hst.Close()
