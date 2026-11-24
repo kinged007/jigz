@@ -1,0 +1,8 @@
+- [x] CHK001 Is AC-1 measurable? Yes: stopping loop keeps `recycle=false` through a query-change reload and `onExit` reports done.
+- [x] CHK002 Is AC-2 measurable? Yes: existing recycle test asserts drain+recycle with no stop; it must pass unchanged.
+- [x] CHK003 Is AC-3 measurable? Yes: one supervisor test drives stop → query change → exit and asserts the run ends.
+- [x] CHK004 Does every FR have a task? Yes: FR-001 → T002/T004 (verify guard + regression test), FR-002 → T003, FR-003 → T002.
+- [x] CHK005 Does every task name an AC or polish purpose? Yes: T001–T004 name ACs, T005–T007 are polish (suites, gate, smoke).
+- [x] CHK006 Is scope minimal? Yes: one test file expected; prod change only if `dev` verification fails, stated as conditional.
+- [x] CHK007 Are named files/functions verified? Yes: `cmd/jig/gate.go` `recycleDrain`, `cmd/jig/supervise.go` `reload`/`onExit`/`finished`, `cmd/jig/supervise_test.go` helpers confirmed via grep and `git show origin/dev`.
+- [x] CHK008 Does the plan respect the OWNER triage note? Yes: base is `origin/dev`, fix from #65 verified present, issue closes as fixed by #65 plus the new test if nothing else is missing.

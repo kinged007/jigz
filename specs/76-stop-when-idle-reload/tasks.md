@@ -1,0 +1,7 @@
+- [ ] T001 [P] [AC-3] `cmd/jig/supervise_test.go` — rebase work onto `origin/dev`, verify the `stopping && !recycle` early return in `recycleDrain` is present
+- [ ] T002 [AC-3] `cmd/jig/supervise_test.go` — write `TestStopWhenIdleSurvivesQueryChangeReload` (stop idle, query-change reload, assert no recycle and `onExit` done) and watch it pass against `dev`
+- [ ] T003 [P] [AC-2] `cmd/jig/supervise_test.go` — run existing `TestReloadWithAChangedRepoRewritesTheEnvFileAndRecyclesLoops` unchanged to prove normal query/env restart still works
+- [ ] T004 [P] [AC-1] `cmd/jig/supervise_test.go` — assert in the new test that the stopping loop is not restarted and `finished()` becomes true once all loops exit
+- [ ] T005 [polish] repo — run focused suite `go test ./cmd/jig/ -run 'Reload|StopWhenIdle|Recycle|Supervise'`
+- [ ] T006 [polish] repo — run full quality gate from `AGENTS.md`: `gofmt -l cmd internal`, `go vet ./...`, `go test ./...`, `go build ./...`
+- [ ] T007 [polish] repo — smoke test: `go build -o /tmp/jig ./cmd/jig && /tmp/jig --help`
