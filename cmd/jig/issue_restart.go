@@ -586,12 +586,16 @@ func restartActor(ctx context.Context, tracker issueTracker, slug, token string)
 }
 
 // restartStep applies the restart requests stored while the supervisor
-// was down or busy, oldest first. Each file is removed before its
-// request runs, so a request applies exactly once even when the run
-// restarts mid-sequence. A request that no longer restarts is final:
-// the file is gone and the outcome is recorded as an event. A tracker
-// or state failure keeps the file for the next tick, so the issue stays
-// restartable.
+// was down or busy, oldest first. Each file is renamed to an in-flight
+// marker before its request runs, so two ticks never apply one request
+// twice; the marker is removed on success or refusal and renamed back
+// for a retryable failure. A crash between the label change and the
+// marker removal re-applies idempotent labels on the next start. A
+// request that no longer restarts is final: the marker is gone and the
+// outcome is recorded as an event. A permanent tracker failure drops
+// the request with an outcome instead of retrying forever; any other
+// failure keeps the file for the next tick and moves on to the next
+// request, so one stuck issue never starves the rest.
 func (s *supervisor) restartStep() {
 	prefix, err := cleanupFilePath(s.root, restartRequestSuffix)
 	if err != nil {
@@ -600,6 +604,14 @@ func (s *supervisor) restartStep() {
 	files, _ := filepath.Glob(prefix + "*")
 	sort.Strings(files)
 	for _, f := range files {
+		if strings.HasSuffix(f, ".applying") {
+			// A marker left by a crash: restore it to a request file.
+			base := strings.TrimSuffix(f, ".applying")
+			if err := os.Rename(f, base); err != nil {
+				continue
+			}
+			f = base
+		}
 		data, rerr := os.ReadFile(f)
 		var req restartRequest
 		if rerr != nil || json.Unmarshal(data, &req) != nil || req.Issue <= 0 {
@@ -607,18 +619,42 @@ func (s *supervisor) restartStep() {
 			_ = os.Remove(f)
 			continue
 		}
+		inflight := f + ".applying"
+		if err := os.Rename(f, inflight); err != nil {
+			continue
+		}
 		if err := s.applyStoredRestart(req); err != nil {
 			var refusal *restartRefusal
 			if errors.As(err, &refusal) {
-				_ = os.Remove(f)
+				_ = os.Remove(inflight)
 				s.recordRestartOutcome(req, "", refusal.loop, refusal.reason)
 				continue
 			}
+			if restartPermanent(err) {
+				_ = os.Remove(inflight)
+				s.recordRestartOutcome(req, "", "", fmt.Sprintf("gave up on issue %d: %v", req.Issue, err))
+				continue
+			}
 			fmt.Fprintln(os.Stderr, "jig: restart:", err)
-			return
+			if rerr := os.Rename(inflight, f); rerr != nil {
+				if werr := writeFileAtomic(f, data); werr != nil {
+					fmt.Fprintln(os.Stderr, "jig: restart: restore:", werr)
+				}
+			}
+			continue
 		}
-		_ = os.Remove(f)
+		_ = os.Remove(inflight)
 	}
+}
+
+// restartPermanent reports a tracker failure retrying cannot fix: bad
+// credentials, a forbidden label write, or a gone repository.
+func restartPermanent(err error) bool {
+	var e *github.Error
+	if errors.As(err, &e) {
+		return e.Status == 401 || e.Status == 403 || e.Status == 404
+	}
+	return false
 }
 
 // applyStoredRestart runs one stored restart request to completion:
