@@ -1,8 +1,10 @@
 # Dashboard
 
 Every run serves a dashboard (default `http://127.0.0.1:7677`, bound to
-loopback). The dashboard is read-only: it shows state and history, and nothing on it starts, stops,
-restarts, edits or changes anything. Loops are controlled with the `jig`
+loopback). The dashboard is read-only with one exception: the run page
+carries a Restart issue button (see [The run page](#the-run-page)). It
+shows state and history, and nothing else on it starts, stops, restarts,
+edits or changes anything. Loops are controlled with the `jig`
 commands (`jig stop`, `jig restart`, `jig reload`, `jig wake`,
 `jig cleanup`, `jig pause`, `jig resume`, `jig budget override`), and
 projects are set up with `jig setup`.
@@ -115,6 +117,12 @@ runs the loop:
 - Engine log: the lines of the workflow log that name the issue. The log loads
   when the Engine log tab opens, and the Reload button and the refresh of a
   running run read it again.
+
+The run page carries a Restart issue button: the dashboard's one write
+action. It runs the same operation as `jig issue restart` for the page's
+issue and workflow, with the same refusal rules, and redirects back to the
+run page, where the restart shows as an event with who triggered it and
+when (see [Restarting a stuck issue](usage.md#restarting-a-stuck-issue)).
 
 After the run the engine database has the run's event record, which the Agent
 log shows in place of the transcript. A run with no event record falls back to

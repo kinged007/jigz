@@ -570,6 +570,7 @@ func (s *supervisor) run() int {
 			if code, done := s.budgetStep(); done {
 				return code
 			}
+			s.restartStep()
 			if code, done := s.gateStep(); done {
 				return code
 			}

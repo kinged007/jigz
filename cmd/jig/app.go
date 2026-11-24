@@ -104,9 +104,12 @@ type app struct {
 	store      *store.Store
 	applyWait  time.Duration
 	pollEvery  time.Duration
-	verOnce    sync.Once
-	versions   []pair
-	alertCache dbAlertCache
+	// restartTrackerForTest substitutes the tracker a dashboard
+	// restart uses. Nil means the production GitHub client.
+	restartTrackerForTest issueTracker
+	verOnce               sync.Once
+	versions              []pair
+	alertCache            dbAlertCache
 	// hide is nil when nothing can be hidden, as in tests.
 	hide *hider
 	// liveHome is the home directory the agents keep their transcripts in.
