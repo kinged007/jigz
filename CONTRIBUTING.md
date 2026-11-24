@@ -6,7 +6,7 @@
 go build ./... && go vet ./... && gofmt -l cmd internal && go test ./...
 ```
 
-Go 1.26.0 or newer. CI runs the same commands, plus a build matrix for
+Go 1.26.0 or newer (the floor comes from the `golang.org/x/sys` dependency). CI runs the same commands, plus a build matrix for
 linux and darwin on amd64 and arm64. Windows is not a target.
 
 ## Tests

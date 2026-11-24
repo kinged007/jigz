@@ -24,14 +24,15 @@ Three things run on your machine, and you are trusting all of them.
    clones the repository, and hands each item to an agent. `jig` pins a
    specific release and verifies the download against that release's
    `checksums.txt`.
-3. **The agent** — a coding agent such as [pi](https://github.com/badlogic/pi-mono).
+3. **The agent** — a coding agent CLI: [Claude Code](https://code.claude.com/docs/en/cli)
+   by default, or another such as [pi](https://github.com/badlogic/pi-mono).
    This is the component that reads your files and runs your commands.
 
-The generated workflows need two pieces the engine does not always ship:
-the **pi agent adapter** and the **github-pr tracker** (which treats pull
-requests as work items). The default engine release carries both. The
-`engine:` block of `machine.yaml` and `JIG_ENGINE_REPO` select a
-different release; whatever they point at must still carry both adapters.
+The generated workflows need the **github-pr tracker**, which treats pull
+requests as work items, and the agent adapter of the agent they run (`claude-code`
+by default). The default engine release has both. The `engine:` block of
+`machine.yaml` and `JIG_ENGINE_REPO` select a different release. Only select
+a release you trust: it runs on your machine with your credentials.
 
 ## Token scope
 

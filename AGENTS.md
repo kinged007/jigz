@@ -2,7 +2,7 @@
 
 ## What it is
 
-`jig` is a Go CLI that wraps the engine and a web dashboard. It sets up config, labels and workflow files in a target repo, then launches one loop process per workflow (poll → claim issue/PR → hand to `pi` agent → record in SQLite). No agent ships in this repo.
+`jig` is a Go CLI that wraps the engine and a web dashboard. It sets up config, labels and workflow files in a target repo, then launches one loop process per workflow (poll → claim issue/PR → hand to the agent (Claude Code by default, or `pi`) → record in SQLite). No agent ships in this repo.
 
 ## How to run checks
 
@@ -27,7 +27,7 @@ CI (`.github/workflows/ci.yml`) runs all of the above on `push` to `main` and on
 
 ## Skills
 
-The repo uses the `pi` agent. Prompts are shipped in `cmd/jig/workflows/prompts` and written to `.jigz/workflows/prompts/` by `setup` when missing; workflow documents are generated from the `work:` entries of `.jigz/config.yaml` and are not shipped.
+Prompts are shipped in `cmd/jig/workflows/prompts` and written to `.jigz/workflows/prompts/` by `setup` when missing; workflow documents are generated from the `work:` entries of `.jigz/config.yaml` and are not shipped.
 
 Area context for agents (paths, entry points, conventions, focused checks per `area:` label) is in `.agents/areas/`; start at `.agents/areas/README.md`.
 

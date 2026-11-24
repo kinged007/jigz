@@ -31,6 +31,8 @@ in time, it prints the last log lines and exits non-zero. Stop the run with
 `status`, `wake`, `pause`, `resume`, `budget override`, `reload`, `cleanup`,
 `validate`), Setup (`setup`), run options (`--host`, `--dashboard-port`,
 `--no-dashboard`, `--unite`) and Other (`--version`, `--dump-version`).
+A positional argument selects the repo root; the default is the current
+directory.
 
 `setup` reads `.jigz/config.yaml`, generates the workflow files from its
 work entries and creates the labels listed under `labels:`. It writes the
@@ -110,6 +112,14 @@ paused: `period`, `period_start`, `tokens_used`, `cap`, `warn_percent`,
 `override` and `warned`. A paused workflow has state `paused`, which takes
 precedence over `sleeping`.
 
+### When a loop exits
+
+If one loop process exits, `jig` stops the remaining loops, removes the run
+from the registry and exits. Nothing restarts a loop on its own. Read
+`.jigz/logs/<workflow>.log` for the cause, fix it, and start again with
+`jig` or `jig start`. Items that were mid-run keep their trigger label, so the
+next run picks them up again.
+
 ### Child logs
 
 The stdout and stderr of each engine child are written to
@@ -152,18 +162,10 @@ without a budget, or the status document does not show the change after
 document (`<hash>.budget.request.<time>-<pid>`), which the supervisor reads
 and deletes at its next 2-second tick, whatever the sleep settings are.
 
-Flags: `--unite` joins (or starts) the shared dashboard,
-`--dashboard-port=N` forces the dashboard onto port N,
-`--no-dashboard` disables the dashboard page. A positional arg selects the
-repo root (default: current directory).
-
-`JIG_ONLY=plan,build` starts only those loops; unset runs them
-all. It applies to `jig` and `jig start`. This is how Jigz picks a per-repo workflow set.
-
 ### Selecting loops
 
-`JIG_ONLY` is a comma-separated list of `WORKFLOW.*.md` stems. Unset runs
-every installed loop; a name that matches no installed workflow is fatal,
+`JIG_ONLY` is a comma-separated list of `WORKFLOW.*.md` stems. It applies to
+`jig` and `jig start`. Unset runs every installed loop; a name that matches no installed workflow is fatal,
 so a typo cannot leave that loop's work unwatched.
 
 ```sh
@@ -189,5 +191,3 @@ appears in one place. Without `--unite` the page shows only its own
 repository. The dashboard is read-only and has no authentication: use it
 locally, on a private network, or behind your own secure proxy. See
 [Dashboard](dashboard.md#dashboard).
-
-Evidence status: Confirmed against `cmd/jig` unless noted.

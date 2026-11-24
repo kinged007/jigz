@@ -2,14 +2,15 @@
 
 [![CI](https://github.com/kinged007/jigz/actions/workflows/ci.yml/badge.svg)](https://github.com/kinged007/jigz/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/kinged007/jigz)](https://github.com/kinged007/jigz/releases) [![Go](https://img.shields.io/badge/Go-1.26-blue)](go.mod)
 
-Run autonomous coding agents against your GitHub issues with one command.
+Run autonomous coding agents against your GitHub issues and pull requests.
 
-`jig` watches a repo's issues and pull requests, and for each
-labeled item spins up an AI coding agent that reads the issue, writes the
-code, and moves the work forward — planning, implementing, reviewing, and
-merging — mostly on its own. You manage the backlog by adding labels and
-assigning issues; the agents do the rest. GitHub is the only supported
-tracker.
+`jig` watches a repository's issues and pull requests. For each labeled item
+it starts an AI coding agent that reads the issue, writes the code, and moves
+the work forward: planning, implementing, reviewing and merging. You manage
+the backlog by adding labels and assigning issues. GitHub is the only
+supported tracker.
+
+![The Jigz dashboard: fleet state, token budgets and usage](docs/images/dashboard-operations.png)
 
 ## Features
 
@@ -38,12 +39,30 @@ The loop polls roughly every 60 seconds, claims the issue, works on a
 See [docs/usage.md](docs/usage.md) and
 [docs/concepts.md](docs/concepts.md).
 
+## Supported agents
+
+Each loop runs one agent CLI. Claude Code is the default; switch with the
+`runtime` of an agent in `.jigz/config.yaml`
+([Agent runtimes](docs/configuration.md#agent-runtimes)).
+
+| Agent CLI | Runtime | Default command |
+|---|---|---|
+| [Claude Code](https://code.claude.com/docs/en/cli) | `claude-code` | `claude` |
+| [pi](https://github.com/badlogic/pi-mono) | `pi` | `pi` |
+| Codex | `codex` | `codex app-server` |
+| OpenCode | `opencode` | `opencode` |
+| GitHub Copilot CLI | `copilot-cli` | `copilot` |
+
+Dashboard transcripts and stdout-based usage-limit detection cover Claude Code
+and pi; other agents are detected from stderr. See
+[Customizing agents](docs/customization.md#agents-and-models).
+
 ## Requirements
 
-- macOS or Linux (Windows is unsupported, see [Known limitations](#known-limitations)).
+- macOS or Linux, on Intel or Apple silicon. Windows is not supported.
 - A GitHub token with `repo` scope (classic) or Contents, Issues, Pull requests read/write (fine-grained); see [the token setup](docs/install.md#github-token).
 - The [gh CLI](https://cli.github.com/) on `PATH`.
-- A coding agent CLI: [Claude Code](https://code.claude.com/docs/en/cli) (`claude`) by default, or `pi`.
+- A coding agent CLI installed and logged in; Claude Code (`claude`) is the default. See [Supported agents](#supported-agents).
 - Go 1.26.0 or newer only to build from source.
 
 ## How it works
@@ -58,6 +77,16 @@ person to label it `agent:merge`. Because the trigger stays on the item
 for the whole run, an interrupted loop finds it again on the next poll.
 Details: [docs/concepts.md](docs/concepts.md).
 
+## Dashboard
+
+Every run serves a read-only web dashboard at `http://127.0.0.1:7677`. It shows
+the state of each loop, token use against budgets, and the history of every
+run.
+
+![Runs per day and per-loop token budgets on the dashboard](docs/images/dashboard-runs.png)
+
+See [docs/dashboard.md](docs/dashboard.md).
+
 ## Documentation
 
 - [docs/concepts.md](docs/concepts.md) — labels, loops, and how agents pick up issues
@@ -68,27 +97,9 @@ Details: [docs/concepts.md](docs/concepts.md).
 - [docs/dashboard.md](docs/dashboard.md) — the read-only web dashboard, including `--unite`
 - [docs/customization.md](docs/customization.md) — agents, models, auto-merge, agent identity
 
-## Known limitations
-
-- **One crashed loop stops the run.** A loop process exiting ends
-  `jig`, as a signal does. The remaining loops are stopped
-  cleanly and the registry entry is dropped, but nothing restarts them.
-- **Prompt files are not version-stamped.** A prompt file you have
-  not edited is not updated when the binary is upgraded. Delete it and
-  re-run `setup` to take the shipped version.
-- **Windows is unsupported.** The engine releases a `.zip`; the
-  installer reads `tar.gz`.
-
 ## Roadmap
 
-- Restart a loop that exits instead of ending the run. Currently one
-  crashed loop stops every other loop; see
-  [Known limitations](#known-limitations).
-- Stamp prompt files with the binary version that wrote them, so an
-  upgrade can offer a new version of a file the user has not edited.
-
-The full ordered plan lives in [ROADMAP.md](ROADMAP.md); where the product
-is heading is in [VISION.md](VISION.md).
+Planned work is listed in [ROADMAP.md](ROADMAP.md). Where the product is heading is in [VISION.md](VISION.md).
 
 ## Contributing
 
