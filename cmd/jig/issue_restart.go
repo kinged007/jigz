@@ -671,7 +671,8 @@ func (s *supervisor) restartStep() {
 			}
 			if restartPermanent(err) {
 				_ = os.Remove(inflight)
-				s.recordRestartOutcome(req, "", "", fmt.Sprintf("gave up on issue %d: %v", req.Issue, err))
+				_, loop := restartHistoryLocation(req.Issue)
+				s.recordRestartOutcome(req, "", loop, fmt.Sprintf("gave up on issue %d: %v", req.Issue, err))
 				continue
 			}
 			var terr *restartTransientConfigError
@@ -679,7 +680,8 @@ func (s *supervisor) restartStep() {
 				attempts := restartConfigAttempts(data)
 				if attempts+1 >= maxRestartConfigAttempts {
 					_ = os.Remove(inflight)
-					s.recordRestartOutcome(req, "", "", fmt.Sprintf("gave up on issue %d after %d attempts: %v", req.Issue, attempts+1, err))
+					_, loop := restartHistoryLocation(req.Issue)
+					s.recordRestartOutcome(req, "", loop, fmt.Sprintf("gave up on issue %d after %d attempts: %v", req.Issue, attempts+1, err))
 					continue
 				}
 				if werr := restartRestoreWrite(f, append(data, '\n')); werr != nil {
@@ -824,13 +826,54 @@ func (s *supervisor) recordRestartOutcome(req restartRequest, at, loop, refusal 
 	if refusal != "" {
 		detail = "restart refused by " + req.Actor + ": " + refusal
 	}
+	project := restartProject(s.root)
+	if project == "" {
+		if p, _ := restartHistoryLocation(req.Issue); p != "" {
+			project = p
+		}
+	}
 	ev := store.Event{
-		TS: ts, Project: restartProject(s.root), Workflow: loop,
+		TS: ts, Project: project, Workflow: loop,
 		IssueID: strconv.Itoa(req.Issue), Kind: restartEventKind, Detail: detail,
 	}
 	if err := hst.AddEvents([]store.Event{ev}); err != nil {
 		fmt.Fprintln(os.Stderr, "jig: restart: event:", err)
 	}
+}
+
+// restartHistoryLocation returns the project and workflow of the most
+// recent stored run of an issue, across every project and workflow in
+// history. Stored-request drops use it when the config no longer loads
+// and no loop was resolved. Empty when history has no run of the issue.
+func restartHistoryLocation(issue int) (string, string) {
+	hst, err := store.Open(dashboardStateDir())
+	if err != nil {
+		return "", ""
+	}
+	defer hst.Close()
+	opts, err := hst.RunOptions()
+	if err != nil {
+		return "", ""
+	}
+	want := strconv.Itoa(issue)
+	bestProject, bestLoop := "", ""
+	var bestAt time.Time
+	have := false
+	for _, p := range opts.Projects {
+		for _, w := range opts.Workflows {
+			runs, err := hst.IssueRuns(p, w, want)
+			if err != nil {
+				continue
+			}
+			for _, r := range runs {
+				at := parseRestartTime(r.StartedAt)
+				if !have || at.After(bestAt) {
+					bestProject, bestLoop, bestAt, have = p, w, at, true
+				}
+			}
+		}
+	}
+	return bestProject, bestLoop
 }
 
 // restartProject is the repo slug of a root, empty when unknown. The

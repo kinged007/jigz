@@ -942,7 +942,9 @@ func TestRestartStepDropsForbiddenTrackerError(t *testing.T) {
 }
 
 // A half-written config file is transient: the request is kept across
-// ticks and dropped only after maxRestartConfigAttempts attempts.
+// ticks and dropped only after maxRestartConfigAttempts attempts. The
+// drop resolves the loop from the issue's last run and records an event,
+// so the run page shows what happened to the recorded request.
 func TestRestartStepRetriesTransientConfigThenDrops(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("JIG_REGISTRY_DIR", t.TempDir())
@@ -953,6 +955,19 @@ func TestRestartStepRetriesTransientConfigThenDrops(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".jigz", "config.yaml"), []byte("{broken"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	hst, err := store.Open(dashboardStateDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := hst.AddRuns([]store.Run{{
+		Project: "o/r", Workflow: "issues", ID: 3, IssueID: "7",
+		DisplayIdentifier: "o/r#7", Status: "failed",
+		StartedAt: "2026-11-24T09:00:00Z", CompletedAt: "2026-11-24T09:05:00Z",
+	}}); err != nil {
+		hst.Close()
+		t.Fatal(err)
+	}
+	hst.Close()
 	prefix, err := cleanupFilePath(root, restartRequestSuffix)
 	if err != nil {
 		t.Fatal(err)
@@ -979,6 +994,21 @@ func TestRestartStepRetriesTransientConfigThenDrops(t *testing.T) {
 	s.restartStep()
 	if files, _ := filepath.Glob(prefix + "*"); len(files) != 0 {
 		t.Fatalf("files after attempt %d = %v, want the request dropped", maxRestartConfigAttempts, files)
+	}
+	hst, err = store.Open(dashboardStateDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hst.Close()
+	evs, err := hst.IssueEvents("o/r", "issues", "7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs) != 1 || evs[0].Kind != restartEventKind {
+		t.Fatalf("events = %+v, want one restart drop event", evs)
+	}
+	if !strings.Contains(evs[0].Detail, "gave up") || !strings.Contains(evs[0].Detail, "tester") {
+		t.Fatalf("drop event %+v misses gave-up and actor", evs[0])
 	}
 }
 
