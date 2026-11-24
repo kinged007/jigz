@@ -141,9 +141,10 @@ type restartActions struct {
 }
 
 // planRestart decides one restart from already-gathered state. Live
-// means a live engine session holds the issue; loop and trigger name
-// the owning loop and the label to ensure, empty when unknown; claim is
-// the loop's claim marker.
+// means a live engine session holds the issue, or the live set is
+// unknown (an unknown set refuses like a live one, never like an empty
+// one); loop and trigger name the owning loop and the label to ensure,
+// empty when unknown; claim is the loop's claim marker.
 func planRestart(num int, labels []string, isPR, live bool, loop, trigger, claim string) restartActions {
 	if isPR {
 		return restartActions{refuse: fmt.Sprintf("issue %d is a pull request, not an issue", num)}
@@ -245,17 +246,20 @@ func liveRestartIssues(sessions []string) map[string]bool {
 	return out
 }
 
-// restartDeps is everything applying a restart needs.
+// restartDeps is everything applying a restart needs. sessionsUnknown
+// is true while the supervisor cannot account for every engine session;
+// an unknown live set refuses like a live one, never like an empty one.
 type restartDeps struct {
-	tracker issueTracker
-	token   string
-	slug    string
-	loops   map[string]config.Resolved
-	live    map[string]bool
-	history *store.Store
-	events  *store.Store
-	now     func() time.Time
-	actor   string
+	tracker         issueTracker
+	token           string
+	slug            string
+	loops           map[string]config.Resolved
+	live            map[string]bool
+	sessionsUnknown bool
+	history         *store.Store
+	events          *store.Store
+	now             func() time.Time
+	actor           string
 }
 
 func (d *restartDeps) clock() time.Time {
@@ -288,7 +292,7 @@ func applyIssueRestart(ctx context.Context, d *restartDeps, num int, hintLoop st
 	if hintLoop != "" && loop != hintLoop {
 		return res, &restartRefusal{reason: fmt.Sprintf("issue %d belongs to another loop", num)}
 	}
-	act := planRestart(num, labels, isPR, d.live[strconv.Itoa(num)], loop, trigger, claimLabelOf(d.loops, loop))
+	act := planRestart(num, labels, isPR, d.live[strconv.Itoa(num)] || d.sessionsUnknown, loop, trigger, claimLabelOf(d.loops, loop))
 	if act.refuse != "" {
 		return res, &restartRefusal{reason: act.refuse, loop: loop}
 	}
@@ -469,7 +473,9 @@ func restartFromCLI(root string, num int) (issueRestartResult, error) {
 		tracker: tracker, token: cfg.Token, slug: cfg.Repo,
 		loops: cfg.Resolve(), actor: actor,
 	}
-	deps.live = liveRestartIssues(statusSessions(root))
+	sessions, known := statusSessions(root)
+	deps.live = liveRestartIssues(sessions)
+	deps.sessionsUnknown = !known
 	if hst, herr := store.Open(dashboardStateDir()); herr == nil {
 		deps.history, deps.events = hst, hst
 		defer hst.Close()
@@ -504,22 +510,31 @@ func restartFromCLI(root string, num int) (issueRestartResult, error) {
 }
 
 // statusSessions lists the session issue ids the supervisor of root
-// knows about, empty when no supervisor serves it.
-func statusSessions(root string) []string {
+// knows about, with whether the set is complete. It reports unknown
+// while a running loop cannot account for every engine session, and
+// known-empty when no supervisor serves the root. Callers must treat
+// an unknown set as live, never as empty.
+func statusSessions(root string) ([]string, bool) {
 	if _, err := runningEntry(root); err != nil {
-		return nil
+		return nil, true
 	}
 	doc, err := readStatusDoc(root)
 	if err != nil {
-		return nil
+		return nil, false
 	}
 	var out []string
 	for _, w := range doc.Workflows {
+		if !engineUp(w) {
+			continue
+		}
+		if !w.SessionsKnown {
+			return nil, false
+		}
 		for _, s := range w.Sessions {
 			out = append(out, s.IssueID)
 		}
 	}
-	return out
+	return out, true
 }
 
 // restartActor is the tracker login of the loop's token, the "who" of
@@ -585,7 +600,9 @@ func (s *supervisor) applyStoredRestart(req restartRequest) error {
 		tracker: tracker, token: cfg.Token, slug: cfg.Repo,
 		loops: cfg.Resolve(), actor: req.Actor,
 	}
-	deps.live = liveRestartIssues(statusSessions(s.root))
+	sessions, known := statusSessions(s.root)
+	deps.live = liveRestartIssues(sessions)
+	deps.sessionsUnknown = !known
 	if hst, herr := store.Open(dashboardStateDir()); herr == nil {
 		deps.history, deps.events = hst, hst
 		defer hst.Close()

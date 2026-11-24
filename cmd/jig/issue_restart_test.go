@@ -436,6 +436,20 @@ func newDashboardRestartRig(t *testing.T, labels []string) *dashboardRestartRig 
 	if err := os.WriteFile(filepath.Join(regDir, "registry.json"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// The rig registers a live supervisor, so it needs a readable
+	// status doc with a known (empty) session set; without one the
+	// restart refuses, as it cannot rule out a live session.
+	statusFile, err := statusPath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(statusFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	doc, _ := json.Marshal(statusDoc{SchemaVersion: statusSchemaVersion, Workflows: []workflowStatus{}})
+	if err := os.WriteFile(statusFile, doc, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -558,6 +572,25 @@ func TestRestartStepKeepsUnappliableRequests(t *testing.T) {
 	if len(pending) != 1 || pending[0].Issue != 7 {
 		t.Fatalf("pending = %+v, want issue 7", pending)
 	}
+}
+
+// An unknown live set refuses like a live one, never like an empty
+// one: the issue could be mid-run under a session we cannot see.
+func TestRestartRefusesWhenSessionsUnknown(t *testing.T) {
+	tr := newFakeTracker()
+	tr.labels[7] = []string{"agent:build", "in-progress"}
+	d := testDeps(t, tr)
+	d.sessionsUnknown = true
+	mustRefuse(t, d, 7, "", "issue 7 is mid-run")
+	if !slices.Equal(tr.labels[7], []string{"agent:build", "in-progress"}) {
+		t.Fatalf("refused restart changed labels: %v", tr.labels[7])
+	}
+
+	tr2 := newFakeTracker()
+	tr2.labels[8] = []string{"agent:build"}
+	d2 := testDeps(t, tr2)
+	d2.sessionsUnknown = true
+	mustRefuse(t, d2, 8, "", "issue 8 is claimed by a live session")
 }
 
 // A loop that matches by query, not by label, restarts by releasing the

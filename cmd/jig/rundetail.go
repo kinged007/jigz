@@ -200,7 +200,9 @@ func (a *app) runRestart(w http.ResponseWriter, r *http.Request) {
 		tracker: a.restartTracker(), token: cfg.Token, slug: cfg.Repo,
 		loops: cfg.Resolve(), actor: restartDashboardActor(r),
 	}
-	deps.live = liveRestartIssues(statusSessions(root))
+	sessions, known := statusSessions(root)
+	deps.live = liveRestartIssues(sessions)
+	deps.sessionsUnknown = !known
 	deps.history, deps.events = st, st
 	res, err := applyIssueRestart(ctx, deps, num, workflow)
 	if err != nil {
