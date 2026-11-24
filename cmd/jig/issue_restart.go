@@ -401,6 +401,10 @@ func pendingRestartIssues(root string) ([]restartRequest, error) {
 // file per issue published by linking a complete temp file into place,
 // so two concurrent restarts leave one file (the loser sees the
 // winner's file) and a reader never sees a half-written request.
+// restartLink publishes a complete temp request file into its per-issue
+// name. It is a variable so tests can force the hard-link failure path.
+var restartLink = os.Link
+
 func storeRestartRequest(root string, req restartRequest) (already bool, err error) {
 	if pending, err := pendingRestartIssues(root); err == nil {
 		for _, p := range pending {
@@ -436,11 +440,30 @@ func storeRestartRequest(root string, req restartRequest) (already bool, err err
 	if cerr := os.Chmod(tmpName, 0o644); cerr != nil {
 		return false, cerr
 	}
-	if lerr := os.Link(tmpName, path); lerr != nil {
+	if lerr := restartLink(tmpName, path); lerr != nil {
 		if os.IsExist(lerr) {
 			return true, nil
 		}
-		return false, lerr
+		// Filesystems without hard links (some FUSE/SMB state dirs)
+		// reject link: fall back to an exclusive create of the
+		// per-issue file so the request is still recorded.
+		f, cerr := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if cerr != nil {
+			if os.IsExist(cerr) {
+				return true, nil
+			}
+			return false, cerr
+		}
+		if _, werr := f.Write(data); werr != nil {
+			_ = f.Close()
+			_ = os.Remove(path)
+			return false, werr
+		}
+		if cerr := f.Close(); cerr != nil {
+			_ = os.Remove(path)
+			return false, cerr
+		}
+		return false, nil
 	}
 	return false, nil
 }

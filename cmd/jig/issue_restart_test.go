@@ -727,3 +727,26 @@ func TestRestartStoredDefersWhileSessionsUnknown(t *testing.T) {
 		t.Fatalf("events = %+v, want one restart event", evs)
 	}
 }
+
+// A hard-link failure that is not EEXIST still records the request
+// through an exclusive create, so state dirs without link support work.
+func TestRestartStoreFallsBackWithoutLink(t *testing.T) {
+	old := restartLink
+	restartLink = func(_, _ string) error { return errors.New("operation not permitted") }
+	defer func() { restartLink = old }()
+	root := t.TempDir()
+	req := restartRequest{Issue: 7, Actor: "tester", At: time.Now().UTC()}
+	if already, err := storeRestartRequest(root, req); err != nil || already {
+		t.Fatalf("store with link failing = %v, %v, want stored", already, err)
+	}
+	pending, err := pendingRestartIssues(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 1 || pending[0].Issue != 7 {
+		t.Fatalf("pending = %+v, want issue 7", pending)
+	}
+	if already, err := storeRestartRequest(root, req); err != nil || !already {
+		t.Fatalf("second store = %v, %v, want already", already, err)
+	}
+}
