@@ -445,23 +445,20 @@ func storeRestartRequest(root string, req restartRequest) (already bool, err err
 			return true, nil
 		}
 		// Filesystems without hard links (some FUSE/SMB state dirs)
-		// reject link: fall back to an exclusive create of the
-		// per-issue file so the request is still recorded.
-		f, cerr := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-		if cerr != nil {
-			if os.IsExist(cerr) {
+		// reject link: publish the complete temp file with a rename.
+		// The payload is already whole in tmpName, so a crash cannot
+		// leave a partial per-issue file; re-check for a winner first
+		// because rename replaces its destination.
+		if _, serr := os.Lstat(path); serr == nil {
+			return true, nil
+		} else if !os.IsNotExist(serr) {
+			return false, serr
+		}
+		if rerr := os.Rename(tmpName, path); rerr != nil {
+			if os.IsExist(rerr) {
 				return true, nil
 			}
-			return false, cerr
-		}
-		if _, werr := f.Write(data); werr != nil {
-			_ = f.Close()
-			_ = os.Remove(path)
-			return false, werr
-		}
-		if cerr := f.Close(); cerr != nil {
-			_ = os.Remove(path)
-			return false, cerr
+			return false, rerr
 		}
 		return false, nil
 	}

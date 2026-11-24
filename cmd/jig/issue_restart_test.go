@@ -808,3 +808,36 @@ func TestRestartStepDropsBadConfig(t *testing.T) {
 		t.Fatalf("files after step = %v, want the bad-config request dropped", files)
 	}
 }
+
+// The no-hard-link fallback publishes the complete temp file with a
+// rename, so a crash cannot leave a partial per-issue request behind:
+// the stored file parses as the recorded request.
+func TestRestartStoreFallbackPublishesCompleteFile(t *testing.T) {
+	old := restartLink
+	restartLink = func(_, _ string) error { return errors.New("operation not permitted") }
+	defer func() { restartLink = old }()
+	root := t.TempDir()
+	at := time.Date(2026, 11, 24, 10, 0, 0, 0, time.UTC)
+	req := restartRequest{Issue: 7, Actor: "tester", At: at}
+	if already, err := storeRestartRequest(root, req); err != nil || already {
+		t.Fatalf("store with link failing = %v, %v, want stored", already, err)
+	}
+	prefix, err := cleanupFilePath(root, restartRequestSuffix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(prefix + "7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got restartRequest
+	if err := json.Unmarshal(raw, &got); err != nil || got.Issue != 7 || got.Actor != "tester" {
+		t.Fatalf("stored file = %q, want the complete recorded request", raw)
+	}
+	if pending, err := pendingRestartIssues(root); err != nil || len(pending) != 1 || pending[0].Issue != 7 {
+		t.Fatalf("pending = %+v, %v, want exactly issue 7", pending, err)
+	}
+	if already, err := storeRestartRequest(root, req); err != nil || !already {
+		t.Fatalf("second store = %v, %v, want already", already, err)
+	}
+}
