@@ -165,14 +165,13 @@ github:                   # dashboard GitHub access; re-read on every pass, no r
 ### Fleet and work
 
 The same file holds the engine target, the operating hours, the tracker
-and hook defaults, the agent fleet and the work entries
-(`plans/jigz/engine-interface.md` has the design). Secrets are never
+and hook defaults, the agent fleet and the work entries. Secrets are never
 stored in the file: a credential is a reference to an environment
 variable of the supervising process, `{from_env: NAME}`. A key whose
 name ends in `TOKEN`, `KEY`, `SECRET` or `PASSWORD` (in any case) must
 be a reference; a literal is rejected. An unresolved reference does not
-fail the load; it makes the agent unavailable, and the unresolved names
-are retrievable (`Config.UnresolvedRefs`). `max_concurrent_agents`
+fail the load; it makes the agent unavailable (see
+[Unusable agents](#unusable-agents)). `max_concurrent_agents`
 counts the running sessions of one work entry; `0` (or omitted) means
 no limit.
 
@@ -1006,8 +1005,8 @@ engine's error text. A usage limit is recognised in that text when the agent
 CLI reports it, or when `agent-exec` writes its limit line and the engine
 includes it in the error. `failed_agent` covers every other failure.
 
-Known limitation: with `max_concurrent_agents` above 1, a loop can claim new
-work between the window close and the moment it is stopped.
+With `max_concurrent_agents` above 1, a loop can claim new work between the
+window closing and the loop being stopped.
 
 Using a subscription account unattended can be restricted by the provider.
 Checking the provider's terms is your responsibility.
@@ -1036,7 +1035,7 @@ limits:
 `JIG_ENGINE_BIN` beats both. The dashboard re-reads `machine.yaml` when
 the file changes, so hiding edits apply without a restart.
 
-Hideable pages (from `internal/machine/dashboard.go`):
+Hideable pages:
 
 | Name | Hides |
 |---|---|
@@ -1061,9 +1060,7 @@ Hideable sections:
 | `audit_log` | Audit log on Operations and project pages, `GET /api/v1/audit` |
 | `effective_config` | Effective configuration table on project pages |
 
-`limits.patterns` extends the built-in usage-limit match (`internal/machine/limits.go`)
+`limits.patterns` extends the built-in usage-limit match
 used by `jig agent-exec`: when the CLI output matches, the agent is marked
 exhausted until the reset time in the message, or `default_reset` later.
 A bad regexp fails the machine file load.
-
-Evidence status: Confirmed against `internal/config`, `internal/gen`, and `internal/machine` unless noted.
