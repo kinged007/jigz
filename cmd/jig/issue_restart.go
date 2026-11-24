@@ -679,14 +679,28 @@ func (s *supervisor) restartStep() {
 }
 
 // restartPermanent reports a tracker failure retrying cannot fix: bad
-// credentials, a forbidden label write, or a gone repository.
+// credentials, a forbidden label write, or a gone repository. A bad
+// config or token fails the same way: the next tick would fail
+// identically, so the request is dropped with an outcome instead of
+// retrying forever.
 func restartPermanent(err error) bool {
+	var perm *restartPermanentError
+	if errors.As(err, &perm) {
+		return true
+	}
 	var e *github.Error
 	if errors.As(err, &e) {
 		return e.Status == 401 || e.Status == 403 || e.Status == 404
 	}
 	return false
 }
+
+// restartPermanentError marks a stored-restart failure no retry can
+// fix, such as a bad config or token.
+type restartPermanentError struct{ err error }
+
+func (e *restartPermanentError) Error() string { return e.err.Error() }
+func (e *restartPermanentError) Unwrap() error { return e.err }
 
 // applyStoredRestart runs one stored restart request to completion:
 // labels, event and wake, like the command line. While the live session
@@ -696,10 +710,10 @@ func restartPermanent(err error) bool {
 func (s *supervisor) applyStoredRestart(req restartRequest) error {
 	cfg, err := config.Load(s.root)
 	if err != nil {
-		return err
+		return &restartPermanentError{err}
 	}
 	if err := cfg.CheckToken(); err != nil {
-		return err
+		return &restartPermanentError{err}
 	}
 	sessions, known := statusSessions(s.root)
 	if !known {

@@ -543,8 +543,41 @@ func TestRunPageOffersOnlyRestartControl(t *testing.T) {
 // it cannot apply yet, so the issue stays restartable.
 func TestRestartStepKeepsUnappliableRequests(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	t.Setenv("JIG_REGISTRY_DIR", t.TempDir())
+	regDir := t.TempDir()
+	t.Setenv("JIG_REGISTRY_DIR", regDir)
 	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".jigz"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := "repo: o/r\ntoken: test-token\nagents:\n  a1: { runtime: pi }\npools:\n  build-pool: [a1]\nwork:\n  issues:\n" +
+		"    query_filter: \"label:agent:build,in-progress -label:needs-human\"\n" +
+		"    agent: build-pool\n" +
+		"    rules:\n" +
+		"      - { name: build, match: { labels: [agent:build] }, prompt: prompts/build.md }\n"
+	if err := os.WriteFile(filepath.Join(root, ".jigz", "config.yaml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg := registry{Entries: map[string]registryEntry{root: {
+		RepoName: "o/r", UpdatedAt: time.Now(), PID: os.Getpid(),
+	}}}
+	raw, _ := json.Marshal(reg)
+	if err := os.WriteFile(filepath.Join(regDir, "registry.json"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path, err := statusPath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	doc := statusDoc{SchemaVersion: statusSchemaVersion, PID: os.Getpid(), Repo: root, RepoName: "o/r",
+		StartedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(), State: "running",
+		Workflows: []workflowStatus{{Name: "issues", PID: 1, State: "running", SessionsKnown: false}}}
+	raw, _ = json.Marshal(doc)
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	prefix, err := cleanupFilePath(root, restartRequestSuffix)
 	if err != nil {
 		t.Fatal(err)
@@ -748,5 +781,30 @@ func TestRestartStoreFallsBackWithoutLink(t *testing.T) {
 	}
 	if already, err := storeRestartRequest(root, req); err != nil || !already {
 		t.Fatalf("second store = %v, %v, want already", already, err)
+	}
+}
+
+// A stored restart with no usable config is dropped instead of
+// retried forever: the next tick would fail identically.
+func TestRestartStepDropsBadConfig(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("JIG_REGISTRY_DIR", t.TempDir())
+	root := t.TempDir()
+	prefix, err := cleanupFilePath(root, restartRequestSuffix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(prefix), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	req := restartRequest{Issue: 7, Actor: "tester", At: time.Now().UTC()}
+	data, _ := json.Marshal(req)
+	if err := os.WriteFile(prefix+"7", data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	(&supervisor{root: root}).restartStep()
+	files, _ := filepath.Glob(prefix + "*")
+	if len(files) != 0 {
+		t.Fatalf("files after step = %v, want the bad-config request dropped", files)
 	}
 }
