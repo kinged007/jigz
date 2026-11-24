@@ -39,6 +39,18 @@ The loop polls roughly every 60 seconds, claims the issue, works on a
 See [docs/usage.md](docs/usage.md) and
 [docs/concepts.md](docs/concepts.md).
 
+## Customize it for your team
+
+`jig setup` writes a basic config and prompts that work out of the box. They
+are a starting point. Adapt `.jigz/config.yaml` and the prompts in
+`.jigz/workflows/prompts/` to the development process of your repositories and
+organization: review rules, branch and commit conventions, test commands,
+labels, budgets and working hours. `jig setup` never overwrites a config or
+prompt file you have edited. See
+[docs/configuration.md](docs/configuration.md),
+[docs/workflows.md](docs/workflows.md#prompts) and
+[docs/customization.md](docs/customization.md).
+
 ## Supported agents
 
 Each loop runs one agent CLI. Claude Code is the default; switch with the

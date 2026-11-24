@@ -1,5 +1,11 @@
 # Customization
 
+The config and prompts that `jig setup` writes are a usable default, not a
+fit for every team. Adapt `.jigz/config.yaml` and the prompts in
+`.jigz/workflows/prompts/` to the development process of your repositories and
+organization: review rules, branch and commit conventions, test commands,
+labels, budgets and working hours. The sections below cover common changes.
+
 ## Agents and models
 
 The shipped default is the `claude-code` agent with the `claude-haiku-5-5`
