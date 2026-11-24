@@ -45,6 +45,9 @@ func runAgentExec(args []string, stdin io.Reader, stdout, stderr io.Writer) int 
 	}
 	var cfg *config.Config
 	if root := agentExecRoot(); root != "" {
+		if err := loadRepoEnv(root); err != nil {
+			return fail(2, "%v", err)
+		}
 		if c, err := config.Load(root); err == nil {
 			cfg = c
 		}
@@ -262,7 +265,7 @@ func spawnAgentChild(stdin io.Reader, stdout, stderr io.Writer, fail func(int, s
 			})
 		}
 	}
-	var version strings.Builder
+	var version, versionErr strings.Builder
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
@@ -274,7 +277,15 @@ func spawnAgentChild(stdin io.Reader, stdout, stderr io.Writer, fail func(int, s
 			onLine(l, false)
 		})
 	}()
-	go func() { defer wg.Done(); copyLines(errPipe, stderr, func(l string) { onLine(l, true) }) }()
+	go func() {
+		defer wg.Done()
+		copyLines(errPipe, stderr, func(l string) {
+			if versionProblem != nil && versionErr.Len() < 4096 {
+				versionErr.WriteString(l + "\n")
+			}
+			onLine(l, true)
+		})
+	}()
 	wg.Wait()
 	waitErr := cmd.Wait()
 
@@ -290,7 +301,7 @@ func spawnAgentChild(stdin io.Reader, stdout, stderr io.Writer, fail func(int, s
 		}
 	}
 	if versionProblem != nil && code == 0 && !limited {
-		if msg := versionProblem(version.String()); msg != "" {
+		if msg := versionProblem(version.String() + versionErr.String()); msg != "" {
 			markUnusable(statePath, markName, displayName, msg, now, stderr)
 		}
 	}
