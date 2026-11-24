@@ -398,8 +398,9 @@ func pendingRestartIssues(root string) ([]restartRequest, error) {
 // storeRestartRequest records one restart for the next supervisor start.
 // It reports whether an identical request was already pending, so two
 // runs leave exactly one pending re-queue. The pending record is one
-// file per issue created exclusive, so two concurrent restarts leave
-// one file: the loser sees the winner's file.
+// file per issue published by linking a complete temp file into place,
+// so two concurrent restarts leave one file (the loser sees the
+// winner's file) and a reader never sees a half-written request.
 func storeRestartRequest(root string, req restartRequest) (already bool, err error) {
 	if pending, err := pendingRestartIssues(root); err == nil {
 		for _, p := range pending {
@@ -419,21 +420,27 @@ func storeRestartRequest(root string, req restartRequest) (already bool, err err
 	}
 	path := prefix + strconv.Itoa(req.Issue)
 	data, _ := json.Marshal(req)
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".restart-request-tmp-*")
 	if err != nil {
-		if os.IsExist(err) {
-			return true, nil
-		}
 		return false, err
 	}
-	if _, werr := f.Write(data); werr != nil {
-		_ = f.Close()
-		_ = os.Remove(path)
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if _, werr := tmp.Write(data); werr != nil {
+		_ = tmp.Close()
 		return false, werr
 	}
-	if cerr := f.Close(); cerr != nil {
-		_ = os.Remove(path)
+	if cerr := tmp.Close(); cerr != nil {
 		return false, cerr
+	}
+	if cerr := os.Chmod(tmpName, 0o644); cerr != nil {
+		return false, cerr
+	}
+	if lerr := os.Link(tmpName, path); lerr != nil {
+		if os.IsExist(lerr) {
+			return true, nil
+		}
+		return false, lerr
 	}
 	return false, nil
 }
