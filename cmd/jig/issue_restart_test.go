@@ -1012,6 +1012,94 @@ func TestRestartStepRetriesTransientConfigThenDrops(t *testing.T) {
 	}
 }
 
+// A same-numbered issue in another repo never wins the history fallback:
+// the capped drop is recorded under this supervisor's repo, so the
+// issuing repo's run page shows the event and the foreign repo shows
+// nothing.
+func TestRestartStepDropsUnderOwnRepoWithSameIssueElsewhere(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("JIG_REGISTRY_DIR", t.TempDir())
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".jigz"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".jigz", "config.yaml"), []byte("{broken"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path, err := statusPath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	doc := statusDoc{SchemaVersion: statusSchemaVersion, PID: os.Getpid(), Repo: root, RepoName: "o/r",
+		StartedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(), State: "running",
+		Workflows: []workflowStatus{{Name: "issues", PID: 1, State: "running", SessionsKnown: true}}}
+	raw, _ := json.Marshal(doc)
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hst, err := store.Open(dashboardStateDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := hst.AddRuns([]store.Run{{
+		Project: "o/r", Workflow: "issues", ID: 3, IssueID: "7",
+		DisplayIdentifier: "o/r#7", Status: "failed",
+		StartedAt: "2026-11-24T09:00:00Z", CompletedAt: "2026-11-24T09:05:00Z",
+	}, {
+		Project: "f/r", Workflow: "issues", ID: 9, IssueID: "7",
+		DisplayIdentifier: "f/r#7", Status: "failed",
+		StartedAt: "2026-11-24T10:00:00Z", CompletedAt: "2026-11-24T10:05:00Z",
+	}}); err != nil {
+		hst.Close()
+		t.Fatal(err)
+	}
+	hst.Close()
+	prefix, err := cleanupFilePath(root, restartRequestSuffix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(prefix), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	req := restartRequest{Issue: 7, Actor: "tester", At: time.Now().UTC()}
+	data, _ := json.Marshal(req)
+	if err := os.WriteFile(prefix+"7", data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := &supervisor{root: root}
+	for i := 0; i < maxRestartConfigAttempts; i++ {
+		s.restartStep()
+	}
+	if files, _ := filepath.Glob(prefix + "*"); len(files) != 0 {
+		t.Fatalf("files after %d attempts = %v, want the request dropped", maxRestartConfigAttempts, files)
+	}
+	hst, err = store.Open(dashboardStateDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hst.Close()
+	evs, err := hst.IssueEvents("o/r", "issues", "7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs) != 1 || evs[0].Kind != restartEventKind {
+		t.Fatalf("events = %+v, want one restart drop event under o/r", evs)
+	}
+	if !strings.Contains(evs[0].Detail, "gave up") || !strings.Contains(evs[0].Detail, "tester") {
+		t.Fatalf("drop event %+v misses gave-up and actor", evs[0])
+	}
+	foreign, err := hst.IssueEvents("f/r", "issues", "7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(foreign) != 0 {
+		t.Fatalf("foreign events = %+v, want no restart event under f/r", foreign)
+	}
+}
+
 // A failed restore keeps the in-flight marker: the only copy of a
 // retryable request is not deleted when the state dir cannot take the
 // restored file, so the next tick can reprocess it.

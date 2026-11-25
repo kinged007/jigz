@@ -671,7 +671,7 @@ func (s *supervisor) restartStep() {
 			}
 			if restartPermanent(err) {
 				_ = os.Remove(inflight)
-				_, loop := restartHistoryLocation(req.Issue)
+				_, loop := restartHistoryLocation(req.Issue, restartDropRepo(s.root))
 				s.recordRestartOutcome(req, "", loop, fmt.Sprintf("gave up on issue %d: %v", req.Issue, err))
 				continue
 			}
@@ -680,7 +680,7 @@ func (s *supervisor) restartStep() {
 				attempts := restartConfigAttempts(data)
 				if attempts+1 >= maxRestartConfigAttempts {
 					_ = os.Remove(inflight)
-					_, loop := restartHistoryLocation(req.Issue)
+					_, loop := restartHistoryLocation(req.Issue, restartDropRepo(s.root))
 					s.recordRestartOutcome(req, "", loop, fmt.Sprintf("gave up on issue %d after %d attempts: %v", req.Issue, attempts+1, err))
 					continue
 				}
@@ -828,7 +828,7 @@ func (s *supervisor) recordRestartOutcome(req restartRequest, at, loop, refusal 
 	}
 	project := restartProject(s.root)
 	if project == "" {
-		if p, _ := restartHistoryLocation(req.Issue); p != "" {
+		if p, _ := restartHistoryLocation(req.Issue, restartDropRepo(s.root)); p != "" {
 			project = p
 		}
 	}
@@ -842,10 +842,12 @@ func (s *supervisor) recordRestartOutcome(req restartRequest, at, loop, refusal 
 }
 
 // restartHistoryLocation returns the project and workflow of the most
-// recent stored run of an issue, across every project and workflow in
+// recent stored run of an issue in repo, across that repo's workflows in
 // history. Stored-request drops use it when the config no longer loads
-// and no loop was resolved. Empty when history has no run of the issue.
-func restartHistoryLocation(issue int) (string, string) {
+// and no loop was resolved. An empty repo constrains nothing, matching
+// the pre-filter behavior when this supervisor's slug is unknown. Empty
+// when history has no run of the issue in repo.
+func restartHistoryLocation(issue int, repo string) (string, string) {
 	hst, err := store.Open(dashboardStateDir())
 	if err != nil {
 		return "", ""
@@ -860,6 +862,9 @@ func restartHistoryLocation(issue int) (string, string) {
 	var bestAt time.Time
 	have := false
 	for _, p := range opts.Projects {
+		if repo != "" && p != repo {
+			continue
+		}
 		for _, w := range opts.Workflows {
 			runs, err := hst.IssueRuns(p, w, want)
 			if err != nil {
@@ -884,6 +889,21 @@ func restartProject(root string) string {
 		return ""
 	}
 	return cfg.Repo
+}
+
+// restartDropRepo is the repo slug constraining the history fallback of
+// a stored-request drop. It prefers the config slug and falls back to
+// the status document's repo name, which carries the slug when the
+// config was readable at status-write time. Empty when neither yields a
+// slug, leaving the history scan unconstrained.
+func restartDropRepo(root string) string {
+	if slug := restartProject(root); slug != "" {
+		return slug
+	}
+	if doc, err := readStatusDoc(root); err == nil && strings.Contains(doc.RepoName, "/") {
+		return doc.RepoName
+	}
+	return ""
 }
 
 // printRestartResult reports one restart in human form.
