@@ -74,3 +74,22 @@ func TestRetryableFailuresParkNothing(t *testing.T) {
 		t.Errorf("parks = %+v, want none for retryable and cancelled runs", parks)
 	}
 }
+
+func TestStaleFailureSupersededByNewerRunParksNothing(t *testing.T) {
+	path, db := fixture(t)
+	c, st := newCollector(t, path)
+	c.Once(context.Background())
+	if _, err := db.Exec(`INSERT INTO run_history (issue_id, identifier, attempt, agent_adapter, workspace,
+		started_at, completed_at, status, error, display_identifier) VALUES
+		('26','26',1,'claude-code','','2026-10-15T00:02:00Z','2026-10-15T00:03:00Z','failed','Invalid API key · Please run /login','acme/app#26'),
+		('26','26',2,'claude-code','','2026-10-15T00:04:00Z','2026-10-15T00:05:00Z','succeeded','','acme/app#26')`); err != nil {
+		t.Fatal(err)
+	}
+	c.Once(context.Background())
+	if _, found, _ := st.ActivePark("acme/app", "build", "26"); found {
+		t.Error("stale failed run parked even though a newer success for the same issue was copied")
+	}
+	if parks, _ := st.ActiveParks(); len(parks) != 0 {
+		t.Errorf("parks = %+v, want none when the failure is superseded", parks)
+	}
+}
