@@ -200,9 +200,10 @@ clears it (see [Usage](usage.md#restarting-a-stuck-issue)).
 | `transient-network` | yes | the item retries under the attempt limit and backoff | none needed |
 | `unknown` | yes | the item retries under the attempt limit and backoff | none needed |
 
-A failure matching more than one class takes the first match in the
-table order above: a usage-limit message wrapped in an authentication
-error stays a usage limit. While one item is parked, the loop keeps
+A failure matching more than one class takes the first match in
+`Classify` order: usage-limit first, then missing-model, CLI/version,
+authentication, crash, transient. A usage-limit message wrapped in an
+authentication error stays a usage limit. While one item is parked, the loop keeps
 processing other items.
 
 ## Validation
