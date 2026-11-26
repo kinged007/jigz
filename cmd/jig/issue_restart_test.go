@@ -1142,3 +1142,33 @@ func TestRestartStepKeepsInflightWhenRestoreFails(t *testing.T) {
 		t.Fatalf("in-flight file = %q, want the stored request kept", raw)
 	}
 }
+
+// A restart on the live path clears a seeded park and reports it; a
+// second restart is a no-op for parks.
+func TestRestartClearsParksOnTheLivePath(t *testing.T) {
+	tr := newFakeTracker()
+	tr.labels[7] = []string{"agent:build", "in-progress"}
+	d := testDeps(t, tr)
+	if _, err := d.history.ParkIssue(store.IssuePark{Project: "o/r", Workflow: "issues", IssueID: "7", Class: "agent-unauthenticated", Fix: "log the agent back in (run /login)", TS: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	res := mustRestart(t, d, 7, "")
+	found := false
+	for _, e := range res.Effects {
+		if e == "cleared park" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("effects = %v, want cleared park on the first restart", res.Effects)
+	}
+	if _, found, _ := d.history.ActivePark("o/r", "issues", "7"); found {
+		t.Error("park still active after the live restart")
+	}
+	res2 := mustRestart(t, d, 7, "")
+	for _, e := range res2.Effects {
+		if e == "cleared park" {
+			t.Errorf("second effects = %v, want no cleared park when nothing is parked", res2.Effects)
+		}
+	}
+}
