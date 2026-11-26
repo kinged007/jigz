@@ -94,7 +94,7 @@ The graph is on the left and the twelve panels are on the right (scrollable).
 - All panels are computed for the window, so they change while the replay
   runs: label counts, file hotspots, event log, stage matrix, activity,
   keywords, flow metrics and workflow variants.
-- The inspector has an "Open in GitHub" button (new tab) for issues, PRs,
+- The inspector header has a GitHub icon button (opens in a new tab) for issues, PRs,
   commits, files, directories, labels, stages, scopes, keywords, milestones
   and people.
 - The URL hash keeps the selection, view and window
