@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"html/template"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kinged007/jigz/internal/config"
+	"github.com/kinged007/jigz/internal/github"
 	"github.com/kinged007/jigz/internal/loopsrc"
 	"github.com/kinged007/jigz/internal/runlive"
 	"github.com/kinged007/jigz/internal/store"
@@ -138,6 +141,114 @@ func (a *app) runDetail(w http.ResponseWriter, r *http.Request) {
 	if err := page.ExecuteTemplate(w, "run", d); err != nil {
 		log.Printf("run: %v", err)
 	}
+}
+
+// runRestart is the dashboard's one write action: restart the issue of
+// this run page. It runs the same operation as `jig issue restart`,
+// with the run page's workflow as the owning loop, so refusals match
+// the command line. Success redirects back to the run page, which shows
+// the restart as an event; a refusal is a one-line 409.
+func (a *app) runRestart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	project := r.PathValue("owner") + "/" + r.PathValue("name")
+	workflow := r.PathValue("workflow")
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "no such run", http.StatusNotFound)
+		return
+	}
+	st := a.store
+	if st == nil {
+		var oerr error
+		st, oerr = store.Open(dashboardStateDir())
+		if oerr != nil {
+			http.Error(w, "run history is unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		defer st.Close()
+	}
+	run, err := st.Run(project, workflow, id)
+	if err != nil {
+		http.Error(w, "no such run", http.StatusNotFound)
+		return
+	}
+	num, err := strconv.Atoi(run.IssueID)
+	if err != nil || num <= 0 {
+		http.Error(w, "issue "+run.IssueID+" is not restartable", http.StatusConflict)
+		return
+	}
+	root, ok := rootForProject(project)
+	if !ok {
+		http.Error(w, "no Jigz run serves "+project, http.StatusNotFound)
+		return
+	}
+	cfg, err := config.Load(root)
+	if err != nil {
+		http.Error(w, "no Jigz run serves "+project, http.StatusNotFound)
+		return
+	}
+	if err := cfg.CheckToken(); err != nil {
+		http.Error(w, "no tracker token for "+project, http.StatusConflict)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	deps := &restartDeps{
+		tracker: a.restartTracker(), token: cfg.Token, slug: cfg.Repo,
+		loops: cfg.Resolve(), actor: restartDashboardActor(r),
+	}
+	sessions, known := statusSessions(root)
+	deps.live = liveRestartIssues(sessions)
+	deps.sessionsUnknown = !known
+	deps.history, deps.events = st, st
+	res, err := applyIssueRestart(ctx, deps, num, workflow)
+	if err != nil {
+		var refusal *restartRefusal
+		if errors.As(err, &refusal) {
+			http.Error(w, refusal.reason, http.StatusConflict)
+			return
+		}
+		http.Error(w, "restart failed: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	_ = res
+	if werr := requestWake(root); werr != nil {
+		log.Printf("restart: wake: %v", werr)
+	}
+	http.Redirect(w, r, "/runs/"+project+"/"+workflow+"/"+strconv.FormatInt(id, 10), http.StatusSeeOther)
+}
+
+// rootForProject finds the repo root serving a project slug, through
+// the shared registry.
+func rootForProject(slug string) (string, bool) {
+	for root, e := range readRegistryEntries() {
+		if strings.EqualFold(e.RepoName, slug) {
+			return root, true
+		}
+	}
+	return "", false
+}
+
+// restartTracker is the tracker a dashboard restart uses: the
+// production GitHub client, unless a test substituted one.
+func (a *app) restartTracker() issueTracker {
+	if a.restartTrackerForTest != nil {
+		return a.restartTrackerForTest
+	}
+	return &ghIssueTracker{client: &github.Client{BaseURL: "https://api.github.com"}}
+}
+
+// restartDashboardActor is the "who" of a dashboard restart: the login
+// the operator authenticated to the tracker with is unknown to the
+// dashboard, so the event records the dashboard restart.
+func restartDashboardActor(r *http.Request) string {
+	if u, _, ok := r.BasicAuth(); ok && u != "" {
+		return u
+	}
+	return "dashboard"
 }
 
 // runPRs returns the cached pull requests of a run, with the extra GitHub

@@ -162,6 +162,29 @@ without a budget, or the status document does not show the change after
 document (`<hash>.budget.request.<time>-<pid>`), which the supervisor reads
 and deletes at its next 2-second tick, whatever the sleep settings are.
 
+### Restarting a stuck issue
+
+`jig issue restart <number> [--json] [repo-root]` restarts a stuck issue
+in one action: it releases the issue's claim (`in-progress`), makes sure
+its trigger label is present, records a restart event with the tracker
+login and the timestamp, and wakes the loop so the engine re-polls the
+issue. `--json` prints `issue`, `restarted`, `loop`, `trigger`,
+`released_claim`, `applied_trigger`, `woke`, `actor`, `at` and `effects`;
+the run page shows the same actor and timestamp as a restart event. The
+action is idempotent: running it twice leaves the issue restartable,
+not double-claimed, and it succeeds whether the trigger label is present
+without a claim or a claim remnant is present without the trigger label.
+
+It refuses with a one-line reason, changing nothing, when the issue is
+mid-run, claimed by a live session, belongs to another loop, is a pull
+request, or does not exist. It exits non-zero when no tracker token
+resolves. When no supervisor serves the repo-root, the restart is stored
+next to the status document
+(`<hash>.restart.request.<issue>`) and applied once on the next
+start; a second run while it is pending reports the request as already
+recorded instead of queuing it twice. A crash between the label change
+and the request cleanup may record the restart event twice; the
+duplicate is accepted because the labels stay correct.
 ### Selecting loops
 
 `JIG_ONLY` is a comma-separated list of `WORKFLOW.*.md` stems. It applies to

@@ -54,7 +54,8 @@ func TestReadOnlyMethods(t *testing.T) {
 }
 
 // No page offers a form that posts, a control for a removed route, or a
-// link to a removed page.
+// link to a removed page. The run page's restart form is the one
+// exception, pinned by TestRunPageOffersOnlyRestartControl.
 func TestPagesOfferNoControls(t *testing.T) {
 	h := readOnlyServer(t)
 	var pages []string

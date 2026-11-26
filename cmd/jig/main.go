@@ -66,7 +66,7 @@ func parseArgs(argv []string) (cmdline, error) {
 				continue
 			}
 			return c, fmt.Errorf("unknown flag %q", arg)
-		case "stop", "restart", "status", "cleanup", "wake", "pause", "resume", "budget", "reload", "validate", "agent-exec":
+		case "stop", "restart", "status", "cleanup", "wake", "pause", "resume", "budget", "reload", "validate", "agent-exec", "issue":
 			// A subcommand: everything after it belongs to runRemote,
 			// which does its own parsing, so stop collecting here.
 			c.remote = name
@@ -166,6 +166,10 @@ Control (act on the run serving repo-root, found through the registry)
                                   changes need restart --when-idle
   cleanup [--dry-run] [--json]    run the configured cleanup command once
                                   and exit non-zero when it fails
+  issue restart <number> [--json]
+                                  restart a stuck issue: release its claim,
+                                  re-apply its trigger label, record the
+                                  restart and wake the loop
   validate [--json]               check config.yaml and run the engine's
                                   validation on each workflow
 
@@ -281,6 +285,10 @@ func run() (code int) {
 	}
 	if c.remote == "pause" || c.remote == "resume" || c.remote == "budget" {
 		runBudgetCmd(c.remote, c.remoteArgs)
+		return 0
+	}
+	if c.remote == "issue" {
+		runIssue(c.remoteArgs)
 		return 0
 	}
 	if c.remote == "cleanup" {
@@ -403,6 +411,9 @@ func run() (code int) {
 		fatal(err)
 	}
 	sup.republish()
+	// Stored restarts apply on start, so a request filed while the run
+	// was down takes effect without waiting for the first tick.
+	sup.restartStep()
 	if cfg.Cleanup.Enabled {
 		sup.startCleanup(cfg)
 	}

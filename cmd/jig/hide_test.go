@@ -30,7 +30,10 @@ func get(a *app, path string) *httptest.ResponseRecorder {
 }
 
 func concretePath(pattern string) string {
-	p := strings.TrimPrefix(pattern, "GET ")
+	p := pattern
+	if i := strings.Index(p, " "); i >= 0 {
+		p = p[i+1:]
+	}
 	for old, v := range map[string]string{
 		"{owner}": "o", "{name}": "n", "{workflow}": "w", "{id}": "1", "{rest...}": "o/n/w/1", "{$}": "",
 	} {

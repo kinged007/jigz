@@ -37,6 +37,7 @@ func init() {
 		{"GET /runs.csv", "runs", "", (*app).runsCSV},
 		{"GET /questions", "questions", "", (*app).questionsPage},
 		{"GET /runs/{owner}/{name}/{workflow}/{id}", "runs", "", (*app).runDetail},
+		{"/runs/{owner}/{name}/{workflow}/{id}/restart", "runs", "", (*app).runRestart},
 		{"GET /runs/{owner}/{name}/{workflow}/log", "runs", "log_tail", (*app).runLog},
 		{"GET /runs/{owner}/{name}/{workflow}/{id}/live", "runs", "", (*app).runLiveFragment},
 		{"GET /runs/{owner}/{name}/{workflow}/{id}/agent-log", "runs", "agent_log", (*app).runAgentLog},

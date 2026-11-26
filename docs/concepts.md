@@ -100,6 +100,18 @@ neither an active state nor a terminal one: it marks the item finished
 without closing it, and re-labelling the item with a trigger is how you
 run it again.
 
+A run that keeps failing ends up parked: the engine stops retrying it
+and the trigger/claim labels are left however the last attempt left
+them. `jig issue restart` (and the run page's Restart issue button)
+recovers the item in one action: it removes the `in-progress` claim when
+one is present, re-applies the owning loop's trigger label when it is
+missing, records a restart event with who triggered it and when, and
+wakes the loop so the engine re-polls the item. Parked and retry rows in
+the engine database are not written by the restart; the engine
+reconciles them when it re-dispatches the re-queued item. The restart
+refuses, changing nothing, when the item is mid-run, claimed by a live
+session, or owned by another loop.
+
 Questions carry no label of their own: there is no `agent:question` or
 `needs-answer` label. An agent asks with an HTML comment block in an
 issue comment, and a blocking question parks the item by adding

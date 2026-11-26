@@ -148,6 +148,9 @@ type supervisor struct {
 	// sessions reports whether a loop has a session running; retries do
 	// not count.
 	sessions func(name string) (active, known bool)
+	// restartTracker substitutes the tracker a stored restart applies
+	// with. Nil means the production GitHub client.
+	restartTracker issueTracker
 	// docAgent is the agent the on-disk document was rendered for, by
 	// loop. genLoops and genProf re-render it when the gate picks a
 	// standby agent. pickCnt counts consecutive ticks with the same
@@ -631,6 +634,7 @@ func (s *supervisor) run() int {
 			if code, done := s.budgetStep(); done {
 				return code
 			}
+			s.restartStep()
 			if code, done := s.gateStep(); done {
 				return code
 			}
