@@ -5,7 +5,7 @@
 - [x] T001 [P] [AC-1] internal/machine — add failing classifier tests for non-retryable wordings (unauthenticated, CLI/version unusable, missing model; limit overlap goes to limit)
 - [x] T002 [P] [AC-2] internal/machine — add failing classifier tests for retryable wordings (usage limit, engine crash, transient network) and unknown-keeps-retry
 - [x] T003 [P] [AC-4] cmd/jig + internal/store — add failing exactly-once tests (one alert + one run event, no duplicates on repeat)
-- [x] T004 [P] [AC-3,AC-7] cmd/jig + internal/supervise — add failing tests (non-retryable parks item with no further attempt; loop keeps processing others)
+- [x] T004 [P] [AC-3,AC-7] cmd/jig + internal/supervise — add failing tests (non-retryable parks item Jigz-side, advisory with engine retry path unchanged; loop keeps processing others)
 - [x] T005 [P] [AC-5,AC-6] internal/machine + cmd/jig — extend existing handoff/retry tests (limit hands over and resumes; transient retries under limit/backoff)
 - [x] T006 [P] [AC-8] restart path shared with #72 — add failing tests (restart clears added state; second run is a no-op, no double-claim)
 
