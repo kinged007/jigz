@@ -55,10 +55,12 @@ func main() {
 			err = doBuild(*data)
 		}
 	case "serve":
+		var r *refresher
 		if *refresh > 0 {
-			go refreshLoop(ctx, *data, so, *refresh)
+			r = &refresher{every: *refresh}
+			go r.run(ctx, *data, so)
 		}
-		err = serve(ctx, *addr, *data)
+		err = serve(ctx, *addr, *data, r)
 	default:
 		usage()
 		os.Exit(2)
@@ -130,23 +132,4 @@ func doBuild(dataDir string) error {
 	}
 	fmt.Fprintf(os.Stderr, "build: %d nodes, %d links, %d KB in %s\n", len(g.Nodes), len(g.Links), len(b)/1024, time.Since(start).Round(time.Millisecond))
 	return nil
-}
-
-func refreshLoop(ctx context.Context, dataDir string, o syncOptions, every time.Duration) {
-	t := time.NewTicker(every)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			if err := doSync(ctx, dataDir, o); err != nil {
-				fmt.Fprintln(os.Stderr, "refresh sync:", err)
-				continue
-			}
-			if err := doBuild(dataDir); err != nil {
-				fmt.Fprintln(os.Stderr, "refresh build:", err)
-			}
-		}
-	}
 }

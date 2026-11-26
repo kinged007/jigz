@@ -19,6 +19,10 @@ h1 { margin: 0; font-size: 21px; font-weight: 500; letter-spacing: .06em; }
 .clock { text-align: right; font-size: 12px; letter-spacing: .06em; }
 .clock .live { color: var(--dim); font-size: 10px; }
 .clock .live b { color: var(--fg); font-weight: 500; }
+#liveind.off b, #liveind.err #countdown { color: #fb923c; }
+#liveind.off .dot { background: #fb923c; box-shadow: none; animation: none; }
+.panel.flash { animation: flash 1.4s ease-out; }
+@keyframes flash { from { border-color: var(--accent); box-shadow: 0 0 10px rgba(127, 216, 255, .35); } }
 .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); vertical-align: 0; animation: pulse 1.6s infinite; }
 @keyframes pulse { 50% { opacity: .35; } }
 .fps { margin-left: 14px; }

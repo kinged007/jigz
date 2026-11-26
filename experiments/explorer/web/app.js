@@ -61,14 +61,28 @@ const ago = (iso) => { if (!iso) return "never"; const m = (Date.now() - Date.pa
 const median = (a) => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
 
 // ---------- load ----------
-fetch("graph.json").then((r) => { if (!r.ok) throw new Error("graph.json " + r.status + " — run: explorer build"); return r.json(); })
-  .then(init).catch((e) => { $("sub").textContent = String(e); console.error(e); });
+const getJSON = (url) => fetch(url, { cache: "no-store" }).then((r) => { if (!r.ok) throw new Error(url + " " + r.status); return r.json(); });
 
-function init(g) {
+// /status tells the page whether the server refreshes by itself. Without
+// -refresh the page loads once and shows no live indicator.
+async function start() {
+  try {
+    const st = await getJSON("status").catch(() => ({ refresh: 0, version: "" }));
+    const g = await getJSON("graph.json").catch((e) => { throw new Error(e.message + " — run: explorer build"); });
+    init(g);
+    if (st.refresh > 0) startLive(st);
+  } catch (e) { $("sub").textContent = String(e); console.error(e); }
+}
+start();
+
+// Builds everything derived from the graph. Nodes that exist in prev keep
+// their position, so a live refresh does not move what is on screen.
+function index(g, prev) {
   S.g = g;
   S.nodes = g.nodes;
   S.links = g.links;
   S.adj = S.nodes.map(() => []);
+  S.byId = new Map();
   S.nodes.forEach((n, i) => { S.byId.set(n.id, i); n.i = i; });
   for (const l of S.links) { S.adj[l.s].push(l); S.adj[l.t].push(l); l.g = LINK_GROUPS[l.k] || "meaning"; }
   S.contains = S.links.filter((l) => l.k === "contains");
@@ -77,10 +91,22 @@ function init(g) {
   S.stageOrder = new Map(g.workflow.stages.map((s) => [s.name, s.order]));
   S.vis = new Uint8Array(S.nodes.length);
 
-  // Normalise the layout so the 95th percentile radius is 320 units.
-  const rs = S.nodes.map((n) => Math.hypot(...n.p)).sort((a, b) => a - b);
-  const k = 320 / (rs[Math.floor(rs.length * 0.95)] || 1);
-  for (const n of S.nodes) { n.x = n.p[0] * k; n.y = n.p[1] * k; n.z = n.p[2] * k; n.r = (TYPES[n.type]?.size || 1.5) * (1 + Math.sqrt(n.deg) * 0.12); }
+  if (!prev) {
+    // Normalise the layout so the 95th percentile radius is 320 units.
+    const rs = S.nodes.map((n) => Math.hypot(...n.p)).sort((a, b) => a - b);
+    S.k = 320 / (rs[Math.floor(rs.length * 0.95)] || 1);
+  }
+  const fresh = [];
+  for (const n of S.nodes) {
+    const o = prev?.get(n.id);
+    if (o) { n.x = o.x; n.y = o.y; n.z = o.z; }
+    else if (prev) fresh.push(n);
+    else { n.x = n.p[0] * S.k; n.y = n.p[1] * S.k; n.z = n.p[2] * S.k; }
+    n.r = (TYPES[n.type]?.size || 1.5) * (1 + Math.sqrt(n.deg) * 0.12);
+    n.hid = S.hidden.has(n.type);
+    n.sig = signature(n);
+  }
+  placeNew(fresh);
   S.labelled = S.nodes.filter((n) => ["stage", "user", "repo"].includes(n.type) || (n.deg > 40 && ["label", "scope", "keyword", "dir"].includes(n.type)))
     .sort((a, b) => b.deg - a.deg).slice(0, 70).map((n) => n.i);
   S.proj = { x: new Float32Array(S.nodes.length), y: new Float32Array(S.nodes.length), s: new Float32Array(S.nodes.length), z: new Float32Array(S.nodes.length), v: new Uint8Array(S.nodes.length) };
@@ -92,22 +118,130 @@ function init(g) {
     if (n.type === "commit") S.events.push({ t: n.t, type: "commit", node: n.i });
   }
   S.events.sort((a, b) => a.t - b.t);
+}
 
-  const c = g.stats.counts, r = g.repo;
+const signature = (n) => `${n.state}|${n.title}|${(n.meta?.labels || []).join(",")}`;
+
+// A new node starts at the mean position of the nodes it links to, which is
+// where the layout would roughly put it. Nodes whose neighbours are all new
+// are placed in later passes.
+function placeNew(fresh) {
+  let todo = fresh;
+  for (let pass = 0; pass < 4 && todo.length; pass++) {
+    const left = [];
+    for (const n of todo) {
+      let sx = 0, sy = 0, sz = 0, c = 0;
+      for (const l of S.adj[n.i]) {
+        const m = S.nodes[l.s === n.i ? l.t : l.s];
+        if (m.x !== undefined) { sx += m.x; sy += m.y; sz += m.z; c++; }
+      }
+      if (c) { n.x = sx / c + (Math.random() - 0.5) * 12; n.y = sy / c + (Math.random() - 0.5) * 12; n.z = sz / c + (Math.random() - 0.5) * 12; }
+      else left.push(n);
+    }
+    todo = left;
+  }
+  for (const n of todo) { n.x = n.p[0] * S.k; n.y = n.p[1] * S.k; n.z = n.p[2] * S.k; }
+}
+
+function renderHeader() {
+  const g = S.g, c = g.stats.counts, r = g.repo;
   $("sub").textContent = `SRC github / ${r.nameWithOwner} / ${fmt(c.issue || 0)} issues / ${fmt(c.pr || 0)} pulls / ${fmt(c.commit || 0)} commits / ${fmt(c.file || 0)} files`;
   $("cmdrepo").textContent = r.nameWithOwner;
-  $("synced").textContent = "SYNCED " + ago(g.syncedAt).toUpperCase();
   $("hudCount").textContent = `GRAPH / ${fmt(S.nodes.length)} NODES · ${fmt(S.links.length)} LINKS`;
+  renderLive();
+}
+
+function init(g) {
+  index(g, null);
   buildLegend();
   $("tabs").innerHTML = TABS.map(([n], i) => `<button data-i="${i}" class="${i === 0 ? "on" : ""}">${n}</button>`).join("");
   $("tabs").onclick = (e) => { const b = e.target.closest("button"); if (b) setTab(+b.dataset.i); };
 
+  renderHeader();
   setupInput();
   setupScrubber();
   computeVisibility();
   refreshPanels();
   applyHash();
   requestAnimationFrame(frame);
+}
+
+// ---------- live refresh ----------
+// The server rewrites graph.json every -refresh interval. The page polls
+// /status and, when the file changed, merges the new graph into the running
+// one: the camera, selection, search, tab, hidden types and time window stay
+// as they are, and only the panels whose content changed are redrawn.
+const LIVE_NAMES = { issue: "issues", pr: "pulls", commit: "commits" };
+const LIVE = { on: false, version: "", nextAt: 0, syncing: false, error: "", offline: false, busy: false };
+
+function startLive(st) {
+  LIVE.on = true;
+  LIVE.version = st.version;
+  readStatus(st);
+  renderLive();
+  setInterval(pollStatus, 3000);
+}
+
+function readStatus(st) {
+  LIVE.syncing = st.syncing; LIVE.error = st.error || ""; LIVE.nextAt = Date.now() + st.nextIn * 1000; LIVE.offline = false;
+}
+
+async function pollStatus() {
+  if (LIVE.busy) return;
+  LIVE.busy = true;
+  try {
+    const st = await getJSON("status");
+    readStatus(st);
+    if (st.version !== LIVE.version) {
+      applyGraph(await getJSON("graph.json"));
+      LIVE.version = st.version;
+    }
+  } catch (e) { LIVE.offline = true; console.error(e); }
+  LIVE.busy = false;
+  renderLive();
+}
+
+function renderLive() {
+  const live = $("liveind");
+  live.hidden = !LIVE.on;
+  $("synced").textContent = "SYNCED " + ago(S.g.syncedAt).toUpperCase();
+  if (!LIVE.on) return;
+  const left = Math.max(0, Math.round((LIVE.nextAt - Date.now()) / 1000));
+  const state = LIVE.offline ? "OFFLINE" : LIVE.syncing ? "SYNCING…" : "NEXT " + String(Math.floor(left / 60)).padStart(2, "0") + ":" + String(left % 60).padStart(2, "0");
+  $("countdown").textContent = state;
+  $("liveind").classList.toggle("off", LIVE.offline);
+  $("liveind").title = LIVE.error ? "last refresh failed: " + LIVE.error : "";
+  $("liveind").classList.toggle("err", !!LIVE.error);
+}
+
+function applyGraph(g) {
+  const prev = new Map(S.nodes.map((n) => [n.id, n]));
+  const selId = S.sel >= 0 ? S.nodes[S.sel].id : null;
+  index(g, prev);
+
+  const added = {}, changed = {};
+  for (const n of S.nodes) {
+    const o = prev.get(n.id);
+    if (!o) added[n.type] = (added[n.type] || 0) + 1;
+    else if (o.sig !== n.sig && CORE.has(n.type)) changed[n.type] = (changed[n.type] || 0) + 1;
+  }
+
+  S.sel = selId && S.byId.has(selId) ? S.byId.get(selId) : -1;
+  S.hover = -1;
+  S.neigh = new Set();
+  if (S.sel >= 0) for (const l of S.adj[S.sel]) S.neigh.add(l.s === S.sel ? l.t : l.s);
+  rescale();
+  S.liveApply = true;
+  computeVisibility();
+  refreshPanels();
+  S.liveApply = false;
+  if (S.query) { S.query = ""; search($("q").value); }
+  renderHeader();
+  drawSpark();
+
+  const list = (o) => ["issue", "pr", "commit"].filter((t) => o[t]).map((t) => `${o[t]} ${LIVE_NAMES[t]}`).join(", ");
+  const msg = [list(added) && "new: " + list(added), list(changed) && "updated: " + list(changed)].filter(Boolean).join(" · ");
+  status("live :: " + (msg || "refreshed, no changes"));
 }
 
 // ---------- shapes ----------
@@ -266,7 +400,7 @@ function frame(now) {
   drawRadar(now);
 
   S.frames++;
-  if (now - S.fpsT > 1000) { S.fps = Math.round(S.frames * 1000 / (now - S.fpsT)); S.frames = 0; S.fpsT = now; $("fps").textContent = S.fps + "FPS"; tickClock(); }
+  if (now - S.fpsT > 1000) { S.fps = Math.round(S.frames * 1000 / (now - S.fpsT)); S.frames = 0; S.fpsT = now; $("fps").textContent = S.fps + "FPS"; tickClock(); renderLive(); }
   $("hudCam").textContent = `AZ ${(((S.yaw * 180 / Math.PI) % 360 + 360) % 360).toFixed(1)}° Z ${Math.round(S.dist / 4)}`;
   requestAnimationFrame(frame);
 }
@@ -574,11 +708,28 @@ function applyHash() {
 }
 
 // ---------- history window (start / end handles and replay) ----------
-function setupScrubber() {
-  const st = S.g.stats, fromEl = $("timeFrom"), toEl = $("time");
-  const span = Math.max(1, st.lastTime - st.firstTime);
+function setRange() {
+  const st = S.g.stats, span = Math.max(1, st.lastTime - st.firstTime);
   S.toT = (v) => st.firstTime + span * v / 1000;
   S.toV = (t) => Math.max(0, Math.min(1000, Math.round(1000 * (t - st.firstTime) / span)));
+}
+
+// New data can move the ends of the slider range; the handles keep their dates.
+function rescale() {
+  setRange();
+  setWindow(S.timeFrom, S.timeCut);
+  if (S.playing) startPlayClock();
+}
+
+function startPlayClock() {
+  const fv = +$("timeFrom").value;
+  S.playDur = Math.max(4000, 24000 * (1000 - fv) / 1000);
+  S.playT0 = performance.now() - ((+$("time").value - fv) / Math.max(1, 1000 - fv)) * S.playDur;
+}
+
+function setupScrubber() {
+  const fromEl = $("timeFrom"), toEl = $("time");
+  setRange();
   const onInput = (which) => () => {
     stopPlay();
     if (which === "from" && +fromEl.value > +toEl.value) toEl.value = fromEl.value;
@@ -595,8 +746,7 @@ function setupScrubber() {
     if (S.playing) { stopPlay(); return; }
     const fv = +fromEl.value;
     if (+toEl.value >= 1000 || +toEl.value <= fv) toEl.value = fv;
-    S.playDur = Math.max(4000, 24000 * (1000 - fv) / 1000);
-    S.playT0 = performance.now() - ((+toEl.value - fv) / Math.max(1, 1000 - fv)) * S.playDur;
+    startPlayClock();
     S.playing = true;
     $("play").textContent = "❚❚";
   };
@@ -698,6 +848,17 @@ function githubUrl(n) {
 }
 
 // ---------- panels ----------
+// Writes html only when it differs from what the element already shows, keeps
+// the scroll position, and marks the panel when a live refresh changed it.
+function put(el, html) {
+  if (el._html === html) return;
+  const first = el._html === undefined, top = el.scrollTop;
+  el._html = html;
+  el.innerHTML = html;
+  el.scrollTop = top;
+  const panel = el.closest(".panel");
+  if (panel && S.liveApply && !first) { panel.classList.remove("flash"); void panel.offsetWidth; panel.classList.add("flash"); }
+}
 function body(id) { return document.querySelector(`#${id} .body`); }
 function nodeLink(id, text) { return S.byId.has(id) ? `<span class="link" data-node="${esc(id)}">${esc(text)}</span>` : esc(text); }
 document.addEventListener("click", (e) => {
@@ -760,26 +921,26 @@ function renderOverview() {
   const g = S.g, W = S.W, st = g.stats, m = flowMetrics(W), range = rangeLabel(), [owner, name] = g.repo.nameWithOwner.split("/");
   S.M = m;
   $("p1r").textContent = `${fmt(W.items.length)} ITEMS`;
-  body("p1").innerHTML = `<div class="muted">${esc(owner)} /</div>
+  put(body("p1"), `<div class="muted">${esc(owner)} /</div>
     <div class="big">${esc(name)}</div>
     <div style="margin:3px 0"><span style="color:#fde047">★ ${fmt(g.repo.stars)}</span> <span class="muted">· ${esc(g.repo.language || "")} · ${esc(g.repo.defaultBranch)}</span></div>
     <div class="ell muted">${esc(g.repo.description || "no description")}</div>
     <div class="acc" style="margin-top:5px">${range}</div>
     <div class="muted">${fmt(W.commits.length)} commits · open ${fmt(m.issuesOpen)} issues · ${fmt(m.prsOpen)} pulls</div>
-    <div class="faint">synced ${ago(g.syncedAt)} · built ${ago(g.builtAt)}</div>`;
+    <div class="faint">synced ${ago(g.syncedAt)} · built ${ago(g.builtAt)}</div>`);
 
   const lc = new Map();
   for (const n of W.items) for (const l of n.meta.labels || []) lc.set(l, (lc.get(l) || 0) + 1);
   const labels = [...lc.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, 7), lmax = Math.max(1, ...labels.map((l) => l[1]));
-  body("p2").innerHTML = `<div class="bars">${labels.map(([l, c]) => `<div class="r ${isStage(l) ? "st" : ""}"><span class="n">${nodeLink("label:" + l, l.toUpperCase())}</span><span class="b"><i style="width:${(100 * c / lmax).toFixed(1)}%"></i></span><span class="c">${fmt(c)}</span></div>`).join("") || '<div class="muted">no items in this window</div>'}</div>`;
+  put(body("p2"), `<div class="bars">${labels.map(([l, c]) => `<div class="r ${isStage(l) ? "st" : ""}"><span class="n">${nodeLink("label:" + l, l.toUpperCase())}</span><span class="b"><i style="width:${(100 * c / lmax).toFixed(1)}%"></i></span><span class="c">${fmt(c)}</span></div>`).join("") || '<div class="muted">no items in this window</div>'}</div>`);
 
-  body("p8").innerHTML = activityPanel(W, m);
+  put(body("p8"), activityPanel(W, m));
   $("p11r").textContent = range;
-  body("p11").innerHTML = `<div class="tiles">
+  put(body("p11"), `<div class="tiles">
     <div><div class="k">ISSUE CLOSE</div><div class="big">${m.closeMed ? dur(m.closeMed) : "—"}</div><div class="faint">median</div></div>
     <div><div class="k">PR TO MERGE</div><div class="big">${m.mergeMed ? dur(m.mergeMed) : "—"}</div><div class="faint">median</div></div>
     <div class="hi"><div class="k">MERGE RATE</div><div class="big">${m.mergeRate}%</div><div class="faint">${fmt(m.merged)} / ${fmt(m.prs)}</div></div>
-    <div><div class="k">CLOSED BY PR</div><div class="big">${m.linkedPct}%</div><div class="faint">of ${fmt(m.issues)} issues</div></div></div>`;
+    <div><div class="k">CLOSED BY PR</div><div class="big">${m.linkedPct}%</div><div class="faint">of ${fmt(m.issues)} issues</div></div></div>`);
 
   const counts = {};
   for (const n of S.nodes) if (S.vis[n.i]) counts[n.type] = (counts[n.type] || 0) + 1;
@@ -820,21 +981,21 @@ function renderCard(n) {
   const kind = n.type === "issue" || n.type === "pr" ? (n.state || "").toLowerCase() : n.type === "commit" ? `+${n.meta?.add ?? 0} −${n.meta?.del ?? 0}` : `${fmt(n.deg)} links`;
   const col = TYPES[n.type].color;
   $("card").style.borderColor = col + "88";
-  $("card").innerHTML = `<div class="t">${esc(n.title || n.label)}</div>
+  put($("card"), `<div class="t">${esc(n.title || n.label)}</div>
     <div class="k">REPO</div><div>${esc(S.g.repo.nameWithOwner)}</div>
-    <div class="k">KIND</div><div class="row"><span class="v" style="color:${col}">${esc(kind)}</span><span>${t}</span></div><div class="bar" style="background:${col};box-shadow:0 0 6px ${col}"></div>`;
+    <div class="k">KIND</div><div class="row"><span class="v" style="color:${col}">${esc(kind)}</span><span>${t}</span></div><div class="bar" style="background:${col};box-shadow:0 0 6px ${col}"></div>`);
 }
 
 function renderInspector(n) {
   const el = body("p3"), head = $("p3r");
   if (!n) {
-    head.innerHTML = `<a class="ghbtn" href="${esc(S.g.repo.url)}" target="_blank" rel="noopener">OPEN REPO IN GITHUB ↗</a>`;
-    el.innerHTML = `<div class="big">no selection</div><div class="muted" style="margin-top:6px">click a node, search with the prompt, or pick an entry from any panel.</div>
-      <div class="faint" style="margin-top:8px">drag orbit · ctrl/middle-drag pan · wheel zoom · / search · r reset · esc clear</div>`;
+    put(head, `<a class="ghbtn" href="${esc(S.g.repo.url)}" target="_blank" rel="noopener">OPEN REPO IN GITHUB ↗</a>`);
+    put(el, `<div class="big">no selection</div><div class="muted" style="margin-top:6px">click a node, search with the prompt, or pick an entry from any panel.</div>
+      <div class="faint" style="margin-top:8px">drag orbit · ctrl/middle-drag pan · wheel zoom · / search · r reset · esc clear</div>`);
     return;
   }
   const url = githubUrl(n);
-  head.innerHTML = url ? `<a class="ghbtn" href="${esc(url)}" target="_blank" rel="noopener">OPEN IN GITHUB ↗</a>` : "TRACE";
+  put(head, url ? `<a class="ghbtn" href="${esc(url)}" target="_blank" rel="noopener">OPEN IN GITHUB ↗</a>` : "TRACE");
   const m = n.meta || {}, kinds = {};
   for (const l of S.adj[n.i]) kinds[l.k] = (kinds[l.k] || 0) + 1;
   const rows = [["KIND", `${TYPES[n.type]?.name || n.type}${n.state ? " · " + n.state.toLowerCase() : ""}`]];
@@ -846,9 +1007,9 @@ function renderInspector(n) {
   if (m.dwellH !== undefined) rows.push(["DWELL", `${dur(m.dwellH)} median · ${fmt(m.items)} items`]);
   rows.push(["LINKS", Object.entries(kinds).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, v]) => `${k} ${v}`).join(" · ")]);
   const labels = (m.labels || []).map((l) => `<span class="${isStage(l) ? "st" : ""}">${esc(l)}</span>`).join("");
-  el.innerHTML = `<div class="ell" style="font-size:14px;margin-bottom:4px;color:${TYPES[n.type].color}">${esc(n.title || n.label)}</div>
+  put(el, `<div class="ell" style="font-size:14px;margin-bottom:4px;color:${TYPES[n.type].color}">${esc(n.title || n.label)}</div>
     <dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("")}</dl>
-    <div class="chips" style="margin-top:5px">${labels}</div>`;
+    <div class="chips" style="margin-top:5px">${labels}</div>`);
 }
 
 function isStage(l) { return S.byId.has("label:" + l) && S.nodes[S.byId.get("label:" + l)].type === "stage"; }
@@ -858,7 +1019,7 @@ function renderRadar(n) {
   if (!n) {
     S.blips = [...S.SA.counts.keys()].filter((s) => !["opened", "merged", "closed", "not planned"].includes(s)).slice(0, 14)
       .map((s, k) => ({ a: k * 0.45, r: 12 + 48 * (S.stageOrder.get(s) || 0.1), c: TYPES.stage.color }));
-    nums.innerHTML = `<div class="k">STAGES</div><div class="huge">${String(S.SA.counts.size).padStart(2, "0")}</div><div class="k">NODE TYPES</div><div class="huge">${String(S.typeCount || 0).padStart(2, "0")}</div>`;
+    put(nums, `<div class="k">STAGES</div><div class="huge">${String(S.SA.counts.size).padStart(2, "0")}</div><div class="k">NODE TYPES</div><div class="huge">${String(S.typeCount || 0).padStart(2, "0")}</div>`);
     return;
   }
   const types = {}, ids = [...S.neigh];
@@ -868,7 +1029,7 @@ function renderRadar(n) {
     const t = keys.indexOf(S.nodes[j].type);
     return { a: (t / keys.length) * Math.PI * 2 + ((j * 0.618) % 0.4), r: 14 + 46 * Math.min(1, Math.log1p(S.nodes[j].deg) / 6), c: TYPES[S.nodes[j].type].color };
   });
-  nums.innerHTML = `<div class="k">NEIGHBOURS</div><div class="huge">${String(ids.length).padStart(2, "0")}</div><div class="k">TYPES</div><div class="huge">${String(Object.keys(types).length).padStart(2, "0")}</div><div class="faint">found ${ids.length} / ${fmt(n.deg)}</div>`;
+  put(nums, `<div class="k">NEIGHBOURS</div><div class="huge">${String(ids.length).padStart(2, "0")}</div><div class="k">TYPES</div><div class="huge">${String(Object.keys(types).length).padStart(2, "0")}</div><div class="faint">found ${ids.length} / ${fmt(n.deg)}</div>`);
 }
 
 function renderTree(n) {
@@ -900,7 +1061,7 @@ function renderTree(n) {
     const f = S.nodes[S.byId.get("file:" + p)];
     rows.push(`<div class="r ${p === on ? "on" : ""}"><span>${"  ".repeat(parts.length - 1)}├ ${nodeLink("file:" + p, parts[parts.length - 1])}</span><span>${cnt.get(p) ?? f?.meta?.commits ?? ""}</span></div>`);
   }
-  el.innerHTML = rows.length ? `<div class="tree">${rows.slice(0, 9).join("")}</div>` : `<div class="muted">no commits in this window</div>`;
+  put(el, rows.length ? `<div class="tree">${rows.slice(0, 9).join("")}</div>` : `<div class="muted">no commits in this window</div>`);
 }
 
 function renderLog(n) {
@@ -919,7 +1080,7 @@ function renderLog(n) {
       return [e.type, `${e.type.padEnd(9)} ${node.label} ${tail}`, e.t];
     });
   }
-  body("p6").innerHTML = rows.length ? `<div class="log">${rows.map((r, k) => `<div class="r"><span class="ln">${String(30 + k).padStart(2, "0")}</span><span class="op">${OPS[r[0]] || "·"}</span><span class="tx" title="${day(r[2])}">${esc(r[1])}</span></div>`).join("")}</div>` : `<div class="muted">no events in this window</div>`;
+  put(body("p6"), rows.length ? `<div class="log">${rows.map((r, k) => `<div class="r"><span class="ln">${String(30 + k).padStart(2, "0")}</span><span class="op">${OPS[r[0]] || "·"}</span><span class="tx" title="${day(r[2])}">${esc(r[1])}</span></div>`).join("")}</div>` : `<div class="muted">no events in this window</div>`);
 }
 
 function renderMatrix(n) {
@@ -939,22 +1100,22 @@ function renderMatrix(n) {
     });
   });
   let total = 0; for (const c of SA.trans.values()) total += c;
-  body("p7").innerHTML = html + `</div><div class="faint" style="margin-top:4px">${fmt(total)} transitions · ${SA.counts.size} stages</div>`;
+  put(body("p7"), html + `</div><div class="faint" style="margin-top:4px">${fmt(total)} transitions · ${SA.counts.size} stages</div>`);
 }
 
 function renderTrajectory(n) {
   const el = body("p9"), path = n?.meta?.path?.filter((p) => p.t <= S.timeCut);
   if (!path) {
     $("p9r").textContent = "STAGES";
-    el.innerHTML = `<div class="path">${S.SA.top.map((s) => `<div class="r"><b>▸</b>${nodeLink(S.stageId.get(s), s)}<span class="d">${fmt(S.SA.counts.get(s))} · ${S.SA.dwell.has(s) ? dur(median(S.SA.dwell.get(s))) : "—"}</span></div>`).join("") || '<div class="muted">no items in this window</div>'}</div>`;
+    put(el, `<div class="path">${S.SA.top.map((s) => `<div class="r"><b>▸</b>${nodeLink(S.stageId.get(s), s)}<span class="d">${fmt(S.SA.counts.get(s))} · ${S.SA.dwell.has(s) ? dur(median(S.SA.dwell.get(s))) : "—"}</span></div>`).join("") || '<div class="muted">no items in this window</div>'}</div>`);
     return;
   }
   $("p9r").textContent = `${path.length} STEPS`;
-  el.innerHTML = `<div class="path">${path.slice(-8).map((p, k, a) => {
+  put(el, `<div class="path">${path.slice(-8).map((p, k, a) => {
     const next = a[k + 1], d = next ? dur((next.t - p.t) / 3600) : "";
     const id = ["opened", "merged", "closed", "not planned"].includes(p.s) ? "stage:" + p.s : "label:" + p.s;
     return `<div class="r"><b>${k === a.length - 1 ? "◆" : "▸"}</b><span>${nodeLink(id, p.s)} <span class="faint">${day(p.t)}</span></span><span class="d">${d ? "+" + d : ""}</span></div>`;
-  }).join("")}</div>`;
+  }).join("")}</div>`);
 }
 
 function renderKeywords(n) {
@@ -967,15 +1128,15 @@ function renderKeywords(n) {
   list.sort((a, b) => b.c - a.c || (a.term < b.term ? -1 : 1));
   const kws = list.slice(0, 32), max = Math.max(1, ...kws.map((k) => k.c));
   const mine = new Set(n?.meta?.keywords || (n?.type === "keyword" ? [n.label] : []));
-  body("p10").innerHTML = `<div class="kwbars">${kws.map((k) => `<i class="${mine.has(k.term) ? "on" : ""}" data-node="kw:${esc(k.term)}" title="${esc(k.term)} · ${k.c} items" style="height:${(100 * k.c / max).toFixed(1)}%"></i>`).join("")}</div>
-    <div class="kwfoot"><span>${mine.size ? [...mine].join(" · ") : kws.slice(0, 4).map((k) => k.term).join(" · ")}</span><span class="muted">${list.length} terms</span></div>`;
+  put(body("p10"), `<div class="kwbars">${kws.map((k) => `<i class="${mine.has(k.term) ? "on" : ""}" data-node="kw:${esc(k.term)}" title="${esc(k.term)} · ${k.c} items" style="height:${(100 * k.c / max).toFixed(1)}%"></i>`).join("")}</div>
+    <div class="kwfoot"><span>${mine.size ? [...mine].join(" · ") : kws.slice(0, 4).map((k) => k.term).join(" · ")}</span><span class="muted">${list.length} terms</span></div>`);
 }
 
 function renderVariants(n) {
   const mine = n?.meta?.path?.filter((p) => p.t <= S.timeCut).map((p) => p.s).join("\u0000");
-  body("p12").innerHTML = `<div class="variants">${S.SA.variants.map(([key, c]) => {
+  put(body("p12"), `<div class="variants">${S.SA.variants.map(([key, c]) => {
     const path = key.split("\u0000");
     const p = path.map((s) => s.replace(/^agent:/, "")).map((s, k, a) => k === a.length - 1 ? `<b>${esc(s)}</b>` : esc(s)).join(" › ");
     return `<div class="r ${key === mine ? "on" : ""}"><span class="p" title="${esc(path.join(" → "))}">${p}</span><span class="c">${fmt(c)}</span></div>`;
-  }).join("") || '<div class="muted">no items in this window</div>'}</div>`;
+  }).join("") || '<div class="muted">no items in this window</div>'}</div>`);
 }

@@ -1,9 +1,13 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func ev(typ, at, label string) Event { return Event{Type: typ, At: at, Label: label} }
@@ -192,5 +196,52 @@ func TestLinkKindUpgradesToCloses(t *testing.T) {
 	b.link("b", "a", "closes")
 	if len(b.order) != 1 || b.order[0].Kind != "closes" || b.order[0].W != 2 {
 		t.Fatalf("link = %+v", b.order[0])
+	}
+}
+
+func getStatus(t *testing.T, dir string, r *refresher) Status {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	newMux(dir, r).ServeHTTP(rec, httptest.NewRequest("GET", "/status", nil))
+	var s Status
+	if err := json.Unmarshal(rec.Body.Bytes(), &s); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func TestStatus(t *testing.T) {
+	dir := t.TempDir()
+	if s := getStatus(t, dir, nil); s.Refresh != 0 || s.Version != "" {
+		t.Fatalf("no refresher, no graph: %+v", s)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "graph.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s1 := getStatus(t, dir, nil)
+	if s1.Refresh != 0 || s1.Version == "" {
+		t.Fatalf("no refresher: %+v", s1)
+	}
+
+	r := &refresher{every: 90 * time.Second, nextAt: time.Now().Add(30 * time.Second)}
+	s := getStatus(t, dir, r)
+	if s.Refresh != 90 || s.NextIn < 29 || s.NextIn > 30 || s.Syncing {
+		t.Fatalf("idle refresher: %+v", s)
+	}
+	r.set(true, "")
+	if s := getStatus(t, dir, r); !s.Syncing || s.NextIn != 0 {
+		t.Fatalf("syncing refresher: %+v", s)
+	}
+	r.set(false, "rate limited")
+	if s := getStatus(t, dir, r); s.Error != "rate limited" {
+		t.Fatalf("failed refresher: %+v", s)
+	}
+
+	future := time.Now().Add(time.Hour)
+	if err := os.Chtimes(filepath.Join(dir, "graph.json"), future, future); err != nil {
+		t.Fatal(err)
+	}
+	if s2 := getStatus(t, dir, nil); s2.Version == s1.Version {
+		t.Fatal("version did not change after graph.json was rewritten")
 	}
 }

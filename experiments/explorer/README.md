@@ -19,7 +19,9 @@ go run . serve                                   # http://127.0.0.1:7878
 ```
 
 `update` is `sync` followed by `build`; both can run on their own.
-`serve -refresh 15m` syncs and rebuilds in the background at that interval.
+`serve -refresh 15m` syncs and rebuilds in the background at that interval and
+turns on live updates in the page (see "Live updates"). Without `-refresh` the
+page loads `graph.json` once and shows no live indicator.
 The token comes from `GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`.
 
 Data is stored in `.explorer/<owner>__<name>/` (ignored by git):
@@ -97,6 +99,26 @@ The graph is on the left and the twelve panels are on the right (scrollable).
   and people.
 - The URL hash keeps the selection, view and window
   (`#node=issue:1840&tab=workflow&f=1790812800&t=1791763200`).
+
+## Live updates
+
+With `serve -refresh <interval>` the header shows `LIVE` and a countdown to the
+next refresh (`SYNCING…` while it runs, `OFFLINE` when the server cannot be
+reached; the tooltip shows the last sync error). The page polls `/status` every
+3 seconds. When `graph.json` has been rewritten it fetches the new graph and
+merges it into the running page:
+
+- Nodes that already exist keep their position. New nodes start at the mean
+  position of the nodes they link to.
+- The camera, selection, search, tab, hidden node types, time window (the
+  handles keep their dates; an end handle at `NOW` follows new data), replay
+  and panel scroll positions are kept.
+- A panel is rewritten only when its content changed, and a changed panel
+  flashes once. The status line reports what was added and updated.
+
+Layout drift: positions are never recomputed in the page, so after many
+refreshes the picture can differ from a fresh load. Reload to get the full
+layout.
 
 ## Limits
 
