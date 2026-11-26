@@ -1,5 +1,5 @@
 ---
-# jig:generated v1 skeleton=delivery-builder-a engine=kinged007/sortie@v1.28.1 sha256=9088608d2b2545a8238dbe99823ed2a3b3dd5e55d31ec73aa99cf55a6f709c5c
+# jig:generated v1 skeleton=issues engine=kinged007/sortie@v1.31.0-fork.1 sha256=d8930ef39eec953f67775870baf9ba61cfff2df6f6341f4ace9f5c03a5e5c092
 tracker:
   kind: github
   api_key: $JIG_TRACKER_TOKEN
@@ -13,10 +13,10 @@ tracker:
   #
   # The assignee scope is always @me; it is appended at launch, not stored
   # here.
-  query_filter: "-label:needs-human label:agent:build"
+  query_filter: "label:agent:build,in-progress -label:needs-human"
   active_states: [agent:build, in-progress]
   in_progress_state: in-progress
-  handoff_state: 
+  handoff_state: agent:done
   handoff_evidence: off
   terminal_states: [closed]
   comments:
@@ -26,10 +26,10 @@ tracker:
 polling:
   interval_ms: 60000
 
-db_path: ../data/jigz-delivery-builder-a.db
+db_path: ../data/jigz-issues.db
 
 workspace:
-  root: $JIG_WORKSPACES/delivery-builder-a
+  root: $JIG_WORKSPACES/issues
   retention_days: 30
 
 hooks:
@@ -70,11 +70,11 @@ hooks:
     # of swallowing the error, so the retry starts from a clean tree.
     git fetch origin "auto/$JIG_ISSUE_IDENTIFIER" 2>/dev/null && git rebase "origin/auto/$JIG_ISSUE_IDENTIFIER" || git rebase --abort
     git push -u origin "auto/$JIG_ISSUE_IDENTIFIER"
-  timeout_ms: 300000
+  timeout_ms: 120000
 
 agent:
   kind: claude-code
-  command: /usr/local/bin/jig agent-exec builder-a
+  command: /usr/local/bin/jig agent-exec builder
   max_turns: 10
   max_concurrent_agents: 1
   turn_timeout_ms: 3600000

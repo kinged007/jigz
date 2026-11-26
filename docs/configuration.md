@@ -859,7 +859,7 @@ and `limits` live at their defaults and `engine:` commented out, so the
 engine default moves with the binary:
 
 ```yaml
-#engine: { repo: kinged007/sortie, version: v1.28.1 }  # pin a version here only to hold one
+#engine: { repo: kinged007/sortie, version: v1.31.0-fork.1 }  # pin a version here only to hold one
 dashboard:
   hide:
     pages: [questions, backups]   # removed from the sidebar; their routes answer 404

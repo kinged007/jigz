@@ -68,7 +68,7 @@ func AppliedFiles(root string) ([]hubproto.FileHash, error) {
 // placeholder tracker key and a scratch workspace directory, and no token
 // or other variable of the daemon. It must not run workflow hooks.
 // `sortie validate` (cmd/sortie/validate.go runValidate, engine v1.28.1
-// and v1.29.0) runs none: hooks run only through workspace.RunHook, which
+// and v1.29.0 and v1.31.0-fork.1) runs none: hooks run only through workspace.RunHook, which
 // workspace.Prepare and orchestrator.RunReactionTriage call during
 // dispatch. Its preflight creates workspace.root and a probe file in it,
 // which is why env names a scratch workspace directory.

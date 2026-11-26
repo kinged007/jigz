@@ -1,5 +1,5 @@
 ---
-# jig:generated v1 skeleton=delivery engine=kinged007/sortie@v1.28.1 sha256=5b62ccf562d84c19f076f145b77763db120fc22771b97834231d9096150ecf6b
+# jig:generated v1 skeleton=issues engine=kinged007/sortie@v1.31.0-fork.1 sha256=27ab3be45d8824a6dcbf756d2c8e00278efda991447b7044c818180c0c15fe79
 tracker:
   kind: github
   api_key: $JIG_TRACKER_TOKEN
@@ -13,8 +13,8 @@ tracker:
   #
   # The assignee scope is always @me; it is appended at launch, not stored
   # here.
-  query_filter: "label:in-progress -label:needs-human"
-  active_states: [agent:plan, in-progress]
+  query_filter: "label:agent:build,in-progress -label:needs-human"
+  active_states: [agent:build, in-progress]
   in_progress_state: in-progress
   handoff_state: agent:done
   handoff_evidence: off
@@ -26,10 +26,10 @@ tracker:
 polling:
   interval_ms: 60000
 
-db_path: ../data/jigz-delivery.db
+db_path: ../data/jigz-issues.db
 
 workspace:
-  root: $JIG_WORKSPACES/delivery
+  root: $JIG_WORKSPACES/issues
   retention_days: 30
 
 hooks:
@@ -73,8 +73,8 @@ hooks:
   timeout_ms: 120000
 
 agent:
-  kind: claude-code
-  command: /usr/local/bin/jig agent-exec planner
+  kind: pi
+  command: /usr/local/bin/jig agent-exec pi-api
   max_turns: 10
   max_concurrent_agents: 1
   turn_timeout_ms: 3600000
@@ -85,8 +85,8 @@ agent:
 
 # Only the block the agent kind names is emitted; the engine reports
 # blocks for other kinds as unknown keys.
-claude-code:
-  model: "claude-sonnet-5-5"
+pi:
+  model: "sonnet"
 
 # The first matching rule wins, so an item carrying two rule labels runs
 # the earlier rule first. dispatch.default is the safety net: the engine
@@ -94,13 +94,9 @@ claude-code:
 # that dispatch inside a prompt of ours.
 dispatch:
   rules:
-    - name: plan
+    - name: build
       match:
-        labels: ["agent:plan"]
-      template: prompts/plan.md
-      next: chain
-    - name: chain
-      stage: stage-build
+        labels: ["agent:build"]
       template: prompts/build.md
   default:
     template: prompts/default.md

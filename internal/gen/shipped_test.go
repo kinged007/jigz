@@ -91,7 +91,7 @@ func shippedFixture(t *testing.T) (*config.Config, map[string]config.Agent) {
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, ".jigz"), 0o755)
 	body := `repo: owner/repo
-engine: { repo: kinged007/sortie, version: v1.28.1 }
+engine: { repo: kinged007/sortie, version: v1.31.0-fork.1 }
 operating_hours: {}
 tracker:
   kind: github

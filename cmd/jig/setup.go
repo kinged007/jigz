@@ -257,7 +257,7 @@ func machineTemplateBody() string {
 		"# override this block.\n" +
 		"#engine:\n" +
 		"#  repo: kinged007/sortie\n" +
-		"#  version: v1.28.1\n" +
+		"#  version: v1.31.0-fork.1\n" +
 		"#\n" +
 		"# Dashboard pages and sections to hide. Nothing is hidden by default;\n" +
 		"# hidden pages and their routes answer 404. Full name lists are in\n" +

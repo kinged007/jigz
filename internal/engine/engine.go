@@ -29,7 +29,7 @@ const (
 	DefaultRepo = "kinged007/sortie"
 	// DefaultTag is the engine release the workflows are written for. The
 	// version in asset and cache names is the tag without its leading "v".
-	DefaultTag = "v1.28.1"
+	DefaultTag = "v1.31.0-fork.1"
 	Binary     = "sortie"
 	// maxEngineBytes caps what a release archive may expand to, so a
 	// corrupt or hostile download cannot fill the disk.

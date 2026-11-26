@@ -1,5 +1,5 @@
 ---
-# jig:generated v1 skeleton=issues engine=kinged007/sortie@v1.28.1 sha256=27ab3be45d8824a6dcbf756d2c8e00278efda991447b7044c818180c0c15fe79
+# jig:generated v1 skeleton=issues engine=kinged007/sortie@v1.31.0-fork.1 sha256=63a623a548653e73f1db8ee48d1691b2944bb248cf559309b3521be5611440e7
 tracker:
   kind: github
   api_key: $JIG_TRACKER_TOKEN
@@ -73,8 +73,8 @@ hooks:
   timeout_ms: 120000
 
 agent:
-  kind: pi
-  command: /usr/local/bin/jig agent-exec pi-api
+  kind: claude-code
+  command: /usr/local/bin/jig agent-exec claude-main
   max_turns: 10
   max_concurrent_agents: 1
   turn_timeout_ms: 3600000
@@ -85,8 +85,8 @@ agent:
 
 # Only the block the agent kind names is emitted; the engine reports
 # blocks for other kinds as unknown keys.
-pi:
-  model: "sonnet"
+claude-code:
+  model: "claude-sonnet-5-5"
 
 # The first matching rule wins, so an item carrying two rule labels runs
 # the earlier rule first. dispatch.default is the safety net: the engine

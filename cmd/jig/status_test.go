@@ -253,7 +253,7 @@ func TestStatusJSONPassthroughKeepsTestedSchemaVersions(t *testing.T) {
 }
 
 func TestTestedSchemaVersionsConstant(t *testing.T) {
-	if !slices.Equal(testedSchemaVersions, []int{18, 35, 38, 43}) {
-		t.Errorf("testedSchemaVersions = %v, want [18 35 38 43]", testedSchemaVersions)
+	if !slices.Equal(testedSchemaVersions, []int{18, 35, 38, 43, 50}) {
+		t.Errorf("testedSchemaVersions = %v, want [18 35 38 43 50]", testedSchemaVersions)
 	}
 }

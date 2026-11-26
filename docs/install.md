@@ -31,7 +31,7 @@ commands (`validate`, `stats`) work in any shell. A fresh install needs no
 separate engine step.
 
 The engine is a GitHub release, chosen by a repository (`owner/name`) and a
-version tag (`vX.Y.Z`), defaulting to `v1.28.1`, the release the shipped
+version tag (`vX.Y.Z`), defaulting to `v1.31.0-fork.1`, the release the shipped
 workflows were written against. `jig --version` prints the tool version
 and the engine release it resolves to, and the dashboard Settings page
 shows that release next to the version the engine binary reports.

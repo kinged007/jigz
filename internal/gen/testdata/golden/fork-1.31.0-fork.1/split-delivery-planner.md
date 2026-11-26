@@ -1,5 +1,5 @@
 ---
-# jig:generated v1 skeleton=issues engine=kinged007/sortie@v1.28.1 sha256=d8930ef39eec953f67775870baf9ba61cfff2df6f6341f4ace9f5c03a5e5c092
+# jig:generated v1 skeleton=delivery-planner engine=kinged007/sortie@v1.31.0-fork.1 sha256=804a7ce9be2828d2cf87b37893cdca51dcd3010400ea08bd554c30a39ebf9fda
 tracker:
   kind: github
   api_key: $JIG_TRACKER_TOKEN
@@ -13,10 +13,10 @@ tracker:
   #
   # The assignee scope is always @me; it is appended at launch, not stored
   # here.
-  query_filter: "label:agent:build,in-progress -label:needs-human"
-  active_states: [agent:build, in-progress]
+  query_filter: "-label:needs-human label:agent:plan"
+  active_states: [agent:plan, in-progress]
   in_progress_state: in-progress
-  handoff_state: agent:done
+  handoff_state: 
   handoff_evidence: off
   terminal_states: [closed]
   comments:
@@ -26,10 +26,10 @@ tracker:
 polling:
   interval_ms: 60000
 
-db_path: ../data/jigz-issues.db
+db_path: ../data/jigz-delivery-planner.db
 
 workspace:
-  root: $JIG_WORKSPACES/issues
+  root: $JIG_WORKSPACES/delivery-planner
   retention_days: 30
 
 hooks:
@@ -70,11 +70,11 @@ hooks:
     # of swallowing the error, so the retry starts from a clean tree.
     git fetch origin "auto/$JIG_ISSUE_IDENTIFIER" 2>/dev/null && git rebase "origin/auto/$JIG_ISSUE_IDENTIFIER" || git rebase --abort
     git push -u origin "auto/$JIG_ISSUE_IDENTIFIER"
-  timeout_ms: 120000
+  timeout_ms: 300000
 
 agent:
   kind: claude-code
-  command: /usr/local/bin/jig agent-exec builder
+  command: /usr/local/bin/jig agent-exec planner
   max_turns: 10
   max_concurrent_agents: 1
   turn_timeout_ms: 3600000
@@ -86,7 +86,7 @@ agent:
 # Only the block the agent kind names is emitted; the engine reports
 # blocks for other kinds as unknown keys.
 claude-code:
-  model: "claude-haiku-5-5"
+  model: "claude-sonnet-5-5"
 
 # The first matching rule wins, so an item carrying two rule labels runs
 # the earlier rule first. dispatch.default is the safety net: the engine
@@ -94,10 +94,10 @@ claude-code:
 # that dispatch inside a prompt of ours.
 dispatch:
   rules:
-    - name: build
+    - name: plan
       match:
-        labels: ["agent:build"]
-      template: prompts/build.md
+        labels: ["agent:plan"]
+      template: prompts/plan.md
   default:
     template: prompts/default.md
 ---

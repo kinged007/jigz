@@ -1,5 +1,5 @@
 ---
-# jig:generated v1 skeleton=issues engine=kinged007/sortie@v1.28.1 sha256=f603a745ae0f11a3039f20867cc27fc683893ec42fa8f4d2c15abceb688b1342
+# jig:generated v1 skeleton=issues engine=kinged007/sortie@v1.31.0-fork.1 sha256=f603a745ae0f11a3039f20867cc27fc683893ec42fa8f4d2c15abceb688b1342
 tracker:
   kind: github
   api_key: $JIG_TRACKER_TOKEN

@@ -343,6 +343,10 @@ func TestDetectLimit(t *testing.T) {
 		{"claude assistant hit your limit", "claude-code", `{"type":"assistant","message":{"content":[{"type":"text","text":"You've hit your 5-hour limit"}]}}`, false, false, time.Time{}},
 		{"plain prose mentioning limit", "claude-code", `the docs say you've hit your 5-hour limit when idle`, false, false, time.Time{}},
 		{"stderr prose mentioning limit", "claude-code", `note: users who hit your 5-hour limit see a banner`, true, false, time.Time{}},
+		{"opencode weekly rpc", "opencode", `{"jsonrpc":"2.0","id":3,"error":{"code":-32603,"message":"credential_unverified: OpenCode Go weekly usage limit reached. Switch to a free model, or turn on Extra Usage on the Go page in OpenCode Console to keep going."}}`, false, true, now.Add(time.Hour)},
+		{"opencode rpc stderr", "opencode", `{"jsonrpc":"2.0","id":3,"error":{"code":-32603,"message":"Internal error: Free usage limit reached."}}`, true, true, now.Add(time.Hour)},
+		{"opencode rpc other error", "opencode", `{"jsonrpc":"2.0","id":3,"error":{"code":-32603,"message":"Internal error: bad request"}}`, false, false, time.Time{}},
+		{"opencode rpc success", "opencode", `{"jsonrpc":"2.0","id":3,"result":{"text":"usage limit reached"}}`, false, false, time.Time{}},
 		{"claude overloaded", "claude-code", `{"type":"result","is_error":true,"result":"Overloaded"}`, false, false, time.Time{}},
 		{"claude 529", "claude-code", `{"type":"result","is_error":true,"result":"API Error: 529 overloaded_error"}`, false, false, time.Time{}},
 		{"claude 429", "claude-code", `{"type":"system","subtype":"api_retry","error":"rate_limit","status":429}`, false, false, time.Time{}},
@@ -493,11 +497,10 @@ func TestLoadEngineBlock(t *testing.T) {
 		t.Fatalf("Load = %+v, %v", c, err)
 	}
 	for body, want := range map[string]string{
-		"engine:\n  repo: sortie\n":         "engine.repo",
-		"engine:\n  repo: a/b/c\n":          "engine.repo",
-		"engine:\n  version: 1.29.0\n":      "engine.version",
-		"engine:\n  version: v1.29\n":       "engine.version",
-		"engine:\n  version: v1.29.0-rc1\n": "engine.version",
+		"engine:\n  repo: sortie\n":    "engine.repo",
+		"engine:\n  repo: a/b/c\n":     "engine.repo",
+		"engine:\n  version: 1.29.0\n": "engine.version",
+		"engine:\n  version: v1.29\n":  "engine.version",
 	} {
 		if _, err := Load(write(body)); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("Load(%q) err = %v, want %s", body, err, want)

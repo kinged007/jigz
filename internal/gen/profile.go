@@ -36,6 +36,13 @@ var profiles = []Profile{
 		Schema:   38,
 	},
 	{
+		Repo:     "kinged007/sortie",
+		Version:  "v1.31.0-fork.1",
+		Trackers: []string{"file", "gitea", "github", "github-pr", "gitlab", "jira", "linear"},
+		Agents:   []string{"agent-client-protocol", "claude-code", "codex", "copilot-cli", "mock", "opencode", "pi"},
+		Schema:   50,
+	},
+	{
 		Repo:     "sortie-ai/sortie",
 		Version:  "v1.29.0",
 		Trackers: []string{"file", "gitea", "github", "gitlab", "jira", "linear"},
@@ -48,7 +55,7 @@ var profiles = []Profile{
 // engine section resolves to.
 const (
 	DefaultRepo    = "kinged007/sortie"
-	DefaultVersion = "v1.28.1"
+	DefaultVersion = "v1.31.0-fork.1"
 )
 
 // MinVersion is the oldest release that starts a loop.

@@ -1,5 +1,5 @@
 ---
-# jig:generated v1 skeleton=delivery-planner engine=kinged007/sortie@v1.28.1 sha256=804a7ce9be2828d2cf87b37893cdca51dcd3010400ea08bd554c30a39ebf9fda
+# jig:generated v1 skeleton=delivery engine=kinged007/sortie@v1.31.0-fork.1 sha256=5b62ccf562d84c19f076f145b77763db120fc22771b97834231d9096150ecf6b
 tracker:
   kind: github
   api_key: $JIG_TRACKER_TOKEN
@@ -13,10 +13,10 @@ tracker:
   #
   # The assignee scope is always @me; it is appended at launch, not stored
   # here.
-  query_filter: "-label:needs-human label:agent:plan"
+  query_filter: "label:in-progress -label:needs-human"
   active_states: [agent:plan, in-progress]
   in_progress_state: in-progress
-  handoff_state: 
+  handoff_state: agent:done
   handoff_evidence: off
   terminal_states: [closed]
   comments:
@@ -26,10 +26,10 @@ tracker:
 polling:
   interval_ms: 60000
 
-db_path: ../data/jigz-delivery-planner.db
+db_path: ../data/jigz-delivery.db
 
 workspace:
-  root: $JIG_WORKSPACES/delivery-planner
+  root: $JIG_WORKSPACES/delivery
   retention_days: 30
 
 hooks:
@@ -70,7 +70,7 @@ hooks:
     # of swallowing the error, so the retry starts from a clean tree.
     git fetch origin "auto/$JIG_ISSUE_IDENTIFIER" 2>/dev/null && git rebase "origin/auto/$JIG_ISSUE_IDENTIFIER" || git rebase --abort
     git push -u origin "auto/$JIG_ISSUE_IDENTIFIER"
-  timeout_ms: 300000
+  timeout_ms: 120000
 
 agent:
   kind: claude-code
@@ -98,6 +98,10 @@ dispatch:
       match:
         labels: ["agent:plan"]
       template: prompts/plan.md
+      next: chain
+    - name: chain
+      stage: stage-build
+      template: prompts/build.md
   default:
     template: prompts/default.md
 ---
