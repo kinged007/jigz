@@ -344,6 +344,15 @@ func applyIssueRestart(ctx context.Context, d *restartDeps, num int, hintLoop st
 	if len(effects) == 0 {
 		effects = append(effects, "already restartable")
 	}
+	// The restart is the shared recovery path for stuck issues and for
+	// non-retryable parks: a successful restart clears the issue's parks
+	// in every workflow, so a parked item runs again. Clearing nothing is
+	// a no-op, so restarts of never-parked issues report no extra effect.
+	if d.history != nil {
+		if n, err := d.history.ClearIssueParks(d.slug, strconv.Itoa(num)); err == nil && n > 0 {
+			effects = append(effects, "cleared park")
+		}
+	}
 	res.Restarted = true
 	res.Loop, res.Trigger = loop, trigger
 	res.ReleasedClaim, res.AppliedTrigger = act.releaseClaim, act.applyTrigger

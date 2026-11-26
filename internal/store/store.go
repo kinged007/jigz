@@ -194,6 +194,18 @@ var migrations = []string{
 		workflow TEXT NOT NULL,
 		PRIMARY KEY (project, workflow)
 	);`,
+	`CREATE TABLE issue_parks (
+		project  TEXT NOT NULL,
+		workflow TEXT NOT NULL,
+		issue_id TEXT NOT NULL,
+		class    TEXT NOT NULL,
+		fix      TEXT NOT NULL DEFAULT '',
+		reason   TEXT NOT NULL DEFAULT '',
+		ts       TEXT NOT NULL,
+		cleared  INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY (project, workflow, issue_id)
+	);
+	CREATE INDEX issue_parks_active ON issue_parks (cleared);`,
 }
 
 // Open opens dir/history.db, creating the directory and the database, and

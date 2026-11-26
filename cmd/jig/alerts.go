@@ -11,6 +11,7 @@ import (
 
 	"github.com/kinged007/jigz/internal/loopsrc"
 	"github.com/kinged007/jigz/internal/rollup"
+	"github.com/kinged007/jigz/internal/store"
 	"github.com/kinged007/jigz/internal/supervise"
 )
 
@@ -160,6 +161,7 @@ func (a *app) dbAlerts(projects []opsProject) []alert {
 				out = append(out, alert{"err", "Failure streak", msg, "/runs?" + q.Encode()})
 			}
 		}
+		out = append(out, parkAlerts(a.store, known)...)
 	}
 	c.at, c.out = time.Now(), out
 	return out
@@ -169,6 +171,26 @@ func (a *app) dbAlerts(projects []opsProject) []alert {
 // its database lists them.
 func loopDBAlerts(l rollup.Loop) []alert {
 	return heldAlerts(l, l.BudgetHeld, l.Parked)
+}
+
+// parkAlerts surfaces the issues Jigz parked after a non-retryable
+// failure: one alert per park, naming the failure class and the
+// one-line fix, next to the engine's own parked issues above.
+func parkAlerts(st *store.Store, known map[string]bool) []alert {
+	parks, err := st.ActiveParks()
+	if err != nil {
+		return nil
+	}
+	var out []alert
+	for _, p := range parks {
+		if !known[p.Project] {
+			continue
+		}
+		q := url.Values{"project": {p.Project}, "workflow": {p.Workflow}, "issue": {p.IssueID}}
+		msg := fmt.Sprintf("%s/%s#%s [%s]: %s", p.Project, p.Workflow, p.IssueID, p.Class, p.Fix)
+		out = append(out, alert{"err", "Non-retryable failure", msg, "/runs?" + q.Encode()})
+	}
+	return out
 }
 
 func heldAlerts(l rollup.Loop, budget, parked []rollup.Held) []alert {

@@ -17,6 +17,7 @@ import (
 
 	machine "github.com/kinged007/jigz/internal/host"
 	"github.com/kinged007/jigz/internal/loopsrc"
+	agentmachine "github.com/kinged007/jigz/internal/machine"
 	"github.com/kinged007/jigz/internal/rollup"
 	"github.com/kinged007/jigz/internal/store"
 )
@@ -215,6 +216,12 @@ func (c *Collector) copyRuns(db *sql.DB, l rollup.Loop, schema rollup.Schema) er
 	if c.Kind != nil {
 		kind = c.Kind(l.Repo, l.Loop)
 	}
+	// Fresh runs are copied in batches, but parking waits until every
+	// batch is stored: a failed run parks only when no newer run for the
+	// same issue exists in the whole copy, so a backfill or a success
+	// later in the same copy never parks a stale failure.
+	newestAll := map[string]int64{}
+	var failed []store.Run
 	for {
 		runs, err := readRuns(db, last)
 		if err != nil {
@@ -248,11 +255,71 @@ func (c *Collector) copyRuns(db *sql.DB, l rollup.Loop, schema rollup.Schema) er
 		if err := c.Store.AddRuns(runs); err != nil {
 			return err
 		}
+		for _, r := range runs {
+			newestAll[r.IssueID] = r.ID
+			if r.Status == "failed" && r.Error != "" {
+				failed = append(failed, r)
+			}
+		}
 		last = runs[len(runs)-1].ID
 		if len(runs) < batch {
+			c.parkNonRetryable(l, failed, newestAll)
 			return nil
 		}
 	}
+}
+
+// parkNonRetryable classifies each newly copied failed run before the
+// next retry: a non-retryable failure parks the issue Jigz-side and
+// records exactly one notice (a park row plus one run event carrying
+// the same class and fix). Only the issue's newest copied run parks,
+// so a stale failure superseded by a later run in the same copy never
+// parks. The park row makes the second pass a no-op, and retryable or
+// unknown failures fall through untouched.
+func (c *Collector) parkNonRetryable(l rollup.Loop, runs []store.Run, newest map[string]int64) {
+	now := time.Now()
+	if c.Now != nil {
+		now = c.Now()
+	}
+	ts := now.UTC().Format(time.RFC3339)
+	for _, r := range runs {
+		if r.Status != "failed" || r.Error == "" {
+			continue
+		}
+		if id, ok := newest[r.IssueID]; ok && id != r.ID {
+			continue
+		}
+		class := agentmachine.Classify(r.Error)
+		if agentmachine.Retryable(class) {
+			continue
+		}
+		fix := agentmachine.Fix(class)
+		parked, err := c.Store.ParkIssue(store.IssuePark{
+			Project: l.Repo, Workflow: l.Loop, IssueID: r.IssueID,
+			Class: string(class), Fix: fix, Reason: truncateRunes(r.Error, 200), TS: ts,
+		})
+		if err != nil {
+			log.Printf("collector: %s/%s: park %s: %v", l.Repo, l.Loop, r.IssueID, err)
+			continue
+		}
+		if !parked {
+			continue
+		}
+		if err := c.Store.AddEvents([]store.Event{{
+			TS: ts, Project: l.Repo, Workflow: l.Loop, IssueID: r.IssueID,
+			Kind: store.ParkEventKind, Detail: string(class) + ": " + fix,
+		}}); err != nil {
+			log.Printf("collector: %s/%s: park event %s: %v", l.Repo, l.Loop, r.IssueID, err)
+		}
+	}
+}
+
+// truncateRunes caps s at n runes for a stored reason.
+func truncateRunes(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n])
+	}
+	return s
 }
 
 // fillRunFiles sets the workflow file and rule name on runs stored before Jigz kept

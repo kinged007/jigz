@@ -181,6 +181,33 @@ Move labels with `gh issue edit`, keep `in-progress` until you are done,
 and end by removing your trigger and adding `agent:done`.
 ```
 
+## Failure classes
+
+Each failed attempt is classified before it is retried. Non-retryable
+classes park the item Jigz-side and record exactly one notice: a dashboard alert
+and one run event carrying the same class and fix. The park is advisory:
+it leaves the engine's retry path unchanged and the loop keeps processing
+other items. Retryable classes
+keep today's behaviour. The park lives in Jigz's history database, never
+in the engine's tables; after fixing the cause, `jig issue restart`
+clears it (see [Usage](usage.md#restarting-a-stuck-issue)).
+
+| Class | Retryable | What happens | Fix |
+|---|---|---|---|
+| `agent-unauthenticated` | no | the item is parked with one notice | log the agent back in (run /login) |
+| `agent-cli-unusable` | no | the item is parked with one notice | upgrade the agent CLI to a supported version |
+| `missing-model` | no | the item is parked with one notice | configure a valid model |
+| `usage-limit` | yes | the item hands over to the next pool account and resumes at the reset time | none needed |
+| `engine-crash` | yes | the item retries under the attempt limit and backoff | none needed |
+| `transient-network` | yes | the item retries under the attempt limit and backoff | none needed |
+| `unknown` | yes | the item retries under the attempt limit and backoff | none needed |
+
+A failure matching more than one class takes the first match in
+`Classify` order: usage-limit first, then missing-model, CLI/version,
+authentication, crash, transient. A usage-limit message wrapped in an
+authentication error stays a usage limit. While one item is parked, the loop keeps
+processing other items.
+
 ## Validation
 
 `jig validate [--json]` checks, in order: the config (strict keys and

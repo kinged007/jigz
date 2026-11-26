@@ -168,8 +168,9 @@ Control (act on the run serving repo-root, found through the registry)
                                   and exit non-zero when it fails
   issue restart <number> [--json]
                                   restart a stuck issue: release its claim,
-                                  re-apply its trigger label, record the
-                                  restart and wake the loop
+                                  re-apply its trigger label, clear its
+                                  parked state, record the restart and
+                                  wake the loop
   validate [--json]               check config.yaml and run the engine's
                                   validation on each workflow
 

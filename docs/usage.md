@@ -29,7 +29,7 @@ in time, it prints the last log lines and exits non-zero. Stop the run with
 
 `jig --help` lists every command in groups: Run, Control (`stop`, `restart`,
 `status`, `wake`, `pause`, `resume`, `budget override`, `reload`, `cleanup`,
-`validate`), Setup (`setup`), run options (`--host`, `--dashboard-port`,
+`validate`), Issue (`issue restart`), Setup (`setup`), run options (`--host`, `--dashboard-port`,
 `--no-dashboard`, `--unite`) and Other (`--version`, `--dump-version`).
 A positional argument selects the repo root; the default is the current
 directory.
@@ -168,8 +168,12 @@ and deletes at its next 2-second tick, whatever the sleep settings are.
 in one action: it releases the issue's claim (`in-progress`), makes sure
 its trigger label is present, records a restart event with the tracker
 login and the timestamp, and wakes the loop so the engine re-polls the
-issue. `--json` prints `issue`, `restarted`, `loop`, `trigger`,
-`released_claim`, `applied_trigger`, `woke`, `actor`, `at` and `effects`;
+issue. It also clears the issue's parked state after a non-retryable
+failure (see [Failure classes](workflows.md#failure-classes)), so a parked
+item runs again; clearing is across every workflow of the project and is
+a no-op when nothing is parked. `--json` prints `issue`, `restarted`,
+`loop`, `trigger`, `released_claim`, `applied_trigger`, `woke`, `actor`,
+`at` and `effects`;
 the run page shows the same actor and timestamp as a restart event. The
 action is idempotent: running it twice leaves the issue restartable,
 not double-claimed, and it succeeds whether the trigger label is present
@@ -185,6 +189,19 @@ start; a second run while it is pending reports the request as already
 recorded instead of queuing it twice. A crash between the label change
 and the request cleanup may record the restart event twice; the
 duplicate is accepted because the labels stay correct.
+
+Each failed attempt is classified before it is retried:
+
+| Class | Retryable | What happens | Fix |
+|---|---|---|---|
+| `agent-unauthenticated` | no | the item is parked with one notice | log the agent back in (run /login) |
+| `agent-cli-unusable` | no | the item is parked with one notice | upgrade the agent CLI to a supported version |
+| `missing-model` | no | the item is parked with one notice | configure a valid model |
+| `usage-limit` | yes | the item hands over to the next pool account and resumes at the reset time | none needed |
+| `engine-crash` | yes | the item retries under the attempt limit and backoff | none needed |
+| `transient-network` | yes | the item retries under the attempt limit and backoff | none needed |
+| `unknown` | yes | the item retries under the attempt limit and backoff | none needed |
+
 ### Selecting loops
 
 `JIG_ONLY` is a comma-separated list of `WORKFLOW.*.md` stems. It applies to
