@@ -19,7 +19,7 @@ const dateLayout = "2006-01-02"
 // runQuery is the Runs page's filter as it appears in the URL.
 type runQuery struct {
 	Project, Workflow, Rule, State, Model, Adapter string
-	From, To, Q                                    string
+	From, To, Q, Issue                             string
 	Cursor, After                                  int64
 }
 
@@ -27,6 +27,7 @@ func parseRunQuery(v url.Values) runQuery {
 	q := runQuery{
 		Project: v.Get("project"), Workflow: v.Get("workflow"), Rule: v.Get("rule"), State: v.Get("state"),
 		Model: v.Get("model"), Adapter: v.Get("adapter"), Q: strings.TrimSpace(v.Get("q")),
+		Issue: strings.TrimSpace(v.Get("issue")),
 	}
 	if _, err := time.Parse(dateLayout, v.Get("from")); err == nil {
 		q.From = v.Get("from")
@@ -48,7 +49,7 @@ func (q runQuery) values() url.Values {
 	v := url.Values{}
 	for k, s := range map[string]string{
 		"project": q.Project, "workflow": q.Workflow, "rule": q.Rule, "state": q.State, "model": q.Model,
-		"adapter": q.Adapter, "from": q.From, "to": q.To, "q": q.Q,
+		"adapter": q.Adapter, "from": q.From, "to": q.To, "q": q.Q, "issue": q.Issue,
 	} {
 		if s != "" {
 			v.Set(k, s)
@@ -63,6 +64,11 @@ func (q runQuery) filter() store.RunFilter {
 	f := store.RunFilter{
 		Project: q.Project, Workflow: q.Workflow, Rule: q.Rule, State: q.State, Model: q.Model, Adapter: q.Adapter, Q: q.Q,
 		Cursor: q.Cursor, After: q.After,
+	}
+	// Park alerts link to the runs page with an issue id; it filters
+	// through the same text match that already covers issue ids.
+	if q.Issue != "" {
+		f.Q = q.Issue
 	}
 	if q.From != "" {
 		f.Since = q.From + "T00:00:00Z"
