@@ -8,10 +8,10 @@
 
 A person whose work item stopped with a failure no retry can fix (for example the agent is not logged in) sees a single notice that names the failure class and the one-line fix, instead of finding a silently parked item by scanning alerts.
 
-**Independent test**: cause one run to fail with an unauthenticated-agent error and check that no further attempt for that item starts, the item is parked, and exactly one notice appears carrying the class and the fix.
+**Independent test**: cause one run to fail with an unauthenticated-agent error and check that the item is parked Jigz-side and exactly one notice appears carrying the class and the fix.
 
 **Acceptance scenarios**:
-1. Given an item whose attempt fails because the agent is unauthenticated, When the failure is handled, Then no further attempt for that item starts, the item is parked, and exactly one notice names the class and the fix.
+1. Given an item whose attempt fails because the agent is unauthenticated, When the failure is handled, Then the item is parked Jigz-side and exactly one notice names the class and the fix.
 2. Given the same parked item, When the person checks the dashboard and the run history, Then the same single notice is visible in both places with identical class and fix text.
 
 ### User Story 2 - Keep retryable failures on their current path (Priority: P1)
@@ -38,7 +38,7 @@ A person who fixed the underlying cause (logged in, upgraded, configured the mod
 - **FR-001**: The system MUST classify each failed attempt into one of at least these classes: agent unauthenticated, agent CLI or version unusable, missing model, usage limit, engine crash, transient network.
 - **FR-002**: The system MUST treat agent unauthenticated, agent CLI or version unusable, and missing model as non-retryable.
 - **FR-003**: The system MUST treat usage limit, engine crash, and transient network as retryable with today's behaviour (usage limit hands the item to the next pool account and resumes at the reset time; transient network error retries; engine crash keeps current retry behaviour).
-- **FR-004**: The system MUST, on a non-retryable failure, start no further attempt for that item and park the item.
+- **FR-004**: The system MUST, on a non-retryable failure, park the item Jigz-side and record one notice; the park is advisory and leaves the engine's retry path unchanged.
 - **FR-005**: The system MUST record exactly one notice per non-retryable failure, visible both as a dashboard alert and as one run event, carrying the failure class and a one-line fix (for example the login command or the upgrade instruction).
 - **FR-006**: The system MUST keep the loop running and processing other items when one item fails non-retryably.
 - **FR-007**: The restart action MUST clear the parked and retry state added by this change so a parked item returns to the normal claim path on the same recovery path as the existing stuck-issue restart.
@@ -48,7 +48,7 @@ A person who fixed the underlying cause (logged in, upgraded, configured the mod
 
 - **AC-1**: A failed attempt caused by an unauthenticated agent, an unusable agent CLI or version, or a missing model is classified as non-retryable (covers FR-001, FR-002).
 - **AC-2**: A failed attempt caused by a usage limit, an engine crash, or a transient network error is classified as retryable (covers FR-001, FR-003).
-- **AC-3**: On a non-retryable failure no further attempt for that item starts and the item ends parked (covers FR-004).
+- **AC-3**: On a non-retryable failure the item ends parked Jigz-side with one notice; the loop keeps processing other items (covers FR-004).
 - **AC-4**: A non-retryable failure produces exactly one dashboard alert and exactly one run event, both carrying the same failure class and one-line fix; repeated checks and loop cycles add no duplicates (covers FR-005).
 - **AC-5**: A usage-limit failure hands the item to the next pool account and the item resumes at the reset time (covers FR-003).
 - **AC-6**: A transient-network failure is retried under the existing attempt limit and backoff (covers FR-003).

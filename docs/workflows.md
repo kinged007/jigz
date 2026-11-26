@@ -184,8 +184,10 @@ and end by removing your trigger and adding `agent:done`.
 ## Failure classes
 
 Each failed attempt is classified before it is retried. Non-retryable
-classes park the item and record exactly one notice: a dashboard alert
-and one run event carrying the same class and fix. Retryable classes
+classes park the item Jigz-side and record exactly one notice: a dashboard alert
+and one run event carrying the same class and fix. The park is advisory:
+it leaves the engine's retry path unchanged and the loop keeps processing
+other items. Retryable classes
 keep today's behaviour. The park lives in Jigz's history database, never
 in the engine's tables; after fixing the cause, `jig issue restart`
 clears it (see [Usage](usage.md#restarting-a-stuck-issue)).
