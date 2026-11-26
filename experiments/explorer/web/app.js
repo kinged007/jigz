@@ -49,7 +49,7 @@ const S = {
   yaw: 0.6, pitch: -0.32, dist: 1100, target: [0, 0, 0], goal: null, goalDist: 0,
   sel: -1, hover: -1, tab: 0, query: "", matches: null, neigh: new Set(),
   timeFrom: -Infinity, timeCut: Infinity, playing: false, lastInput: 0, drag: false,
-  winDirty: true, panelDirty: true, panelAt: 0,
+  winDirty: true, panelDirty: true, panelAt: 0, camT: 0, stDirty: true, gl: null,
   proj: null, started: performance.now(), frames: 0, fps: 0, fpsT: performance.now(),
 };
 const $ = (id) => document.getElementById(id);
@@ -118,6 +118,8 @@ function index(g, prev) {
     if (n.type === "commit") S.events.push({ t: n.t, type: "commit", node: n.i });
   }
   S.events.sort((a, b) => a.t - b.t);
+  S.gl?.load(S);
+  S.stDirty = true;
 }
 
 const signature = (n) => `${n.state}|${n.title}|${(n.meta?.labels || []).join(",")}`;
@@ -152,6 +154,9 @@ function renderHeader() {
 }
 
 function init(g) {
+  S.gl = new URLSearchParams(location.search).get("renderer") === "2d" ? null : createGL(glCanvas);
+  glCanvas.hidden = !S.gl;
+  glCanvas.addEventListener("webglcontextlost", (e) => { e.preventDefault(); S.gl = null; glCanvas.hidden = true; });
   index(g, null);
   buildLegend();
   $("tabs").innerHTML = TABS.map(([n], i) => `<button data-i="${i}" class="${i === 0 ? "on" : ""}">${n}</button>`).join("");
@@ -228,6 +233,7 @@ function applyGraph(g) {
 
   S.sel = selId && S.byId.has(selId) ? S.byId.get(selId) : -1;
   S.hover = -1;
+  S.stDirty = true;
   S.neigh = new Set();
   if (S.sel >= 0) for (const l of S.adj[S.sel]) S.neigh.add(l.s === S.sel ? l.t : l.s);
   rescale();
@@ -296,6 +302,7 @@ function buildLegend() {
     S.hidden.has(t) ? S.hidden.delete(t) : S.hidden.add(t);
     c.classList.toggle("off", S.hidden.has(t));
     for (const n of S.nodes) n.hid = S.hidden.has(n.type);
+    S.stDirty = true;
   };
 }
 
@@ -321,6 +328,7 @@ function computeVisibility() {
   }
   vis[S.byId.get("repo")] = 1;
   S.winDirty = false;
+  S.stDirty = true;
 }
 
 function windowStats() {
@@ -365,7 +373,8 @@ function panBy(start, dx, dy) {
 function resetView() { S.target = [0, 0, 0]; S.goal = null; S.goalDist = 0; S.dist = 1100; }
 
 // ---------- rendering ----------
-const canvas = $("graph"), ctx = canvas.getContext("2d");
+const canvas = $("graph"), ctx = canvas.getContext("2d"), glCanvas = $("gl");
+const dprNow = () => Math.min(2, window.devicePixelRatio || 1);
 const sprites = new Map();
 function sprite(color) {
   if (sprites.has(color)) return sprites.get(color);
@@ -378,7 +387,7 @@ function sprite(color) {
 }
 
 function frame(now) {
-  const dpr = window.devicePixelRatio || 1, W = canvas.clientWidth, H = canvas.clientHeight;
+  const dpr = dprNow(), W = canvas.clientWidth, H = canvas.clientHeight;
   if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) { canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr); }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
@@ -392,16 +401,22 @@ function frame(now) {
   if (S.panelDirty && now - S.panelAt > (S.playing || S.scrubbing ? 220 : 0)) { S.panelAt = now; S.panelDirty = false; refreshPanels(); }
 
   project(W, H);
-  ctx.fillStyle = "#04070b"; ctx.fillRect(0, 0, W, H);
-  drawLinks();
-  drawNodes();
+  if (S.gl) {
+    if (S.stDirty) { S.gl.state(S); S.stDirty = false; }
+    S.gl.draw(S, W, H, dpr);
+    ctx.clearRect(0, 0, W, H);
+  } else {
+    ctx.fillStyle = "#04070b"; ctx.fillRect(0, 0, W, H);
+    drawLinks();
+    drawNodes();
+  }
   drawLabels(W, H);
   drawSelection(W, H);
   drawRadar(now);
 
   S.frames++;
-  if (now - S.fpsT > 1000) { S.fps = Math.round(S.frames * 1000 / (now - S.fpsT)); S.frames = 0; S.fpsT = now; $("fps").textContent = S.fps + "FPS"; tickClock(); renderLive(); }
-  $("hudCam").textContent = `AZ ${(((S.yaw * 180 / Math.PI) % 360 + 360) % 360).toFixed(1)}° Z ${Math.round(S.dist / 4)}`;
+  if (now - S.fpsT > 1000) { S.fps = Math.round(S.frames * 1000 / (now - S.fpsT)); S.frames = 0; S.fpsT = now; $("fps").textContent = S.fps + "FPS " + (S.gl ? "GL" : "2D"); tickClock(); renderLive(); }
+  if (now - S.camT > 100) { S.camT = now; $("hudCam").textContent = `AZ ${(((S.yaw * 180 / Math.PI) % 360 + 360) % 360).toFixed(1)}° Z ${Math.round(S.dist / 4)}`; }
   requestAnimationFrame(frame);
 }
 
@@ -506,7 +521,7 @@ function drawNodes() {
 
 function drawLabels(W, H) {
   const P = S.proj;
-  ctx.font = "10px " + getComputedStyle(document.body).fontFamily;
+  ctx.font = S.font || (S.font = "10px " + getComputedStyle(document.body).fontFamily);
   ctx.textBaseline = "middle";
   let list = S.labelled;
   if (S.sel >= 0) list = [...S.neigh].sort((a, b) => S.nodes[b].deg - S.nodes[a].deg).slice(0, 36);
@@ -650,6 +665,7 @@ function scoreMatch(i) {
 }
 
 function search(text) {
+  S.stDirty = true;
   S.query = text.trim().toLowerCase();
   if (!S.query) { S.matches = null; $("qhint").textContent = "JIGZ"; status(""); return; }
   const q = S.query, m = new Set();
@@ -665,6 +681,7 @@ function search(text) {
 
 function setTab(i) {
   S.tab = i;
+  S.stDirty = true;
   [...$("tabs").children].forEach((b, k) => b.classList.toggle("on", k === i));
   status(`view :: ${TABS[i][0].toLowerCase()} · ${TABS[i][1] ? TABS[i][1].join(", ") : "every node type"}`);
   writeHash();
@@ -675,6 +692,7 @@ function status(text) { $("hudStatus").textContent = text ? `${(performance.now(
 // ---------- selection ----------
 function select(i, fly) {
   S.sel = i;
+  S.stDirty = true;
   S.neigh = new Set();
   if (i >= 0) {
     for (const l of S.adj[i]) S.neigh.add(l.s === i ? l.t : l.s);

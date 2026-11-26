@@ -100,6 +100,19 @@ The graph is on the left and the twelve panels are on the right (scrollable).
 - The URL hash keeps the selection, view and window
   (`#node=issue:1840&tab=workflow&f=1790812800&t=1791763200`).
 
+## Rendering
+
+The graph layer is drawn with WebGL2 (`web/gl.js`). Node positions and per-node
+state (visible, in tab, search match, selection) are float textures, and the
+camera, time window, tab, search and selection are applied in the shaders, so
+the CPU does no per-node or per-link work per frame. Node shapes are computed in
+the fragment shader. Labels, the selection callout and the radar stay on a 2D
+canvas above it. The device pixel ratio is capped at 2.
+
+If WebGL2 is unavailable, shader compilation fails or the context is lost, the
+page falls back to the Canvas 2D renderer. `?renderer=2d` forces it. The header
+shows `GL` or `2D` next to the frame rate.
+
 ## Live updates
 
 With `serve -refresh <interval>` the header shows `LIVE` and a countdown to the
@@ -125,5 +138,10 @@ layout.
 - Comment bodies are not stored; comments count as engagement only.
 - Only first-parent history of the default branch is read, and only files
   present at its head become nodes.
-- Canvas 2D draws every link each frame. It holds about 25k links at
-  interactive rates on a desktop GPU; beyond that it needs WebGL.
+- The WebGL2 renderer draws all links in one call. In a software-rendered
+  headless browser the main-thread time per frame dropped from 25 ms to 3 ms
+  on saas-template (3,484 nodes, 25,825 links); it has not been measured on a
+  real GPU.
+- Links are 1 device pixel wide (WebGL has no wider lines), so the selected
+  node's links are thinner than in the 2D renderer.
+- Nodes are not depth-sorted in the WebGL renderer; overlapping nodes blend.
