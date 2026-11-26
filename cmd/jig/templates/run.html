@@ -114,6 +114,7 @@ tr.bad td { background: color-mix(in srgb, var(--err) 12%, transparent); }
   <div class="row">
     {{if .Row.IssueURL}}<a class="btn" href="{{.Row.IssueURL}}" target="_blank" rel="noopener">Open on GitHub</a>{{end}}
     <a class="btn" href="{{.OtherRuns}}">Other runs of this issue</a>
+    {{if .IssueNumber}}<form method="post" action="{{.Row.Href}}/restart"><button class="btn" type="submit">Restart issue</button></form>{{end}}
   </div>
 </div>
 <p class="summary">{{.Summary}}</p>

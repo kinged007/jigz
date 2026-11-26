@@ -150,7 +150,10 @@ Hook scripts read the item through `JIG_*` variables; see
 
 Each rule's `template` is a Markdown file under `.jigz/workflows/`,
 usually in `prompts/`. The engine renders it with the issue context and
-runs the result as the agent's instructions:
+runs the result as the agent's instructions. `jig setup` writes the shipped
+prompts only when they are missing and never overwrites one, so your edits
+are kept. A prompt you have not edited is also not updated when you upgrade
+`jig`: delete the file and run `jig setup` to take the shipped version.
 
 | Variable | Meaning |
 |---|---|
@@ -185,7 +188,7 @@ classes park the item and record exactly one notice: a dashboard alert
 and one run event carrying the same class and fix. Retryable classes
 keep today's behaviour. The park lives in Jigz's history database, never
 in the engine's tables; after fixing the cause, `jig issue restart`
-clears it (see [Usage](usage.md#issue-restart)).
+clears it (see [Usage](usage.md#restarting-a-stuck-issue)).
 
 | Class | Retryable | What happens | Fix |
 |---|---|---|---|
@@ -231,5 +234,3 @@ the config to fix.
 
 See [the engine](install.md#the-engine) for pinning and capability
 detection.
-
-Evidence status: Confirmed against `cmd/jig/workflows/`, `cmd/jig/generate.go`, `internal/gen`, and `internal/config` unless noted.

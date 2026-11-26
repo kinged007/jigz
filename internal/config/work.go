@@ -198,6 +198,25 @@ type Match struct {
 	Labels []string `yaml:"labels"`
 }
 
+// assigneePattern is the GitHub username shape: 1-39 characters of
+// letters, digits and hyphens, not starting or ending with a hyphen.
+// @me is allowed alongside and stands for the token owner.
+var assigneePattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$`)
+
+// validateAssignees rejects an invalid assignee scope at load with an
+// error naming the key and the offending value.
+func validateAssignees(key string, names []string) error {
+	for _, n := range names {
+		if n == "@me" {
+			continue
+		}
+		if !assigneePattern.MatchString(n) {
+			return fmt.Errorf("%s: invalid GitHub username %q (letters, digits and hyphens, 1-39 characters, not starting or ending with a hyphen; or \"@me\")", key, n)
+		}
+	}
+	return nil
+}
+
 // Rule is one dispatch rule of a work entry. Stage and Next are the
 // engine's stage chaining, carried through uninterpreted.
 type Rule struct {
@@ -214,8 +233,11 @@ type Rule struct {
 // entry's overrides of the file-level defaults; nil means none. Agent
 // names may name a pool.
 type Work struct {
-	Managed             bool
-	QueryFilter         string
+	Managed     bool
+	QueryFilter string
+	// Assignees replaces the global assignee scope for this entry's
+	// loops when non-empty; nil or empty inherits the global scope.
+	Assignees           []string
 	Tracker             *Tracker
 	Hooks               *Hooks
 	MaxConcurrentAgents int
@@ -232,6 +254,7 @@ type Work struct {
 type workFile struct {
 	Managed             *bool       `yaml:"managed"`
 	QueryFilter         string      `yaml:"query_filter"`
+	Assignees           []string    `yaml:"assignees"`
 	Tracker             *Tracker    `yaml:"tracker"`
 	Hooks               *Hooks      `yaml:"hooks"`
 	MaxConcurrentAgents int         `yaml:"max_concurrent_agents"`
@@ -261,6 +284,10 @@ func (f workFile) resolve(slug string) (Work, error) {
 		}
 		w.Budget = &b
 	}
+	if err := validateAssignees("work."+slug+".assignees", f.Assignees); err != nil {
+		return Work{}, err
+	}
+	w.Assignees = f.Assignees
 	return w, nil
 }
 

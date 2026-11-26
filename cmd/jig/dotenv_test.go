@@ -1,0 +1,146 @@
+package main
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"testing"
+)
+
+func writeRepoEnv(t *testing.T, root, body string) {
+	t.Helper()
+	mustWrite(t, filepath.Join(root, ".jigz", ".env"), body)
+}
+
+func TestRepoEnvReachesTheChildEnv(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".jigz", "config.yaml"), "repo: owner/name\n")
+	writeRepoEnv(t, root, "# mine\nJIG_TEST_FROM_FILE=file-value\nexport JIG_TEST_QUOTED=\"a b\"\n")
+	os.Unsetenv("JIG_TEST_FROM_FILE")
+	os.Unsetenv("JIG_TEST_QUOTED")
+	t.Cleanup(func() { os.Unsetenv("JIG_TEST_FROM_FILE"); os.Unsetenv("JIG_TEST_QUOTED") })
+	abs, err := absRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sup := newTestSup(t, abs, "plan")
+	_, env, _, err := sup.childEnv("plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := lastEnv(env, "JIG_TEST_FROM_FILE"); got != "file-value" {
+		t.Errorf("JIG_TEST_FROM_FILE = %q in the child env", got)
+	}
+	if got := lastEnv(env, "JIG_TEST_QUOTED"); got != "a b" {
+		t.Errorf("JIG_TEST_QUOTED = %q in the child env", got)
+	}
+	if body, _ := os.ReadFile(filepath.Join(abs, ".jigz", ".env.loop")); len(body) == 0 {
+		t.Error("the env file was not written")
+	}
+}
+
+func TestTheEnvironmentWinsOverRepoEnv(t *testing.T) {
+	root := t.TempDir()
+	writeRepoEnv(t, root, "JIG_TEST_WINS=file\n")
+	t.Setenv("JIG_TEST_WINS", "environment")
+	if _, err := absRoot(root); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("JIG_TEST_WINS"); got != "environment" {
+		t.Errorf("JIG_TEST_WINS = %q, want environment", got)
+	}
+}
+
+func TestRepoEnvOfOneRootDoesNotLeakToAnother(t *testing.T) {
+	a, b := t.TempDir(), t.TempDir()
+	writeRepoEnv(t, a, "JIG_TEST_A_ONLY=a\n")
+	writeRepoEnv(t, b, "JIG_TEST_B_ONLY=b\n")
+	os.Unsetenv("JIG_TEST_A_ONLY")
+	os.Unsetenv("JIG_TEST_B_ONLY")
+	t.Cleanup(func() { os.Unsetenv("JIG_TEST_A_ONLY"); os.Unsetenv("JIG_TEST_B_ONLY") })
+	if _, err := absRoot(a); err != nil {
+		t.Fatal(err)
+	}
+	if _, set := os.LookupEnv("JIG_TEST_B_ONLY"); set {
+		t.Error("a variable of repo b is set after resolving only repo a")
+	}
+	if got := os.Getenv("JIG_TEST_A_ONLY"); got != "a" {
+		t.Errorf("JIG_TEST_A_ONLY = %q", got)
+	}
+}
+
+func TestMissingRepoEnvIsNotAnError(t *testing.T) {
+	if _, err := absRoot(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTargetRepoEnvOverridesDashboardValueOnly(t *testing.T) {
+	env := []string{"JIG_TEST_SHARED=dashboard", "PATH=/bin"}
+	base := len(env)
+	env = append(env, "SORTIE_TRACKER_PROJECT=owner/repo")
+	got := applyTargetRepoEnv(env, base, [][2]string{
+		{"JIG_TEST_SHARED", "target"},
+		{"SORTIE_TRACKER_PROJECT", "owner/other"},
+		{"JIG_TEST_NEW", "new"},
+	})
+	if last := lastEnv(got, "JIG_TEST_SHARED"); last != "target" {
+		t.Errorf("shared key = %q, want target", last)
+	}
+	if last := lastEnv(got, "SORTIE_TRACKER_PROJECT"); last != "owner/repo" {
+		t.Errorf("managed key = %q, want owner/repo", last)
+	}
+	if last := lastEnv(got, "JIG_TEST_NEW"); last != "new" {
+		t.Errorf("new key = %q, want new", last)
+	}
+}
+
+func TestReloadRepoEnvUpdatesChangedValues(t *testing.T) {
+	root := t.TempDir()
+	writeRepoEnv(t, root, "JIG_TEST_RELOAD=file-v1\n")
+	os.Unsetenv("JIG_TEST_RELOAD")
+	t.Cleanup(func() { os.Unsetenv("JIG_TEST_RELOAD") })
+	if err := loadRepoEnv(root); err != nil {
+		t.Fatal(err)
+	}
+	writeRepoEnv(t, root, "JIG_TEST_RELOAD=file-v2\nJIG_TEST_RELOAD_NEW=added\n")
+	os.Unsetenv("JIG_TEST_RELOAD_NEW")
+	t.Cleanup(func() { os.Unsetenv("JIG_TEST_RELOAD_NEW") })
+	if err := reloadRepoEnv(root); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("JIG_TEST_RELOAD"); got != "file-v2" {
+		t.Errorf("JIG_TEST_RELOAD = %q, want file-v2", got)
+	}
+	if got := os.Getenv("JIG_TEST_RELOAD_NEW"); got != "added" {
+		t.Errorf("JIG_TEST_RELOAD_NEW = %q, want added", got)
+	}
+}
+
+func TestReloadRepoEnvKeepsEnvironmentWins(t *testing.T) {
+	root := t.TempDir()
+	writeRepoEnv(t, root, "JIG_TEST_RELOAD_ENV=file\n")
+	t.Setenv("JIG_TEST_RELOAD_ENV", "environment")
+	if err := loadRepoEnv(root); err != nil {
+		t.Fatal(err)
+	}
+	writeRepoEnv(t, root, "JIG_TEST_RELOAD_ENV=changed\n")
+	if err := reloadRepoEnv(root); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("JIG_TEST_RELOAD_ENV"); got != "environment" {
+		t.Errorf("JIG_TEST_RELOAD_ENV = %q, want environment", got)
+	}
+}
+
+func TestRepoEnvIsGitignored(t *testing.T) {
+	root := t.TempDir()
+	if out, err := exec.Command("git", "-C", root, "init", "-q").CombinedOutput(); err != nil {
+		t.Skipf("git init: %v %s", err, out)
+	}
+	ensureGitignore(root)
+	writeRepoEnv(t, root, "X=1\n")
+	if err := exec.Command("git", "-C", root, "check-ignore", "-q", ".jigz/.env").Run(); err != nil {
+		t.Errorf(".jigz/.env is not ignored: %v", err)
+	}
+}

@@ -31,6 +31,8 @@ in time, it prints the last log lines and exits non-zero. Stop the run with
 `status`, `wake`, `pause`, `resume`, `budget override`, `reload`, `cleanup`,
 `validate`), Issue (`issue restart`), Setup (`setup`), run options (`--host`, `--dashboard-port`,
 `--no-dashboard`, `--unite`) and Other (`--version`, `--dump-version`).
+A positional argument selects the repo root; the default is the current
+directory.
 
 `setup` reads `.jigz/config.yaml`, generates the workflow files from its
 work entries and creates the labels listed under `labels:`. It writes the
@@ -110,6 +112,14 @@ paused: `period`, `period_start`, `tokens_used`, `cap`, `warn_percent`,
 `override` and `warned`. A paused workflow has state `paused`, which takes
 precedence over `sleeping`.
 
+### When a loop exits
+
+If one loop process exits, `jig` stops the remaining loops, removes the run
+from the registry and exits. Nothing restarts a loop on its own. Read
+`.jigz/logs/<workflow>.log` for the cause, fix it, and start again with
+`jig` or `jig start`. Items that were mid-run keep their trigger label, so the
+next run picks them up again.
+
 ### Child logs
 
 The stdout and stderr of each engine child are written to
@@ -152,15 +162,33 @@ without a budget, or the status document does not show the change after
 document (`<hash>.budget.request.<time>-<pid>`), which the supervisor reads
 and deletes at its next 2-second tick, whatever the sleep settings are.
 
-### Issue restart
+### Restarting a stuck issue
 
-`jig issue restart <number> [--workflow NAME] [repo-root]` clears the
-parked state of one issue after a non-retryable failure (see
-[Failure classes](workflows.md#failure-classes)), so the item runs again.
-Without `--workflow` it clears the issue's parks in every workflow of the
-project. Clearing twice is a no-op: the second run prints `already clear`
-and claims nothing, so a restart never double-claims. The command works
-offline against the history database and needs no running supervisor.
+`jig issue restart <number> [--json] [repo-root]` restarts a stuck issue
+in one action: it releases the issue's claim (`in-progress`), makes sure
+its trigger label is present, records a restart event with the tracker
+login and the timestamp, and wakes the loop so the engine re-polls the
+issue. It also clears the issue's parked state after a non-retryable
+failure (see [Failure classes](workflows.md#failure-classes)), so a parked
+item runs again; clearing is across every workflow of the project and is
+a no-op when nothing is parked. `--json` prints `issue`, `restarted`,
+`loop`, `trigger`, `released_claim`, `applied_trigger`, `woke`, `actor`,
+`at` and `effects`;
+the run page shows the same actor and timestamp as a restart event. The
+action is idempotent: running it twice leaves the issue restartable,
+not double-claimed, and it succeeds whether the trigger label is present
+without a claim or a claim remnant is present without the trigger label.
+
+It refuses with a one-line reason, changing nothing, when the issue is
+mid-run, claimed by a live session, belongs to another loop, is a pull
+request, or does not exist. It exits non-zero when no tracker token
+resolves. When no supervisor serves the repo-root, the restart is stored
+next to the status document
+(`<hash>.restart.request.<issue>`) and applied once on the next
+start; a second run while it is pending reports the request as already
+recorded instead of queuing it twice. A crash between the label change
+and the request cleanup may record the restart event twice; the
+duplicate is accepted because the labels stay correct.
 
 Each failed attempt is classified before it is retried:
 
@@ -174,18 +202,10 @@ Each failed attempt is classified before it is retried:
 | `transient-network` | yes | the item retries under the attempt limit and backoff | none needed |
 | `unknown` | yes | the item retries under the attempt limit and backoff | none needed |
 
-Flags: `--unite` joins (or starts) the shared dashboard,
-`--dashboard-port=N` forces the dashboard onto port N,
-`--no-dashboard` disables the dashboard page. A positional arg selects the
-repo root (default: current directory).
-
-`JIG_ONLY=plan,build` starts only those loops; unset runs them
-all. It applies to `jig` and `jig start`. This is how Jigz picks a per-repo workflow set.
-
 ### Selecting loops
 
-`JIG_ONLY` is a comma-separated list of `WORKFLOW.*.md` stems. Unset runs
-every installed loop; a name that matches no installed workflow is fatal,
+`JIG_ONLY` is a comma-separated list of `WORKFLOW.*.md` stems. It applies to
+`jig` and `jig start`. Unset runs every installed loop; a name that matches no installed workflow is fatal,
 so a typo cannot leave that loop's work unwatched.
 
 ```sh
@@ -211,5 +231,3 @@ appears in one place. Without `--unite` the page shows only its own
 repository. The dashboard is read-only and has no authentication: use it
 locally, on a private network, or behind your own secure proxy. See
 [Dashboard](dashboard.md#dashboard).
-
-Evidence status: Confirmed against `cmd/jig` unless noted.

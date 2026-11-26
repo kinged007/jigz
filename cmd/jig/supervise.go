@@ -148,6 +148,9 @@ type supervisor struct {
 	// sessions reports whether a loop has a session running; retries do
 	// not count.
 	sessions func(name string) (active, known bool)
+	// restartTracker substitutes the tracker a stored restart applies
+	// with. Nil means the production GitHub client.
+	restartTracker issueTracker
 	// docAgent is the agent the on-disk document was rendered for, by
 	// loop. genLoops and genProf re-render it when the gate picks a
 	// standby agent. pickCnt counts consecutive ticks with the same
@@ -235,7 +238,7 @@ func (s *supervisor) childEnv(name string) (envFile string, env []string, runtim
 	if err != nil {
 		return "", nil, "", fmt.Errorf("%s: %w", name, err)
 	}
-	if envFile, err = writeEnvFile(s.root, own, cfg, token); err != nil {
+	if envFile, _, err = writeEnvFile(s.root, own, cfg, token); err != nil {
 		return "", nil, "", err
 	}
 	// The env override replaces the workflow's query_filter; a filters:
@@ -246,7 +249,7 @@ func (s *supervisor) childEnv(name string) (envFile string, env []string, runtim
 	env = append(os.Environ(), cfg.Env(token)...)
 	env = append(env, "JIG_STATE_PATH="+machine.StatePath(s.root))
 	if q, ok := s.queryFor(name); ok && strings.TrimSpace(q) != "" {
-		env = append(env, "SORTIE_TRACKER_QUERY_FILTER="+q+" assignee:@me")
+		env = append(env, "SORTIE_TRACKER_QUERY_FILTER="+q+" "+config.AssigneeScope(cfg.AssigneesForLoop(name)))
 	} else if filter := cfg.FilterFor(name); filter != "" {
 		env = append(env, "SORTIE_TRACKER_QUERY_FILTER="+filter)
 	}
@@ -397,11 +400,29 @@ func (s *supervisor) terminate(name string) {
 	}
 }
 
-// reload re-reads the configuration, picks up new loop documents, and
-// restarts the loops whose query changed: the engine reads the filter
-// only at start. A changed loop drains first, so in-flight work
+// runningNames lists the loops that have a process.
+func (s *supervisor) runningNames() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var names []string
+	for n := range s.procs {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// reload re-reads the configuration and .jigz/.env, picks up new loop
+// documents, rewrites the env file, and restarts the loops whose query
+// or env file values changed: the engine reads the filter and the env
+// file only at start. A changed loop drains first, so in-flight work
 // finishes; a loop that is not running is held for the gate to start.
 func (s *supervisor) reload() {
+	if err := reloadRepoEnv(s.root); err != nil {
+		fmt.Fprintln(os.Stderr, "jig: reload:", err)
+		s.republish()
+		return
+	}
 	cfg, err := config.Load(s.root)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "jig: reload:", err)
@@ -427,13 +448,56 @@ func (s *supervisor) reload() {
 	s.sleepCfg = cfg.Sleep
 	s.mu.Unlock()
 	s.reloadCleanup(cfg)
+	token, err := cfg.TrackerToken(cfg.TrackerDefaults)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "jig: reload:", err)
+		s.republish()
+		return
+	}
+	_, envChanged, err := writeEnvFile(s.root, "", cfg, token)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "jig: reload:", err)
+		s.republish()
+		return
+	}
 	old := s.querySnapshot()
 	s.clearUnusable()
 	s.refreshState(s.clock(), true)
+	s.mu.Lock()
+	workCopy := make(map[string]config.Resolved, len(s.work))
+	for name, res := range s.work {
+		workCopy[name] = res
+	}
+	s.mu.Unlock()
+	for _, name := range s.runningNames() {
+		w, ok := workCopy[name]
+		if !ok || !w.Managed || w.Tracker.ApiKey == cfg.TrackerDefaults.ApiKey {
+			continue
+		}
+		tok, terr := cfg.TrackerToken(w.Tracker)
+		if terr != nil {
+			continue
+		}
+		_, changed, werr := writeEnvFile(s.root, name, cfg, tok)
+		if werr != nil {
+			fmt.Fprintln(os.Stderr, "jig: reload:", werr)
+			s.republish()
+			return
+		}
+		envChanged = envChanged || changed
+	}
+	if envChanged {
+		for _, name := range s.runningNames() {
+			if s.recycleDrain(name) {
+				fmt.Fprintf(os.Stderr, "jig: %s: env changed, draining and restarting\n", name)
+			}
+		}
+	}
 	for name, q := range s.querySnapshot() {
 		if oq, ok := old[name]; ok && oq != q {
-			fmt.Fprintf(os.Stderr, "jig: %s: query changed, draining and restarting\n", name)
-			s.recycleDrain(name)
+			if s.recycleDrain(name) {
+				fmt.Fprintf(os.Stderr, "jig: %s: query changed, draining and restarting\n", name)
+			}
 		}
 	}
 	added := s.mergeDiscoveredDefs()
@@ -570,6 +634,7 @@ func (s *supervisor) run() int {
 			if code, done := s.budgetStep(); done {
 				return code
 			}
+			s.restartStep()
 			if code, done := s.gateStep(); done {
 				return code
 			}

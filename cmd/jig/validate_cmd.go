@@ -37,6 +37,9 @@ func runValidate(args []string) {
 	if err != nil {
 		fatal(err)
 	}
+	if err := loadRepoEnv(abs); err != nil {
+		fatal(err)
+	}
 	out, ok := validateOutputFor(abs, asJSON)
 	if asJSON {
 		fmt.Println(out)

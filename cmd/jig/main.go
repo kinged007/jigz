@@ -66,17 +66,13 @@ func parseArgs(argv []string) (cmdline, error) {
 				continue
 			}
 			return c, fmt.Errorf("unknown flag %q", arg)
-		case "stop", "restart", "status", "cleanup", "wake", "pause", "resume", "budget", "reload", "validate", "agent-exec":
+		case "stop", "restart", "status", "cleanup", "wake", "pause", "resume", "budget", "reload", "validate", "agent-exec", "issue":
 			// A subcommand: everything after it belongs to runRemote,
 			// which does its own parsing, so stop collecting here.
 			c.remote = name
 			c.remoteArgs = argv[i+1:]
 			i = len(argv)
 		case "start", "join", "leave":
-			c.remote = name
-			c.remoteArgs = argv[i+1:]
-			i = len(argv)
-		case "issue":
 			c.remote = name
 			c.remoteArgs = argv[i+1:]
 			i = len(argv)
@@ -170,13 +166,13 @@ Control (act on the run serving repo-root, found through the registry)
                                   changes need restart --when-idle
   cleanup [--dry-run] [--json]    run the configured cleanup command once
                                   and exit non-zero when it fails
+  issue restart <number> [--json]
+                                  restart a stuck issue: release its claim,
+                                  re-apply its trigger label, clear its
+                                  parked state, record the restart and
+                                  wake the loop
   validate [--json]               check config.yaml and run the engine's
                                   validation on each workflow
-
-Issue
-  issue restart <number> [--workflow NAME] [repo-root]
-                                  clear the parked state of one issue after a
-                                  non-retryable failure so it runs again
 
 Setup
   setup [--repo=owner/name] [--json] [--skip-build]
@@ -292,6 +288,10 @@ func run() (code int) {
 		runBudgetCmd(c.remote, c.remoteArgs)
 		return 0
 	}
+	if c.remote == "issue" {
+		runIssue(c.remoteArgs)
+		return 0
+	}
 	if c.remote == "cleanup" {
 		runCleanupCmd(c.remoteArgs)
 		return 0
@@ -305,10 +305,6 @@ func run() (code int) {
 	}
 	if c.remote == "validate" {
 		runValidate(c.remoteArgs)
-		return 0
-	}
-	if c.remote == "issue" {
-		runIssueCmd(c.remoteArgs)
 		return 0
 	}
 	if c.remote != "" {
@@ -372,7 +368,7 @@ func run() (code int) {
 		if !ok || strings.TrimSpace(filter) == "" {
 			filter = cfg.FilterFor(l.name)
 		} else {
-			filter += " assignee:@me"
+			filter += " " + config.AssigneeScope(cfg.AssigneesForLoop(l.name))
 		}
 		fmt.Printf("loop %-10s %s filter %q\n", l.name, l.file, filter)
 	}
@@ -416,6 +412,9 @@ func run() (code int) {
 		fatal(err)
 	}
 	sup.republish()
+	// Stored restarts apply on start, so a request filed while the run
+	// was down takes effect without waiting for the first tick.
+	sup.restartStep()
 	if cfg.Cleanup.Enabled {
 		sup.startCleanup(cfg)
 	}

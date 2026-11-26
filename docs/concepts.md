@@ -2,25 +2,21 @@
 
 ## What is what
 
-**Jigz** (this repo) is a small Go wrapper. It does setup (config,
-labels, workflow files) and then launches one loop process per workflow,
-plus a web dashboard. It contains no agent itself.
+**Jigz** is a Go command-line tool. It sets up the config, labels and
+workflow files in your repository, then starts one loop process per
+workflow and a web dashboard. It contains no agent itself.
 
-**The engine** does the heavy lifting inside each loop: it polls the
-tracker on a timer, claims a matching item, clones the repo into a scratch
-workspace, hands the item to an agent, and records the run in a local
-SQLite database. `claude-code` is a standard agent kind that every
-supported engine registers, so the generated workflows run without extra
-setup. The one feature the workflows need that an engine may lack is the
-`github-pr` tracker (which treats pull requests as work items). The `pi`
-agent adapter is optional: an engine only needs it when a workflow or
-agent uses `pi`.
+**The engine** runs inside each loop. It polls the tracker on a timer,
+claims a matching item, clones the repo into a scratch workspace, hands
+the item to an agent, and records the run in a local SQLite database.
+`jig setup` downloads it for you; see [the engine](install.md#the-engine).
 
-**The agent** is Claude Code (`claude`), a coding agent that runs in a terminal the same
-way you would: it reads files, edits code, runs checks, and shells out
-to the `gh` CLI to read comments, open PRs, and move labels. The `pi`
-agent is supported too; see
-[Customizing agents and workflows](customization.md#customizing-agents-and-workflows).
+**The agent** is a coding agent CLI. The default is Claude Code (`claude`).
+It runs in a terminal the same way you would: it reads files, edits code,
+runs checks, and uses the `gh` CLI to read comments, open PRs, and move
+labels. Other agents are supported; see
+[Agents and models](customization.md#agents-and-models).
+
 ## Names
 
 | Name | What it is | Where it appears |
@@ -65,6 +61,7 @@ summary comment (Summary / Changes / Verification / Issues encountered).
 State moves forward through labels — `build` opens a PR and labels it
 `agent:review`, `review` sends findings back as `agent:build` or stops on
 `agent:done`, and a person labels an approved PR `agent:merge`.
+
 ## Labels
 
 The `labels:` list that `jig setup` writes into a new `.jigz/config.yaml`
@@ -103,6 +100,18 @@ neither an active state nor a terminal one: it marks the item finished
 without closing it, and re-labelling the item with a trigger is how you
 run it again.
 
+A run that keeps failing ends up parked: the engine stops retrying it
+and the trigger/claim labels are left however the last attempt left
+them. `jig issue restart` (and the run page's Restart issue button)
+recovers the item in one action: it removes the `in-progress` claim when
+one is present, re-applies the owning loop's trigger label when it is
+missing, records a restart event with who triggered it and when, and
+wakes the loop so the engine re-polls the item. Parked and retry rows in
+the engine database are not written by the restart; the engine
+reconciles them when it re-dispatches the re-queued item. The restart
+refuses, changing nothing, when the item is mid-run, claimed by a live
+session, or owned by another loop.
+
 Questions carry no label of their own: there is no `agent:question` or
 `needs-answer` label. An agent asks with an HTML comment block in an
 issue comment, and a blocking question parks the item by adding
@@ -132,6 +141,7 @@ agent applies `agent:merge`: an approved PR waits for a person to label it.
 The chained label must land on the item the next loop watches: the `prs`
 loop watches PRs, so label the PR, not the issue it came from. `.jigz/workflows/prompts/review.md` Step 4 and
 `review-fix.md` Step 5 carry these forms.
+
 ## The loops
 
 The config that `jig setup` writes defines two work entries, `issues` and
@@ -156,34 +166,6 @@ Workflow-wide settings are shared by the rules of one file: hooks,
 `max_turns: 10` and one set of workspace hooks (full fetch of the PR head
 with an `origin` remote) for all three rules. The `issues` workflow pushes
 the `auto/<issue>` branch only when the run committed something.
-
-### Migrating from the five-file layout
-
-`setup` and the loop startup never change or remove an existing prompt
-file. The old `plan`, `build`, `review`, `review-fix` and `merge` loops
-and the `issues` and `prs` loops would process the same issues, so only
-one set may exist. To migrate:
-
-1. Delete the five old files (`WORKFLOW.plan.md`, `WORKFLOW.build.md`,
-   `WORKFLOW.review.md`, `WORKFLOW.review-fix.md`, `WORKFLOW.merge.md`),
-   and their `.sortie-<name>.db` files if you do not need the run history.
-2. Add `issues` and `prs` entries to `work:`, each with a `query_filter`
-   and `rules`, and rerun `jig setup` to generate the two new files.
-3. In `.jigz/config.yaml`, rename old loop names to `issues` or `prs` in
-   the `filters:` key, and move each `workflows:<name>.budget` block to
-   `work:<name>.budget`. The keys `milestone`, `assignee` and `workflows`
-   are no longer accepted: there is no milestone scope, the assignee
-   scope is always `assignee:@me`, and budgets live under
-   `work.<slug>.budget`.
-4. Existing installs keep their old `prompts/plan.md` and `prompts/build.md`,
-   because setup never overwrites a file. Diff them against the shipped
-   copies or delete them and rerun `setup`. An old `build.md` that does not
-   remove `agent:plan-build` in its finishing step leaves that label on the
-   issue, so the issue is dispatched again. `setup` prints a note when
-   either file differs from the shipped copy.
-5. Add the `agent:plan-build` and `agent:docs` entries to the `labels:` list of an
-   existing `.jigz/config.yaml` (copy them from the list above), then
-   rerun `setup`. `setup` only creates the labels in that list.
 
 The loop set is the `work:` entries of `.jigz/config.yaml`. A run starts
 a loop for each `work:` key that has a `WORKFLOW.<key>.md` in
