@@ -17,6 +17,7 @@ import (
 
 	machine "github.com/kinged007/jigz/internal/host"
 	"github.com/kinged007/jigz/internal/loopsrc"
+	agentmachine "github.com/kinged007/jigz/internal/machine"
 	"github.com/kinged007/jigz/internal/rollup"
 	"github.com/kinged007/jigz/internal/store"
 )
@@ -248,11 +249,60 @@ func (c *Collector) copyRuns(db *sql.DB, l rollup.Loop, schema rollup.Schema) er
 		if err := c.Store.AddRuns(runs); err != nil {
 			return err
 		}
+		c.parkNonRetryable(l, runs)
 		last = runs[len(runs)-1].ID
 		if len(runs) < batch {
 			return nil
 		}
 	}
+}
+
+// parkNonRetryable classifies each newly copied failed run before the
+// next retry: a non-retryable failure parks the issue Jigz-side and
+// records exactly one notice (a park row plus one run event carrying
+// the same class and fix). The park row makes the second pass a no-op,
+// and retryable or unknown failures fall through untouched.
+func (c *Collector) parkNonRetryable(l rollup.Loop, runs []store.Run) {
+	now := time.Now()
+	if c.Now != nil {
+		now = c.Now()
+	}
+	ts := now.UTC().Format(time.RFC3339)
+	for _, r := range runs {
+		if r.Status != "failed" || r.Error == "" {
+			continue
+		}
+		class := agentmachine.Classify(r.Error)
+		if agentmachine.Retryable(class) {
+			continue
+		}
+		fix := agentmachine.Fix(class)
+		parked, err := c.Store.ParkIssue(store.IssuePark{
+			Project: l.Repo, Workflow: l.Loop, IssueID: r.IssueID,
+			Class: string(class), Fix: fix, Reason: truncateRunes(r.Error, 200), TS: ts,
+		})
+		if err != nil {
+			log.Printf("collector: %s/%s: park %s: %v", l.Repo, l.Loop, r.IssueID, err)
+			continue
+		}
+		if !parked {
+			continue
+		}
+		if err := c.Store.AddEvents([]store.Event{{
+			TS: ts, Project: l.Repo, Workflow: l.Loop, IssueID: r.IssueID,
+			Kind: store.ParkEventKind, Detail: string(class) + ": " + fix,
+		}}); err != nil {
+			log.Printf("collector: %s/%s: park event %s: %v", l.Repo, l.Loop, r.IssueID, err)
+		}
+	}
+}
+
+// truncateRunes caps s at n runes for a stored reason.
+func truncateRunes(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n])
+	}
+	return s
 }
 
 // fillRunFiles sets the workflow file and rule name on runs stored before Jigz kept

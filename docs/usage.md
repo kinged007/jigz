@@ -29,7 +29,7 @@ in time, it prints the last log lines and exits non-zero. Stop the run with
 
 `jig --help` lists every command in groups: Run, Control (`stop`, `restart`,
 `status`, `wake`, `pause`, `resume`, `budget override`, `reload`, `cleanup`,
-`validate`), Setup (`setup`), run options (`--host`, `--dashboard-port`,
+`validate`), Issue (`issue restart`), Setup (`setup`), run options (`--host`, `--dashboard-port`,
 `--no-dashboard`, `--unite`) and Other (`--version`, `--dump-version`).
 
 `setup` reads `.jigz/config.yaml`, generates the workflow files from its
@@ -151,6 +151,28 @@ without a budget, or the status document does not show the change after
 5 seconds. Each command writes its own request file next to the status
 document (`<hash>.budget.request.<time>-<pid>`), which the supervisor reads
 and deletes at its next 2-second tick, whatever the sleep settings are.
+
+### Issue restart
+
+`jig issue restart <number> [--workflow NAME] [repo-root]` clears the
+parked state of one issue after a non-retryable failure (see
+[Failure classes](workflows.md#failure-classes)), so the item runs again.
+Without `--workflow` it clears the issue's parks in every workflow of the
+project. Clearing twice is a no-op: the second run prints `already clear`
+and claims nothing, so a restart never double-claims. The command works
+offline against the history database and needs no running supervisor.
+
+Each failed attempt is classified before it is retried:
+
+| Class | Retryable | What happens | Fix |
+|---|---|---|---|
+| `agent-unauthenticated` | no | the item is parked with one notice | log the agent back in (run /login) |
+| `agent-cli-unusable` | no | the item is parked with one notice | upgrade the agent CLI to a supported version |
+| `missing-model` | no | the item is parked with one notice | configure a valid model |
+| `usage-limit` | yes | the item hands over to the next pool account and resumes at the reset time | none needed |
+| `engine-crash` | yes | the item retries under the attempt limit and backoff | none needed |
+| `transient-network` | yes | the item retries under the attempt limit and backoff | none needed |
+| `unknown` | yes | the item retries under the attempt limit and backoff | none needed |
 
 Flags: `--unite` joins (or starts) the shared dashboard,
 `--dashboard-port=N` forces the dashboard onto port N,

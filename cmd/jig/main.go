@@ -76,6 +76,10 @@ func parseArgs(argv []string) (cmdline, error) {
 			c.remote = name
 			c.remoteArgs = argv[i+1:]
 			i = len(argv)
+		case "issue":
+			c.remote = name
+			c.remoteArgs = argv[i+1:]
+			i = len(argv)
 		case "--dump-version":
 			c.dumpVersion = true
 		case "--version", "-V":
@@ -168,6 +172,11 @@ Control (act on the run serving repo-root, found through the registry)
                                   and exit non-zero when it fails
   validate [--json]               check config.yaml and run the engine's
                                   validation on each workflow
+
+Issue
+  issue restart <number> [--workflow NAME] [repo-root]
+                                  clear the parked state of one issue after a
+                                  non-retryable failure so it runs again
 
 Setup
   setup [--repo=owner/name] [--json] [--skip-build]
@@ -296,6 +305,10 @@ func run() (code int) {
 	}
 	if c.remote == "validate" {
 		runValidate(c.remoteArgs)
+		return 0
+	}
+	if c.remote == "issue" {
+		runIssueCmd(c.remoteArgs)
 		return 0
 	}
 	if c.remote != "" {
