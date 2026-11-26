@@ -28,6 +28,7 @@ func TestClassify(t *testing.T) {
 		{"transient 503", "upstream returned 503 Service Unavailable", FailureTransient, true},
 		{"unknown prose", "the linter reported 3 errors", FailureUnknown, true},
 		{"unknown empty", "", FailureUnknown, true},
+		{"generic exec without agent prefix", "exec: \"git\": executable file not found in $PATH", FailureUnknown, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if got := Classify(c.text); got != c.want {

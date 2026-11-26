@@ -54,8 +54,9 @@ func Fix(c FailureClass) string {
 // cannot run: the version check refusing a release, or the command
 // itself missing. It reuses no engine text on purpose: the version
 // rules live in VersionProblem and the missing-command text in
-// agent-exec.
-var BuiltinCLIVersion = regexp.MustCompile(`(?i)agent command (?:not found|is empty)|executable file not found|no version that can be read|is not supported; install`)
+// agent-exec. A bare "executable file not found" without the agent
+// command prefix is a generic Go exec error and must not park.
+var BuiltinCLIVersion = regexp.MustCompile(`(?i)agent command (?:not found|is empty)|no version that can be read|is not supported; install`)
 
 // missingModelRe is the model-availability subset of BuiltinUnusable:
 // an agent with no model to run, as opposed to a bad credential.
