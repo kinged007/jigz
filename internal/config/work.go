@@ -281,7 +281,7 @@ type ResolvedRule struct {
 
 // Resolved is one work entry with the file-level defaults and the
 // entry's overrides applied. Engine is the engine target; empty fields
-// mean the engine defaults (kinged007/sortie v1.28.1). OperatingHours
+// mean the engine defaults (kinged007/sortie v1.31.0-pi.github-pr.1). OperatingHours
 // with no windows means 24/7. A nil Budget means the entry has none.
 // This is plain data: resolving does no file I/O.
 type Resolved struct {

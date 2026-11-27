@@ -1,5 +1,5 @@
 ---
-# jig:generated v1 skeleton=issues engine=kinged007/sortie@v1.28.1 sha256=27ab3be45d8824a6dcbf756d2c8e00278efda991447b7044c818180c0c15fe79
+# jig:generated v1 skeleton=delivery-builder-a engine=kinged007/sortie@v1.31.0-pi.github-pr.1 sha256=9088608d2b2545a8238dbe99823ed2a3b3dd5e55d31ec73aa99cf55a6f709c5c
 tracker:
   kind: github
   api_key: $JIG_TRACKER_TOKEN
@@ -13,10 +13,10 @@ tracker:
   #
   # The assignee scope is always @me; it is appended at launch, not stored
   # here.
-  query_filter: "label:agent:build,in-progress -label:needs-human"
+  query_filter: "-label:needs-human label:agent:build"
   active_states: [agent:build, in-progress]
   in_progress_state: in-progress
-  handoff_state: agent:done
+  handoff_state: 
   handoff_evidence: off
   terminal_states: [closed]
   comments:
@@ -26,10 +26,10 @@ tracker:
 polling:
   interval_ms: 60000
 
-db_path: ../data/jigz-issues.db
+db_path: ../data/jigz-delivery-builder-a.db
 
 workspace:
-  root: $JIG_WORKSPACES/issues
+  root: $JIG_WORKSPACES/delivery-builder-a
   retention_days: 30
 
 hooks:
@@ -70,11 +70,11 @@ hooks:
     # of swallowing the error, so the retry starts from a clean tree.
     git fetch origin "auto/$JIG_ISSUE_IDENTIFIER" 2>/dev/null && git rebase "origin/auto/$JIG_ISSUE_IDENTIFIER" || git rebase --abort
     git push -u origin "auto/$JIG_ISSUE_IDENTIFIER"
-  timeout_ms: 120000
+  timeout_ms: 300000
 
 agent:
-  kind: pi
-  command: /usr/local/bin/jig agent-exec pi-api
+  kind: claude-code
+  command: /usr/local/bin/jig agent-exec builder-a
   max_turns: 10
   max_concurrent_agents: 1
   turn_timeout_ms: 3600000
@@ -85,8 +85,8 @@ agent:
 
 # Only the block the agent kind names is emitted; the engine reports
 # blocks for other kinds as unknown keys.
-pi:
-  model: "sonnet"
+claude-code:
+  model: "claude-haiku-5-5"
 
 # The first matching rule wins, so an item carrying two rule labels runs
 # the earlier rule first. dispatch.default is the safety net: the engine

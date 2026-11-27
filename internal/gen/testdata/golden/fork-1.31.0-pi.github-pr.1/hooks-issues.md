@@ -1,5 +1,5 @@
 ---
-# jig:generated v1 skeleton=delivery engine=kinged007/sortie@v1.28.1 sha256=5b62ccf562d84c19f076f145b77763db120fc22771b97834231d9096150ecf6b
+# jig:generated v1 skeleton=issues engine=kinged007/sortie@v1.31.0-pi.github-pr.1 sha256=f603a745ae0f11a3039f20867cc27fc683893ec42fa8f4d2c15abceb688b1342
 tracker:
   kind: github
   api_key: $JIG_TRACKER_TOKEN
@@ -13,8 +13,8 @@ tracker:
   #
   # The assignee scope is always @me; it is appended at launch, not stored
   # here.
-  query_filter: "label:in-progress -label:needs-human"
-  active_states: [agent:plan, in-progress]
+  query_filter: "label:agent:build,in-progress -label:needs-human"
+  active_states: [agent:build, in-progress]
   in_progress_state: in-progress
   handoff_state: agent:done
   handoff_evidence: off
@@ -24,12 +24,12 @@ tracker:
     on_failure: false
 
 polling:
-  interval_ms: 60000
+  interval_ms: 30000
 
-db_path: ../data/jigz-delivery.db
+db_path: ../data/jigz-issues.db
 
 workspace:
-  root: $JIG_WORKSPACES/delivery
+  root: $JIG_WORKSPACES/issues
   retention_days: 30
 
 hooks:
@@ -39,7 +39,7 @@ hooks:
   after_create: |
     JIG_ISSUE_ID=$SORTIE_ISSUE_ID JIG_ISSUE_IDENTIFIER=$SORTIE_ISSUE_IDENTIFIER JIG_WORKSPACE=$SORTIE_WORKSPACE JIG_ATTEMPT=$SORTIE_ATTEMPT JIG_TRACKER_PROJECT=$SORTIE_TRACKER_PROJECT
     export JIG_ISSUE_ID JIG_ISSUE_IDENTIFIER JIG_WORKSPACE JIG_ATTEMPT JIG_TRACKER_PROJECT
-    git clone --depth 1 "https://github.com/$JIG_TRACKER_PROJECT.git" .
+    echo custom
   before_run: |
     JIG_ISSUE_ID=$SORTIE_ISSUE_ID JIG_ISSUE_IDENTIFIER=$SORTIE_ISSUE_IDENTIFIER JIG_WORKSPACE=$SORTIE_WORKSPACE JIG_ATTEMPT=$SORTIE_ATTEMPT JIG_TRACKER_PROJECT=$SORTIE_TRACKER_PROJECT
     export JIG_ISSUE_ID JIG_ISSUE_IDENTIFIER JIG_WORKSPACE JIG_ATTEMPT JIG_TRACKER_PROJECT
@@ -70,12 +70,12 @@ hooks:
     # of swallowing the error, so the retry starts from a clean tree.
     git fetch origin "auto/$JIG_ISSUE_IDENTIFIER" 2>/dev/null && git rebase "origin/auto/$JIG_ISSUE_IDENTIFIER" || git rebase --abort
     git push -u origin "auto/$JIG_ISSUE_IDENTIFIER"
-  timeout_ms: 120000
+  timeout_ms: 300000
 
 agent:
   kind: claude-code
-  command: /usr/local/bin/jig agent-exec planner
-  max_turns: 10
+  command: /usr/local/bin/jig agent-exec builder
+  max_turns: 20
   max_concurrent_agents: 1
   turn_timeout_ms: 3600000
   read_timeout_ms: 120000
@@ -86,7 +86,7 @@ agent:
 # Only the block the agent kind names is emitted; the engine reports
 # blocks for other kinds as unknown keys.
 claude-code:
-  model: "claude-sonnet-5-5"
+  model: "claude-haiku-5-5"
 
 # The first matching rule wins, so an item carrying two rule labels runs
 # the earlier rule first. dispatch.default is the safety net: the engine
@@ -94,14 +94,10 @@ claude-code:
 # that dispatch inside a prompt of ours.
 dispatch:
   rules:
-    - name: plan
+    - name: build
       match:
-        labels: ["agent:plan"]
-      template: prompts/plan.md
-      next: chain
-    - name: chain
-      stage: stage-build
-      template: prompts/build.md
+        labels: ["agent:build"]
+      template: ./prompts/custom.md
   default:
     template: prompts/default.md
 ---

@@ -1,5 +1,5 @@
 ---
-# jig:generated v1 skeleton=issues engine=kinged007/sortie@v1.28.1 sha256=f603a745ae0f11a3039f20867cc27fc683893ec42fa8f4d2c15abceb688b1342
+# jig:generated v1 skeleton=issues engine=kinged007/sortie@v1.31.0-pi.github-pr.1 sha256=27ab3be45d8824a6dcbf756d2c8e00278efda991447b7044c818180c0c15fe79
 tracker:
   kind: github
   api_key: $JIG_TRACKER_TOKEN
@@ -24,7 +24,7 @@ tracker:
     on_failure: false
 
 polling:
-  interval_ms: 30000
+  interval_ms: 60000
 
 db_path: ../data/jigz-issues.db
 
@@ -39,7 +39,7 @@ hooks:
   after_create: |
     JIG_ISSUE_ID=$SORTIE_ISSUE_ID JIG_ISSUE_IDENTIFIER=$SORTIE_ISSUE_IDENTIFIER JIG_WORKSPACE=$SORTIE_WORKSPACE JIG_ATTEMPT=$SORTIE_ATTEMPT JIG_TRACKER_PROJECT=$SORTIE_TRACKER_PROJECT
     export JIG_ISSUE_ID JIG_ISSUE_IDENTIFIER JIG_WORKSPACE JIG_ATTEMPT JIG_TRACKER_PROJECT
-    echo custom
+    git clone --depth 1 "https://github.com/$JIG_TRACKER_PROJECT.git" .
   before_run: |
     JIG_ISSUE_ID=$SORTIE_ISSUE_ID JIG_ISSUE_IDENTIFIER=$SORTIE_ISSUE_IDENTIFIER JIG_WORKSPACE=$SORTIE_WORKSPACE JIG_ATTEMPT=$SORTIE_ATTEMPT JIG_TRACKER_PROJECT=$SORTIE_TRACKER_PROJECT
     export JIG_ISSUE_ID JIG_ISSUE_IDENTIFIER JIG_WORKSPACE JIG_ATTEMPT JIG_TRACKER_PROJECT
@@ -70,12 +70,12 @@ hooks:
     # of swallowing the error, so the retry starts from a clean tree.
     git fetch origin "auto/$JIG_ISSUE_IDENTIFIER" 2>/dev/null && git rebase "origin/auto/$JIG_ISSUE_IDENTIFIER" || git rebase --abort
     git push -u origin "auto/$JIG_ISSUE_IDENTIFIER"
-  timeout_ms: 300000
+  timeout_ms: 120000
 
 agent:
-  kind: claude-code
-  command: /usr/local/bin/jig agent-exec builder
-  max_turns: 20
+  kind: pi
+  command: /usr/local/bin/jig agent-exec pi-api
+  max_turns: 10
   max_concurrent_agents: 1
   turn_timeout_ms: 3600000
   read_timeout_ms: 120000
@@ -85,8 +85,8 @@ agent:
 
 # Only the block the agent kind names is emitted; the engine reports
 # blocks for other kinds as unknown keys.
-claude-code:
-  model: "claude-haiku-5-5"
+pi:
+  model: "sonnet"
 
 # The first matching rule wins, so an item carrying two rule labels runs
 # the earlier rule first. dispatch.default is the safety net: the engine
@@ -97,7 +97,7 @@ dispatch:
     - name: build
       match:
         labels: ["agent:build"]
-      template: ./prompts/custom.md
+      template: prompts/build.md
   default:
     template: prompts/default.md
 ---

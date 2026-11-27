@@ -149,7 +149,7 @@ func TestExample1(t *testing.T) {
 	if len(prs.Agents) != 1 || prs.Agents[0] != "reviewer" {
 		t.Errorf("prs agents = %v", prs.Agents)
 	}
-	if issues.Engine.Repo != "kinged007/sortie" || issues.Engine.Version != "v1.28.1" {
+	if issues.Engine.Repo != "kinged007/sortie" || issues.Engine.Version != "v1.31.0-pi.github-pr.1" {
 		t.Errorf("engine = %+v", issues.Engine)
 	}
 	if len(issues.OperatingHours.Windows) != 0 || issues.OperatingHours.End != "finish" {
