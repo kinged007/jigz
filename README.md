@@ -14,11 +14,15 @@ supported tracker.
 
 ## Features
 
-- One command per repo: `jig setup`, then `jig` runs every loop in the foreground (or `jig start` in the background) plus a read-only web dashboard.
-- Label-driven backlog: add `agent:build` to an issue and the agent plans, codes, opens a PR, and chains through review to merge.
-- Two loops in the config that setup writes: `issues` (plan, build, docs) and `prs` (review, review-fix, merge); add a `work:` entry to add a loop.
-- Spend and schedule guardrails: per-loop token budgets, working hours, idle sleep, and workspace cleanup.
-- Fleet support: agent accounts and pools with usage-limit failover, and one shared dashboard across repos (`--unite`).
+- **Your backlog drives the agents.** Label an issue and an agent works on it: plan, build, review and merge, without you starting each step. You review the results instead of running the tools.
+- **Workflows are yours to define.** Jigz ships with a simple plan-build-review workflow as a starting point. It is meant to be customized fully to your own process.
+- **Many triggers, many rules.** Jigz is triggered by GitHub labels. You can define as many triggers and workflow rules (loops) as you want.
+- **A different agent per workflow.** Each workflow can use its own agent CLI and model; see [Supported agents](#supported-agents).
+- **Spend and schedule controls.** Per-loop token budgets and working hours. Dollar budgets are planned.
+- **One dashboard for several repos.** Run `jig --unite` in each repo to join every Jigz instance on the same machine into one dashboard.
+- **Safe by default.** Only items assigned to the token owner are picked up, and `needs-human` parks an item until a person removes it.
+- **Fleet support.** Agent accounts and pools with usage-limit failover.
+- **Simple to run.** `jig setup`, then `jig` runs every loop in the foreground (or `jig start` in the background) with a read-only web dashboard.
 
 ## Quickstart
 
@@ -79,15 +83,40 @@ and pi; other agents are detected from stderr. See
 
 ## How it works
 
-Every loop polls GitHub roughly every 60 seconds with a search query built
-from trigger labels plus `in-progress`, scoped to `assignee:@me` and
-excluding `needs-human`. Claiming an item adds `in-progress`; the agent
-works on an `auto/<issue-number>` branch and routes its output through
-labels: `build` opens a PR labeled `agent:review`, `review` sends it back
-as `agent:build` or stops at `agent:done`, and an approved PR waits for a
-person to label it `agent:merge`. Because the trigger stays on the item
-for the whole run, an interrupted loop finds it again on the next poll.
-Details: [docs/concepts.md](docs/concepts.md).
+Jigz polls GitHub for issues and pull requests that carry a trigger label.
+The poll interval defaults to 60 seconds and can be increased
+(`polling_interval_ms`, see [docs/configuration.md](docs/configuration.md)).
+The workflow below is the default one that `jig setup` writes. It is a basic
+starting point: the triggers, rules, prompts, agents and models can all be
+changed.
+
+```mermaid
+flowchart TD
+    A[Issue labeled agent:plan-build or agent:plan] --> B[plan: agent writes a plan comment]
+    B -->|agent:plan| C[Person reviews the plan and adds agent:build]
+    B -->|agent:plan-build| D
+    C --> D[build: agent implements on auto/N branch and opens a PR labeled agent:review]
+    D --> E[review: agent reviews the PR]
+    E -->|findings| F[review-fix: agent applies feedback, PR labeled agent:build]
+    F --> E
+    E -->|clean| G[agent:done: waits for a person]
+    G --> H[Person adds agent:merge]
+    H --> I[merge: agent merges the PR]
+```
+
+### When an agent starts work
+
+An item is picked up only when all of these hold:
+
+1. It is assigned to the same GitHub user as the token that Jigz runs with.
+2. It has a trigger label, for example `agent:build`.
+3. It has no blocking label. By default `needs-human` blocks; the query of
+   each loop is set in `query_filter` in `.jigz/config.yaml`.
+
+When an agent claims an item it adds `in-progress`, works on an
+`auto/<issue-number>` branch, and routes its output through labels. Because
+the trigger stays on the item for the whole run, an interrupted loop finds it
+again on the next poll. Details: [docs/concepts.md](docs/concepts.md).
 
 ## Dashboard
 
@@ -115,10 +144,8 @@ Planned work is listed in [ROADMAP.md](ROADMAP.md). Where the product is heading
 
 ## Contributing
 
-Bug fixes and features go through GitHub issues and pull requests.
-Build and check with `go build ./... && go vet ./... && gofmt -l cmd internal && go test ./...`;
-see [CONTRIBUTING.md](CONTRIBUTING.md) for the test setup, commit style,
-and engine-bump rule.
+Bug fixes and features go through GitHub issues and pull requests. Build,
+test and commit instructions are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Support
 
