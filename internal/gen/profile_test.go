@@ -54,7 +54,7 @@ func TestProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if name != "fork" || p.EngineVersion() != "kinged007/sortie@v1.28.1" {
+	if name != "fork" || p.EngineVersion() != "kinged007/sortie@v1.31.0-pi.github-pr.1" {
 		t.Errorf("default = %s %s", name, p.EngineVersion())
 	}
 	if !p.SupportsTracker("github-pr") || p.SupportsAgent("pi") != true {
@@ -76,7 +76,7 @@ func TestProfile(t *testing.T) {
 	if _, _, err := ProfileFor("", "v1.26.0"); err == nil {
 		t.Errorf("too-old version accepted")
 	}
-	u, _, err := ProfileFor("", "v1.29.0")
+	u, _, err := ProfileFor("", "v1.31.0-pi.github-pr.1")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -43,7 +43,7 @@ type Config struct {
 	GitHub fleetconfig.GitHub
 
 	// Engine is the engine: section. Empty fields mean the engine
-	// defaults (kinged007/sortie v1.28.1).
+	// defaults (kinged007/sortie v1.31.0-pi.github-pr.1).
 	Engine machine.Engine
 	// OperatingHours gates every loop. No windows means 24/7.
 	OperatingHours machine.Hours

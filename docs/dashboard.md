@@ -42,8 +42,8 @@ because the database records a run only when it ends. Its tokens and model
 appear after its first completed turn, when the database has them. The
 dashboard shows no cost for a running session.
 
-The database reader accepts the engine schema versions 18 to 43 (the
-engine releases 1.28.1 and 1.29.0 write 38 and 43) when the tables and
+The database reader accepts the engine schema versions 18 to 50 (the
+engine releases 1.28.1, 1.29.0 and 1.31.0-pi.github-pr.1 write 38, 43 and 50) when the tables and
 columns it reads exist. A database written by a newer engine than the
 newest known one is reported as a schema notice and not read.
 

@@ -1,7 +1,7 @@
 ---
-# jig:generated v1 skeleton=delivery-builder-a engine=kinged007/sortie@v1.28.1 sha256=9088608d2b2545a8238dbe99823ed2a3b3dd5e55d31ec73aa99cf55a6f709c5c
+# jig:generated v1 skeleton=prs engine=kinged007/sortie@v1.31.0-pi.github-pr.1 sha256=8a02eca74fb949848defe6b8fbba8eaa049cc3ef559fbac9a002d366f38b095a
 tracker:
-  kind: github
+  kind: github-pr
   api_key: $JIG_TRACKER_TOKEN
   project: owner/repo
   # A label query. The tracker evaluates it once at loop start; a change
@@ -13,23 +13,22 @@ tracker:
   #
   # The assignee scope is always @me; it is appended at launch, not stored
   # here.
-  query_filter: "-label:needs-human label:agent:build"
-  active_states: [agent:build, in-progress]
+  query_filter: "label:agent:review -label:needs-human"
+  active_states: [agent:review, in-progress]
   in_progress_state: in-progress
-  handoff_state: 
+  handoff_state: agent:done
   handoff_evidence: off
   terminal_states: [closed]
   comments:
     on_completion: false
-    on_failure: false
 
 polling:
   interval_ms: 60000
 
-db_path: ../data/jigz-delivery-builder-a.db
+db_path: ../data/jigz-prs.db
 
 workspace:
-  root: $JIG_WORKSPACES/delivery-builder-a
+  root: $JIG_WORKSPACES/prs
   retention_days: 30
 
 hooks:
@@ -39,10 +38,18 @@ hooks:
   after_create: |
     JIG_ISSUE_ID=$SORTIE_ISSUE_ID JIG_ISSUE_IDENTIFIER=$SORTIE_ISSUE_IDENTIFIER JIG_WORKSPACE=$SORTIE_WORKSPACE JIG_ATTEMPT=$SORTIE_ATTEMPT JIG_TRACKER_PROJECT=$SORTIE_TRACKER_PROJECT
     export JIG_ISSUE_ID JIG_ISSUE_IDENTIFIER JIG_WORKSPACE JIG_ATTEMPT JIG_TRACKER_PROJECT
-    git clone --depth 1 "https://github.com/$JIG_TRACKER_PROJECT.git" .
+    git init -q . 2>/dev/null || true
+    # A real remote, not ref-only fetches: the fix rule pushes back and the
+    # merge rule fetches the base branch.
+    git remote add origin "https://github.com/$JIG_TRACKER_PROJECT.git" 2>/dev/null || true
+    # No --depth: a shallow PR root plus a shallow base root share no
+    # common ancestor, which breaks `git merge` / merge-base in the merge rule.
+    git fetch origin "+pull/$JIG_ISSUE_IDENTIFIER/head:pr-$JIG_ISSUE_IDENTIFIER"
+    git checkout -q "pr-$JIG_ISSUE_IDENTIFIER"
   before_run: |
     JIG_ISSUE_ID=$SORTIE_ISSUE_ID JIG_ISSUE_IDENTIFIER=$SORTIE_ISSUE_IDENTIFIER JIG_WORKSPACE=$SORTIE_WORKSPACE JIG_ATTEMPT=$SORTIE_ATTEMPT JIG_TRACKER_PROJECT=$SORTIE_TRACKER_PROJECT
     export JIG_ISSUE_ID JIG_ISSUE_IDENTIFIER JIG_WORKSPACE JIG_ATTEMPT JIG_TRACKER_PROJECT
+    git rev-parse --git-dir >/dev/null 2>&1 || exit 0
     # Heal any git operation an earlier attempt or the agent left in flight.
     # An unresolved index makes every later checkout fail, and the retry
     # reuses this directory, so the poison would persist forever.
@@ -50,31 +57,17 @@ hooks:
     git merge --abort 2>/dev/null || true
     git cherry-pick --abort 2>/dev/null || true
     git reset --hard >/dev/null
-    base=$(git symbolic-ref --short refs/remotes/origin/HEAD | sed 's@^origin/@@')
-    git fetch origin "$base"
-    git checkout -B "auto/$JIG_ISSUE_IDENTIFIER" "origin/$base"
-  after_run: |
-    JIG_ISSUE_ID=$SORTIE_ISSUE_ID JIG_ISSUE_IDENTIFIER=$SORTIE_ISSUE_IDENTIFIER JIG_WORKSPACE=$SORTIE_WORKSPACE JIG_ATTEMPT=$SORTIE_ATTEMPT JIG_TRACKER_PROJECT=$SORTIE_TRACKER_PROJECT
-    export JIG_ISSUE_ID JIG_ISSUE_IDENTIFIER JIG_WORKSPACE JIG_ATTEMPT JIG_TRACKER_PROJECT
-    JIG_SELF_REVIEW_STATUS=$SORTIE_SELF_REVIEW_STATUS JIG_SELF_REVIEW_SUMMARY_PATH=$SORTIE_SELF_REVIEW_SUMMARY_PATH
-    export JIG_SELF_REVIEW_STATUS JIG_SELF_REVIEW_SUMMARY_PATH
-    git add -A
-    git diff --cached --quiet || git commit -m "$JIG_ISSUE_IDENTIFIER: agent changes"
-    # A stage that changed nothing (plan) pushes no branch.
-    base=$(git symbolic-ref --short refs/remotes/origin/HEAD | sed 's@^origin/@@')
-    [ "$(git rev-parse HEAD)" = "$(git rev-parse "origin/$base")" ] && exit 0
-    # A retry reuses the auto/* branch, so the remote may already have
-    # commits from an earlier attempt; rebase onto it instead of failing.
-    # A conflicted rebase left in place poisons the workspace: the next
-    # before_run cannot resolve the index and fails forever. Abort instead
-    # of swallowing the error, so the retry starts from a clean tree.
-    git fetch origin "auto/$JIG_ISSUE_IDENTIFIER" 2>/dev/null && git rebase "origin/auto/$JIG_ISSUE_IDENTIFIER" || git rebase --abort
-    git push -u origin "auto/$JIG_ISSUE_IDENTIFIER"
-  timeout_ms: 300000
+    # The workspace is shared by the review, fix and merge rules and
+    # created once, so a later rule starts from the current PR head.
+    git remote get-url origin >/dev/null 2>&1 || git remote add origin "https://github.com/$JIG_TRACKER_PROJECT.git"
+    if [ -f .git/shallow ]; then git fetch --unshallow origin 2>/dev/null || true; fi
+    git checkout -q "pr-$JIG_ISSUE_IDENTIFIER" 2>/dev/null || true
+    git fetch origin "pull/$JIG_ISSUE_IDENTIFIER/head" 2>/dev/null && git merge --ff-only FETCH_HEAD >/dev/null 2>&1 || true
+  timeout_ms: 60000
 
 agent:
   kind: claude-code
-  command: /usr/local/bin/jig agent-exec builder-a
+  command: /usr/local/bin/jig agent-exec reviewer
   max_turns: 10
   max_concurrent_agents: 1
   turn_timeout_ms: 3600000
@@ -86,7 +79,7 @@ agent:
 # Only the block the agent kind names is emitted; the engine reports
 # blocks for other kinds as unknown keys.
 claude-code:
-  model: "claude-haiku-5-5"
+  model: "claude-sonnet-5-5"
 
 # The first matching rule wins, so an item carrying two rule labels runs
 # the earlier rule first. dispatch.default is the safety net: the engine
@@ -94,10 +87,10 @@ claude-code:
 # that dispatch inside a prompt of ours.
 dispatch:
   rules:
-    - name: build
+    - name: review
       match:
-        labels: ["agent:build"]
-      template: prompts/build.md
+        labels: ["agent:review"]
+      template: prompts/review.md
   default:
     template: prompts/default.md
 ---

@@ -496,12 +496,14 @@ func TestLoadEngineBlock(t *testing.T) {
 	if err != nil || c.Engine != (Engine{Repo: "sortie-ai/sortie", Version: "v1.29.0"}) {
 		t.Fatalf("Load = %+v, %v", c, err)
 	}
+	if err := ValidateEngineVersion("v1.31.0-pi.github-pr.1"); err != nil {
+		t.Errorf("a dotted, hyphenated prerelease is rejected: %v", err)
+	}
 	for body, want := range map[string]string{
-		"engine:\n  repo: sortie\n":         "engine.repo",
-		"engine:\n  repo: a/b/c\n":          "engine.repo",
-		"engine:\n  version: 1.29.0\n":      "engine.version",
-		"engine:\n  version: v1.29\n":       "engine.version",
-		"engine:\n  version: v1.29.0-rc1\n": "engine.version",
+		"engine:\n  repo: sortie\n":    "engine.repo",
+		"engine:\n  repo: a/b/c\n":     "engine.repo",
+		"engine:\n  version: 1.29.0\n": "engine.version",
+		"engine:\n  version: v1.29\n":  "engine.version",
 	} {
 		if _, err := Load(write(body)); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("Load(%q) err = %v, want %s", body, err, want)

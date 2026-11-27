@@ -23,13 +23,13 @@ type EngineRelease struct {
 // EngineReleases lists the engine releases this reader has been checked
 // against, oldest first. A database newer than the last entry was written by
 // an engine this release does not know and is not read.
-var EngineReleases = []EngineRelease{{"1.28.1", 38}, {"1.29.0", 43}}
+var EngineReleases = []EngineRelease{{"1.28.1", 38}, {"1.29.0", 43}, {"1.31.0-pi.github-pr.1", 50}}
 
 // SupportedSchemas lists the schema versions with a checked layout: 18 for
 // the older engine, 35 for engine 1.27.0, and the end version of each
 // EngineReleases entry. It is informative; the accepted range is
 // OldestSchema to NewestSchema.
-var SupportedSchemas = []int{OldestSchema, 35, 38, 43}
+var SupportedSchemas = []int{OldestSchema, 35, 38, 43, 50}
 
 // NewestSchema is the schema version of the newest known engine release.
 func NewestSchema() int { return EngineReleases[len(EngineReleases)-1].Schema }

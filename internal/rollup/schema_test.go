@@ -47,7 +47,7 @@ func TestInspectSchemaAcceptsTheRangeUpToTheNewestKnownEngine(t *testing.T) {
 func TestInspectSchemaRejectsOutsideTheRange(t *testing.T) {
 	for v, want := range map[int]string{
 		17: "unsupported schema version 17",
-		44: "written by a newer engine than this release knows",
+		51: "written by a newer engine than this release knows",
 	} {
 		s := InspectSchema(schemaDB(t, v))
 		if s.Notice == nil || !strings.Contains(s.Notice.String(), want) || s.Has("run_history") {
@@ -222,7 +222,7 @@ func insertRequiredRow(t *testing.T, db *sql.DB, version int) {
 }
 
 func TestEngineReleasesEndAtTheirSchema(t *testing.T) {
-	for tag, want := range map[string]int{"v1.28.1": 38, "1.29.0": 43} {
+	for tag, want := range map[string]int{"v1.28.1": 38, "1.29.0": 43, "v1.31.0-pi.github-pr.1": 50} {
 		if got, ok := SchemaOf(tag); !ok || got != want {
 			t.Errorf("SchemaOf(%q) = %d, %v, want %d", tag, got, ok, want)
 		}
@@ -230,7 +230,7 @@ func TestEngineReleasesEndAtTheirSchema(t *testing.T) {
 	if _, ok := SchemaOf("v9.9.9"); ok {
 		t.Error("an unknown release has a schema")
 	}
-	if NewestSchema() != 43 {
+	if NewestSchema() != 50 {
 		t.Errorf("NewestSchema = %d, want 43", NewestSchema())
 	}
 }

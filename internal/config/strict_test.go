@@ -34,7 +34,7 @@ github:
   questions_window: 168h
 engine:
   repo: kinged007/sortie
-  version: v1.28.1
+  version: v1.31.0-pi.github-pr.1
 operating_hours:
   timezone: UTC
   end: finish
@@ -132,7 +132,7 @@ func TestUnknownKeysRejected(t *testing.T) {
 		{"sleep", "sleep:\n  enabled: true\n  idle_timout: 1m\n", "sleep.idle_timout"},
 		{"github", "github:\n  enrich: true\n  enrch: true\n", "github.enrch"},
 		{"label", "labels:\n- {name: a, colour: b}\n", "labels[0].colour"},
-		{"engine", "engine:\n  verison: v1.28.1\n", "engine.verison"},
+		{"engine", "engine:\n  verison: v1.31.0-pi.github-pr.1\n", "engine.verison"},
 		{"operating_hours", "operating_hours:\n  windows:\n  - {days: [mon], start: \"09:00\", end: \"10:00\", form: x}\n", "operating_hours.windows[0].form"},
 		{"tracker", "tracker:\n  kind: github\n  handoff_evidence: x\n", "tracker.handoff_evidence"},
 		{"tracker ref", "tracker:\n  api_key: {frome_env: X}\n", "tracker.api_key.frome_env"},

@@ -54,7 +54,7 @@ func TestSetupSkeletonValidates(t *testing.T) {
 	if len(resolved) != 2 {
 		t.Fatalf("work entries = %d, want issues + prs", len(resolved))
 	}
-	p, _, err := gen.ProfileFor("kinged007/sortie", "v1.28.1")
+	p, _, err := gen.ProfileFor("kinged007/sortie", "v1.31.0-pi.github-pr.1")
 	if err != nil {
 		t.Fatal(err)
 	}

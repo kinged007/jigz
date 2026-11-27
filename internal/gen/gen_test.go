@@ -21,7 +21,7 @@ func defaultFixture(t *testing.T) (*config.Config, map[string]config.Agent) {
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, ".jigz"), 0o755)
 	body := `repo: owner/repo
-engine: { repo: kinged007/sortie, version: v1.28.1 }
+engine: { repo: kinged007/sortie, version: v1.31.0-pi.github-pr.1 }
 operating_hours: {}
 tracker:
   kind: github
@@ -97,7 +97,7 @@ func TestGoldenVariants(t *testing.T) {
 		t.Fatal(err)
 	}
 	pool, agents := variantFixture(t, `repo: owner/repo
-engine: { repo: kinged007/sortie, version: v1.28.1 }
+engine: { repo: kinged007/sortie, version: v1.31.0-pi.github-pr.1 }
 tracker:
   kind: github
   api_key: { from_env: JIG_TRACKER_TOKEN }
@@ -117,7 +117,7 @@ work:
     rules:
       - { name: build, match: { labels: [agent:build] }, prompt: prompts/build.md }
 `)
-	checkGolden(t, "fork-1.28.1", "pool-issues", renderEntry(t, p, pool, agents, "issues"))
+	checkGolden(t, "fork-1.31.0-pi.github-pr.1", "pool-issues", renderEntry(t, p, pool, agents, "issues"))
 
 	pi, piAgents := variantFixture(t, `repo: owner/repo
 tracker:
@@ -135,7 +135,7 @@ work:
     rules:
       - { name: build, match: { labels: [agent:build] }, prompt: prompts/build.md }
 `)
-	checkGolden(t, "fork-1.28.1", "pi-issues", renderEntry(t, p, pi, piAgents, "issues"))
+	checkGolden(t, "fork-1.31.0-pi.github-pr.1", "pi-issues", renderEntry(t, p, pi, piAgents, "issues"))
 
 	chain, chainAgents := variantFixture(t, `repo: owner/repo
 tracker:
@@ -154,7 +154,7 @@ work:
       - { name: plan, match: { labels: [agent:plan] }, prompt: prompts/plan.md, next: chain }
       - { name: chain, stage: stage-build, prompt: prompts/build.md }
 `)
-	checkGolden(t, "fork-1.28.1", "chain-delivery", renderEntry(t, p, chain, chainAgents, "delivery"))
+	checkGolden(t, "fork-1.31.0-pi.github-pr.1", "chain-delivery", renderEntry(t, p, chain, chainAgents, "delivery"))
 
 	hooks, hookAgents := variantFixture(t, `repo: owner/repo
 tracker:
@@ -175,7 +175,7 @@ work:
     rules:
       - { name: build, match: { labels: [agent:build] }, prompt: ./prompts/custom.md }
 `)
-	checkGolden(t, "fork-1.28.1", "hooks-issues", renderEntry(t, p, hooks, hookAgents, "issues"))
+	checkGolden(t, "fork-1.31.0-pi.github-pr.1", "hooks-issues", renderEntry(t, p, hooks, hookAgents, "issues"))
 
 	up, _, err := ProfileFor("sortie-ai/sortie", "v1.29.0")
 	if err != nil {
@@ -238,7 +238,7 @@ func TestRenderDefault(t *testing.T) {
 		if string(a) != string(twice[name]) {
 			t.Errorf("loop %s is not deterministic", name)
 		}
-		checkGolden(t, "fork-1.28.1", "default-"+strings.Replace(name, "/", "-", 1), a)
+		checkGolden(t, "fork-1.31.0-pi.github-pr.1", "default-"+strings.Replace(name, "/", "-", 1), a)
 		if err := os.WriteFile("/tmp/gen-"+strings.Split(name, "/")[0]+".md", a, 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -298,7 +298,7 @@ work:
 		if err != nil {
 			t.Fatalf("render %s: %v", l.Name, err)
 		}
-		checkGolden(t, "fork-1.28.1", "split-"+l.Name, out)
+		checkGolden(t, "fork-1.31.0-pi.github-pr.1", "split-"+l.Name, out)
 	}
 	// The two queries must not overlap: each carries only its own labels.
 	if strings.Contains(string(mustRender(t, p, loops[0], merged)), "agent:build") {

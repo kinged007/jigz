@@ -107,7 +107,7 @@ type Engine struct {
 
 var (
 	engineRepoRe    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$`)
-	engineVersionRe = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
+	engineVersionRe = regexp.MustCompile(`^v\d+\.\d+\.\d+(-[A-Za-z0-9.-]+)?$`)
 )
 
 // ValidateEngineRepo checks an engine repository of the form owner/name.
@@ -121,7 +121,7 @@ func ValidateEngineRepo(repo string) error {
 // ValidateEngineVersion checks an engine release tag of the form vX.Y.Z.
 func ValidateEngineVersion(version string) error {
 	if !engineVersionRe.MatchString(version) {
-		return fmt.Errorf("engine version %q is not of the form vX.Y.Z", version)
+		return fmt.Errorf("engine version %q is not of the form vX.Y.Z or vX.Y.Z-prerelease", version)
 	}
 	return nil
 }

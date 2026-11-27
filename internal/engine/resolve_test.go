@@ -91,7 +91,6 @@ func TestConfiguredValidation(t *testing.T) {
 		{name: "env repo", repo: "no-slash", want: "JIG_ENGINE_REPO"},
 		{name: "env repo traversal", repo: "owner/..", want: "JIG_ENGINE_REPO"},
 		{name: "env version", version: "1.2", want: "JIG_ENGINE_VERSION"},
-		{name: "env prerelease", version: "v1.2.3-rc1", want: "JIG_ENGINE_VERSION"},
 		{name: "file repo", yaml: "engine:\n  repo: a/b/c\n", want: "engine.repo"},
 		{name: "file version", yaml: "engine:\n  version: latest\n", want: "engine.version"},
 	}
@@ -123,12 +122,12 @@ func TestConfiguredIgnoresUnrelatedMachineErrors(t *testing.T) {
 }
 
 func TestCacheNameSeparatesRepositories(t *testing.T) {
-	fork := Spec{"kinged007/sortie", "v1.28.1"}
+	fork := Spec{"kinged007/sortie", "v1.31.0-pi.github-pr.1"}
 	upstream := Spec{"sortie-ai/sortie", "v1.28.1"}
 	if fork.CacheName() == upstream.CacheName() {
 		t.Fatalf("fork and upstream share %q", fork.CacheName())
 	}
-	if got, want := fork.CacheName(), "sortie-kinged007+sortie-1.28.1"; got != want {
+	if got, want := fork.CacheName(), "sortie-kinged007+sortie-1.31.0-pi.github-pr.1"; got != want {
 		t.Errorf("CacheName = %q, want %q", got, want)
 	}
 	if a, b := (Spec{"a-b/c", "v1.0.0"}), (Spec{"a/b-c", "v1.0.0"}); a.CacheName() == b.CacheName() {
