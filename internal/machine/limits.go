@@ -125,7 +125,22 @@ func stdoutError(runtime, line string) string {
 	case "pi":
 		return piError(obj)
 	}
-	return ""
+	return rpcError(obj)
+}
+
+// rpcError returns the message of a JSON-RPC error response, the form
+// the ACP and app-server runtimes (opencode, codex, copilot-cli) use to
+// report a failed session start or prompt.
+func rpcError(obj map[string]any) string {
+	if obj["jsonrpc"] == nil {
+		return ""
+	}
+	e, ok := obj["error"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	msg, _ := e["message"].(string)
+	return strings.TrimSpace(msg)
 }
 
 // piError finds a map with stopReason "error" anywhere in the event and
