@@ -30,9 +30,14 @@ downloads the pinned engine release, verifies it against that release's
 commands (`validate`, `stats`) work in any shell. A fresh install needs no
 separate engine step.
 
+The engine is [kinged007/sortie](https://github.com/kinged007/sortie), a fork
+of [sortie-ai/sortie](https://github.com/sortie-ai/sortie) with two additional
+features: the `github-pr` tracker and the `pi` agent adapter. Upstream
+releases can be selected instead (see below) but lack those two features.
+
 The engine is a GitHub release, chosen by a repository (`owner/name`) and a
-version tag (`vX.Y.Z`), defaulting to `v1.28.1`, the release the generated
-workflows were written against. `jig --version` prints the tool version
+version tag (`vX.Y.Z`), defaulting to `kinged007/sortie` at `v1.28.1`, the
+release the generated workflows were written against. `jig --version` prints the tool version
 and the engine release it resolves to, and the dashboard Settings page
 shows that release next to the version the engine binary reports.
 
